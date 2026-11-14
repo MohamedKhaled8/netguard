@@ -1,0 +1,59 @@
+environment: "production"
+
+probing:
+  gateway_interval_sec: 1.0
+  external_interval_sec: 3.0
+  dns_interval_sec: 5.0
+  interface_stats_interval_sec: 1.0
+  active_connections_interval_sec: 5.0
+  icmp_timeout_sec: 1.5
+  tcp_timeout_sec: 2.0
+  dns_timeout_sec: 2.0
+  max_concurrent_probes: 10
+  external_targets:
+    - "1.1.1.1"
+    - "8.8.8.8"
+    - "9.9.9.9"
+    - "208.67.222.222"
+  dns_test_domains:
+    - "google.com"
+    - "cloudflare.com"
+    - "microsoft.com"
+    - "apple.com"
+  dns_fallback_resolvers:
+    - "1.1.1.1"
+    - "8.8.8.8"
+    - "9.9.9.9"
+
+thresholds:
+  gateway_latency_warning_ms: 25.0
+  gateway_latency_critical_ms: 80.0
+  gateway_packet_loss_critical: 0.40
+  external_latency_warning_ms: 80.0
+  external_latency_critical_ms: 200.0
+  external_packet_loss_critical: 0.30
+  dns_latency_warning_ms: 100.0
+  dns_latency_critical_ms: 350.0
+  jitter_warning_ms: 30.0
+  jitter_critical_ms: 80.0
+  sliding_window_samples: 10
+
+remediation:
+  mode: "autonomous_safe"
+  max_retries_per_action: 2
+  cooldown_period_sec: 60.0
+  circuit_breaker_failure_threshold: 3
+  circuit_breaker_reset_timeout_sec: 300.0
+  verification_duration_sec: 5.0
+  allow_level_3_disruptive: false
+
+database:
+  db_path: "data/netguard.db"
+  enable_wal: true
+  retention_days: 30
+
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  log_to_console: true
+  log_to_file: true
