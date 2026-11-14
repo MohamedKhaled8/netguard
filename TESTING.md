@@ -29,3 +29,4 @@ Because networking code interacts with external hardware and operating system st
 - **Gate 1 (Monitoring)**: Live and mocked probes generate valid `Measurement` instances; probe rate-limiter prevents network flooding; gateway and internet targets are measured independently.
 - **Gate 2 (Diagnosis)**: Classifiers accurately identify simulated DNS failures, gateway unreachability, and upstream ISP outages with confidence > 0.80; ambiguous conditions produce uncertainty scores rather than false certainty.
 - **Gate 3 (Self-Healing)**: Low-risk actions execute and verify; synthetic regression triggers automatic rollback; repeated failures trip circuit breakers.
+

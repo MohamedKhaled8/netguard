@@ -50,3 +50,4 @@ class CellularDiagnosticsEngine:
     @property
     def latest_metrics(self) -> Optional[CellularMetrics]:
         return self._history[-1] if self._history else None
+

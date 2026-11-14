@@ -9,6 +9,11 @@ class IPlatformAdapter(ABC):
     """Abstract interface defining all OS-specific network stack operations."""
 
     @abstractmethod
+    def is_elevated(self) -> bool:
+        """Check whether the current running process has administrator/root privileges."""
+        pass
+
+    @abstractmethod
     def get_default_gateway(self) -> Optional[str]:
         """Detect the active default IPv4 gateway address."""
         pass

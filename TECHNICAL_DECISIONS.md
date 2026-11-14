@@ -19,3 +19,4 @@
 - **Context**: Many corporate or cellular ISP firewalls deprioritize or block ICMP Echo Requests, causing false "Internet Down" reports.
 - **Decision**: Implement ICMP probing alongside TCP SYN/Connect probes to port 80/443 on reliable targets (Cloudflare, Google, Quad9).
 - **Consequences**: Prevents false positive outage diagnoses on networks that drop ICMP.
+

@@ -8,6 +8,7 @@ from app.platform.interfaces import IPlatformAdapter
 
 
 class MockDNSPlatform(IPlatformAdapter):
+    def is_elevated(self): return True
     def get_default_gateway(self): return "192.168.1.1"
     def get_primary_interface(self): return "Wi-Fi"
     def ping(self, t, s=1.5): return True, 10.0

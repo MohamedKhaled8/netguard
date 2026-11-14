@@ -112,3 +112,4 @@ SQLite database located at `data/netguard.db` with WAL (Write-Ahead Logging) mod
 - `actions_audit`: Record of all automated or manual remediation actions taken, pre/post metrics, and rollback status.
 - `baselines`: Metric distributions across time-of-day / day-of-week buckets.
 - `dns_benchmarks`: Resolver latency, jitter, and error rates.
+

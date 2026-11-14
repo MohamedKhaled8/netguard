@@ -16,19 +16,22 @@ class RenewIPLeaseAction(RemediationAction):
         super().__init__(
             action_id="renew_ip_lease",
             name="Release and Renew IP Lease",
-            description="Releases and re-acquires DHCP lease from local gateway/router.",
-            risk_level=RiskLevel.LEVEL_2_CONTROLLED,
+            description="Re-acquires DHCP lease from local gateway/router.",
+            risk_level=RiskLevel.LEVEL_3_DISRUPTIVE,
             supported_os=["win32"],
-            timeout_sec=25.0,
+            timeout_sec=20.0,
             cooldown_sec=90.0,
             max_retries=1,
         )
 
     def check_preconditions(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Tuple[bool, str]:
+        if not platform.is_elevated():
+            return False, "Cannot renew DHCP lease: Requires Administrator privileges. NetGuard is running in unprivileged user mode."
+
         iface = context.get("interface_name") or platform.get_primary_interface()
         if not iface:
             return False, "No active primary network interface detected"
-        return True, f"Interface '{iface}' ready for DHCP renewal"
+        return True, f"Interface '{iface}' ready for DHCP renewal (elevated privileges confirmed)"
 
     async def execute(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Any:
         loop = asyncio.get_running_loop()

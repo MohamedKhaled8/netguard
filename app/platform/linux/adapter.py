@@ -11,6 +11,13 @@ from app.platform.interfaces import IPlatformAdapter
 class LinuxPlatformAdapter(IPlatformAdapter):
     """Linux implementation using iproute2, /proc/net, and native sockets."""
 
+    def is_elevated(self) -> bool:
+        try:
+            import os
+            return os.geteuid() == 0
+        except Exception:
+            return False
+
     def get_default_gateway(self) -> Optional[str]:
         try:
             with open("/proc/net/route", "r", encoding="utf-8") as f:

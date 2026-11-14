@@ -9,3 +9,4 @@
 
 ## 3. Network Environment
 - **Captive Portals**: Hotspots or public cellular portals intercepting all TCP/DNS traffic may require user interaction and cannot be autonomously bypassed.
+

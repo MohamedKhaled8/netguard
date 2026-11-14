@@ -33,3 +33,4 @@ def load_config(config_path: Optional[Path | str] = None) -> AppConfig:
 
     # Default configuration
     return AppConfig()
+

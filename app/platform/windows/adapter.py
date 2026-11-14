@@ -18,6 +18,14 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         self._cached_gateway: Optional[str] = None
         self._cached_interface: Optional[str] = None
 
+    def is_elevated(self) -> bool:
+        """Check whether the current running process has administrator privileges on Windows."""
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception:
+            return False
+
     def get_default_gateway(self) -> Optional[str]:
         """Parse default IPv4 gateway via route print or ipconfig."""
         try:
@@ -128,7 +136,31 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             sock.close()
 
     def flush_dns_cache(self) -> Tuple[bool, str]:
-        """Execute ipconfig /flushdns."""
+        """Flush the DNS Resolver Cache via native Win32 Dnsapi, PowerShell, or ipconfig."""
+        # 1. Native Win32 API (Works without requiring elevation)
+        try:
+            import ctypes
+            res = ctypes.windll.dnsapi.DnsFlushResolverCache()
+            if res == 1:
+                return True, "Successfully flushed the DNS Resolver Cache via Win32 Dnsapi."
+        except Exception:
+            pass
+
+        # 2. PowerShell Clear-DnsClientCache
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Clear-DnsClientCache"],
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return True, "Successfully flushed DNS Cache via PowerShell Clear-DnsClientCache."
+        except Exception:
+            pass
+
+        # 3. Fallback: ipconfig /flushdns
         try:
             proc = subprocess.run(
                 ["ipconfig", "/flushdns"],
@@ -206,12 +238,22 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return False, str(exc)
 
     def renew_ip_lease(self, interface_name: str) -> Tuple[bool, str]:
-        """Release and renew DHCP lease."""
+        """Request DHCP lease refresh for the active interface."""
+        if not self.is_elevated():
+            return False, "DHCP renewal requires Windows Administrator privileges."
+
         try:
-            subprocess.run(["ipconfig", "/release", interface_name], capture_output=True, timeout=10.0, check=False)
-            time.sleep(1.0)
-            proc = subprocess.run(["ipconfig", "/renew", interface_name], capture_output=True, text=True, timeout=15.0, check=False)
-            return proc.returncode == 0, proc.stdout
+            # Request renewal without releasing first to preserve current connectivity
+            proc = subprocess.run(
+                ["ipconfig", "/renew", interface_name],
+                capture_output=True,
+                text=True,
+                timeout=12.0,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return True, "DHCP lease renewed successfully."
+            return False, proc.stderr or proc.stdout
         except Exception as exc:
             return False, str(exc)
 

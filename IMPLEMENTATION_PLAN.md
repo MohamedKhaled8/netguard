@@ -92,3 +92,4 @@ Stage 12 (Desktop Application & Modern UI)
 - [ ] Stage 10: Local Network Memory (Incident & Resolution store).
 - [ ] Stage 11: Network Digital Twin (Simulation sandbox).
 - [ ] Stage 12: PySide6 Desktop GUI with Real-Time PyQtGraph streaming.
+

@@ -45,3 +45,4 @@ class CellularMetrics(BaseModel):
         elif rsrp < -100.0:
             return SignalQualityCategory.POOR
         return SignalQualityCategory.NO_SIGNAL
+

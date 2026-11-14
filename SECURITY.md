@@ -28,3 +28,4 @@ NETGUARD AI manages critical networking state on desktop operating systems. As s
 - Never pass unvalidated user or network inputs to shell interpreters (`shell=False` mandatory for all `subprocess` invocations).
 - Network interface names and IP addresses are parsed and strictly validated using standard library `ipaddress` and regex anchors before being passed to platform APIs.
 - Execution timeouts are enforced on all system subprocesses to prevent zombie hangs.
+

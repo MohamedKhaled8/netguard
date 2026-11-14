@@ -19,6 +19,7 @@ from app.remediation.safety import ActionSafetyManager, CircuitBreaker
 from app.remediation.orchestrator import RemediationOrchestrator
 from app.remediation.actions.flush_dns import FlushDNSCacheAction
 from app.remediation.actions.switch_dns import SwitchDNSResolverAction
+from app.remediation.actions.renew_dhcp import RenewIPLeaseAction
 from app.storage.database import DatabaseManager
 from app.storage.repositories.audit_repo import AuditRepository
 
@@ -29,6 +30,9 @@ class MockPlatformAdapterForRemediation(IPlatformAdapter):
         self.current_dns = ["192.168.1.1"]
         self.renewed = False
         self.ping_ok = True
+
+    def is_elevated(self):
+        return True
 
     def get_default_gateway(self):
         return "192.168.1.1"
@@ -233,3 +237,36 @@ async def test_switch_dns_action_and_rollback(tmp_path):
     ok, msg = await action.rollback(platform, {}, pre_state)
     assert ok is True
     assert platform.current_dns == ["192.168.1.1"]  # Original restored!
+
+
+@pytest.mark.asyncio
+async def test_unprivileged_precondition_refusal():
+    class UnprivilegedPlatform(MockPlatformAdapterForRemediation):
+        def is_elevated(self):
+            return False
+
+    platform = UnprivilegedPlatform()
+    dns_action = SwitchDNSResolverAction()
+    dhcp_action = RenewIPLeaseAction()
+
+    # Preconditions must fail when unprivileged
+    ok_dns, msg_dns = dns_action.check_preconditions(platform, {})
+    assert ok_dns is False
+    assert "Administrator privileges" in msg_dns
+
+    ok_dhcp, msg_dhcp = dhcp_action.check_preconditions(platform, {})
+    assert ok_dhcp is False
+    assert "Administrator privileges" in msg_dhcp
+
+
+@pytest.mark.asyncio
+async def test_recheck_gateway_action():
+    from app.remediation.actions.recheck_gateway import RecheckGatewayAction
+    platform = MockPlatformAdapterForRemediation()
+    action = RecheckGatewayAction()
+
+    pre_state = await action.execute(platform, {})
+    assert pre_state["successful_pings"] == 3
+
+    ok, msg, _ = await action.verify(platform, {}, pre_state)
+    assert ok is True

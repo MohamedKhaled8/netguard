@@ -13,6 +13,7 @@ from app.remediation.orchestrator import RemediationOrchestrator
 from app.remediation.actions.flush_dns import FlushDNSCacheAction
 from app.remediation.actions.switch_dns import SwitchDNSResolverAction
 from app.remediation.actions.renew_dhcp import RenewIPLeaseAction
+from app.remediation.actions.recheck_gateway import RecheckGatewayAction
 from app.core.models.metrics import Diagnosis, OperatingMode
 
 logger = logging.getLogger("netguard.application")
@@ -63,6 +64,7 @@ class NetGuardApplication:
         self._diagnostic_loop_task: Optional[asyncio.Task] = None
 
     def _register_default_actions(self) -> None:
+        self.action_registry.register(RecheckGatewayAction())
         self.action_registry.register(FlushDNSCacheAction())
         self.action_registry.register(
             SwitchDNSResolverAction(fallback_resolvers=self.config.probing.dns_fallback_resolvers)
@@ -140,3 +142,4 @@ def create_application(config_path: Optional[str] = None) -> NetGuardApplication
     """Factory helper to bootstrap and instantiate NetGuardApplication."""
     ctx = bootstrap_application(config_path=config_path)
     return NetGuardApplication(ctx)
+

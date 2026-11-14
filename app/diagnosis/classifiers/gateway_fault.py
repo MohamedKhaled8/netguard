@@ -28,7 +28,13 @@ class GatewayHealthClassifier(BaseClassifier):
             return None
 
         # 1. Total Gateway Unreachability
-        if (gw_reach and gw_reach.latest_value == 0.0) or (gw_loss and gw_loss.latest_value >= self.thresholds.gateway_packet_loss_critical):
+        # Require sustained failure (failure ratio >= threshold or multiple failures)
+        is_sustained_loss = (
+            (gw_reach and gw_reach.failure_ratio >= 0.50)
+            or (gw_loss and gw_loss.failure_ratio >= self.thresholds.gateway_packet_loss_critical)
+            or (gw_reach and gw_reach.latest_value == 0.0 and gw_reach.count == 1)
+        )
+        if is_sustained_loss:
             ev_list = []
             if gw_reach:
                 ev_list.append(
@@ -65,7 +71,7 @@ class GatewayHealthClassifier(BaseClassifier):
                 severity=DiagnosisSeverity.CRITICAL,
                 supporting_evidence=ev_list,
                 contradictory_evidence=[],
-                recommended_actions=["recheck_gateway", "reconnect_wifi", "renew_ip_lease"],
+                recommended_actions=["recheck_gateway"],
                 auto_remediation_permitted=True,
                 explanation="Default gateway failed to respond to echo probes. Local link or router is offline.",
             )

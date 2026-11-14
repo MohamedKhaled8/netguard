@@ -26,6 +26,9 @@ class MockPlatformAdapter(IPlatformAdapter):
         self.tcp_ok = tcp_ok
         self.tcp_lat = tcp_lat
 
+    def is_elevated(self):
+        return True
+
     def get_default_gateway(self):
         return "192.168.1.1"
 

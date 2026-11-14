@@ -65,3 +65,4 @@ app/
 ├── storage/        # SQLite repositories & migrations
 └── ui/             # PySide6 desktop interface
 ```
+

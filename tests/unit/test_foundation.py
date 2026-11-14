@@ -141,6 +141,7 @@ async def test_event_bus():
 def test_platform_adapter():
     adapter = get_platform_adapter()
     assert adapter is not None
+    assert isinstance(adapter.is_elevated(), bool)
     # Test local loopback TCP connection or ping
     ok, latency = adapter.tcp_connect("127.0.0.1", port=9999, timeout_sec=0.2)
     # Port 9999 may be closed, so ok is bool, latency is float

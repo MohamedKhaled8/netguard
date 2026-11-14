@@ -86,3 +86,4 @@ def bootstrap_application(config_path: Optional[Path | str] = None, in_memory_db
     )
     logger.info("NetGuard AI Bootstrap completed successfully.")
     return context
+
