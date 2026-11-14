@@ -5,7 +5,7 @@ for network metrics, diagnostics, and remediation actions.
 """
 
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 STRINGS: Dict[str, Dict[str, str]] = {
     "ar": {

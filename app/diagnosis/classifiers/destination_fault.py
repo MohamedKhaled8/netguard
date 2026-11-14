@@ -3,7 +3,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from app.core.models.metrics import (
     Diagnosis,
     ProbableCause,

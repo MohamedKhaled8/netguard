@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,

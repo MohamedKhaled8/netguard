@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import psutil
 from app.monitoring.probes.base import BaseProbe
 from app.monitoring.models.probe_result import ProbeResult

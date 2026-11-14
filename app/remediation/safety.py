@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from app.core.exceptions.base import CircuitBreakerOpenError
 
 logger = logging.getLogger("netguard.remediation.safety")
