@@ -28,6 +28,12 @@ class EventBus:
             self._subscribers[topic_pattern].add(callback)
             logger.debug("Subscribed %s to pattern '%s'", callback.__name__, topic_pattern)
 
+    def subscribe_sync(self, topic_pattern: str, callback: SubscriberCallback) -> None:
+        """Synchronous subscription registration for non-async callers (e.g. UI widgets)."""
+        if topic_pattern not in self._subscribers:
+            self._subscribers[topic_pattern] = set()
+        self._subscribers[topic_pattern].add(callback)
+
     async def unsubscribe(self, topic_pattern: str, callback: SubscriberCallback) -> None:
         """Unsubscribe a callback from a topic pattern."""
         async with self._lock:

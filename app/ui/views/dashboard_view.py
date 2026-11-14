@@ -1,13 +1,15 @@
-"""Redesigned Dashboard View for NetGuard AI Desktop.
+"""Redesigned Master Autonomous Cockpit for NetGuard AI Desktop.
 
-Provides a high-craft, intuitive user experience with:
-- Prominent master health status banner.
-- One-click 'Smart Scan & Quick Fix' CTA.
-- 4 Clear KPI cards with micro-copy in plain Arabic.
-- Real-time latency & stability chart.
+Follows unslop, minimalist-ui, and ui-ux-pro-max engineering standards:
+- 100% Autonomous Autopilot experience (zero manual buttons or labor required from user).
+- Bespoke central hero: HealthRadarWidget with live circular score and pulsating status.
+- SmartDiagnosisCard: Answers What happened? Root cause? User impact? Autonomous fix?
+- Bento Telemetry Cards for Gateway, Internet, and DNS.
+- Real-Time Latency Wave + Live Autonomous Activity Stream.
 """
 
 from __future__ import annotations
+from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -15,16 +17,19 @@ from PySide6.QtWidgets import (
     QLabel,
     QFrame,
     QGridLayout,
-    QPushButton,
 )
 from PySide6.QtCore import Qt
-from app.ui.widgets.status_card import StatusCard
+
+from app.ui.widgets.health_radar import HealthRadarWidget
+from app.ui.widgets.smart_diagnosis_card import SmartDiagnosisCard
+from app.ui.widgets.activity_feed import ActivityFeedWidget
 from app.ui.widgets.realtime_chart import RealTimePlotWidget
-from app.ui.i18n import tr
+from app.ui.widgets.status_card import StatusCard
+from app.core.models.metrics import Diagnosis, ProbableCause, MetricType
 
 
 class DashboardView(QWidget):
-    """Main landing screen giving an instantaneous operational view of the network."""
+    """Executive Autonomous Command Cockpit."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -32,154 +37,126 @@ class DashboardView(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        # 1. Master Hero Status Banner
-        self.banner = QFrame()
-        self.banner.setObjectName("HeroBanner")
-        self.banner.setStyleSheet("""
-            QFrame#HeroBanner {
-                background-color: #121929;
-                border: 1px solid #202d45;
-                border-radius: 12px;
-                padding: 16px;
-            }
-        """)
-        banner_layout = QVBoxLayout(self.banner)
-        banner_layout.setContentsMargins(16, 14, 16, 14)
-        banner_layout.setSpacing(12)
+        # 1. Top Section: Hero Health Radar + Smart Diagnosis Card
+        top_hero_layout = QHBoxLayout()
+        top_hero_layout.setSpacing(16)
 
-        # Banner Top Row: Title, Mode Pill
-        top_row = QHBoxLayout()
-        self.status_title = QLabel(tr("system_healthy"))
-        self.status_title.setStyleSheet("font-size: 18px; font-weight: 800; color: #3fb950;")
-        top_row.addWidget(self.status_title)
-        top_row.addStretch()
+        # Central Health Radar
+        self.radar = HealthRadarWidget()
+        top_hero_layout.addWidget(self.radar)
 
-        self.mode_pill = QLabel(tr("mode_autonomous"))
-        self.mode_pill.setStyleSheet("""
-            background-color: #1a2744;
-            color: #58a6ff;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 5px 12px;
-            border-radius: 10px;
-            border: 1px solid #2d4170;
-        """)
-        top_row.addWidget(self.mode_pill)
-        banner_layout.addLayout(top_row)
+        # Smart Diagnostic & Autonomous Resolution Card
+        self.diag_card = SmartDiagnosisCard()
+        top_hero_layout.addWidget(self.diag_card, stretch=1)
 
-        # Banner Middle Row: Explanatory description
-        self.status_desc = QLabel(tr("system_healthy_desc"))
-        self.status_desc.setStyleSheet("font-size: 13px; color: #8b949e; line-height: 1.4;")
-        self.status_desc.setWordWrap(True)
-        banner_layout.addWidget(self.status_desc)
+        layout.addLayout(top_hero_layout)
 
-        # Banner Bottom Row: Quick Action CTAs
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        self.btn_quick_fix = QPushButton(tr("quick_fix_btn"))
-        self.btn_quick_fix.setProperty("class", "HeroActionBtn")
-        self.btn_quick_fix.setStyleSheet("""
-            QPushButton {
-                background-color: #1f6feb;
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 700;
-                padding: 9px 18px;
-                border-radius: 8px;
-                border: 1px solid #388bfd;
-            }
-            QPushButton:hover { background-color: #388bfd; }
-            QPushButton:pressed { background-color: #1a56b7; }
-        """)
-
-        self.btn_flush_dns = QPushButton(tr("flush_dns_btn"))
-        self.btn_flush_dns.setProperty("class", "SecondaryBtn")
-        self.btn_flush_dns.setStyleSheet("""
-            QPushButton {
-                background-color: #1c263c;
-                color: #c9d1d9;
-                font-size: 12px;
-                font-weight: 600;
-                padding: 9px 14px;
-                border-radius: 8px;
-                border: 1px solid #2a3754;
-            }
-            QPushButton:hover { background-color: #263350; color: #ffffff; }
-        """)
-
-        self.btn_recheck_gw = QPushButton(tr("recheck_gw_btn"))
-        self.btn_recheck_gw.setProperty("class", "SecondaryBtn")
-        self.btn_recheck_gw.setStyleSheet("""
-            QPushButton {
-                background-color: #1c263c;
-                color: #c9d1d9;
-                font-size: 12px;
-                font-weight: 600;
-                padding: 9px 14px;
-                border-radius: 8px;
-                border: 1px solid #2a3754;
-            }
-            QPushButton:hover { background-color: #263350; color: #ffffff; }
-        """)
-
-        btn_row.addWidget(self.btn_quick_fix)
-        btn_row.addWidget(self.btn_flush_dns)
-        btn_row.addWidget(self.btn_recheck_gw)
-        btn_row.addStretch()
-
-        banner_layout.addLayout(btn_row)
-        layout.addWidget(self.banner)
-
-        # 2. 4 Telemetry Metric KPI Cards Grid
-        grid = QGridLayout()
-        grid.setSpacing(12)
+        # 2. Middle Section: 3 Bento Telemetry Metric Cards
+        bento_layout = QHBoxLayout()
+        bento_layout.setSpacing(14)
 
         self.card_gateway = StatusCard(
-            title=tr("card_gateway_title"),
+            title="بوابة الراوتر المنزلي (Gateway Link)",
+            initial_value="1.2",
             unit="ms",
-            desc=tr("card_gateway_desc"),
+            desc="يقيس جودة اتصال جهازك بالراوتر عبر الواي فاي أو الكابل، ومعدل فقد الحزم.",
         )
         self.card_external = StatusCard(
-            title=tr("card_external_title"),
+            title="سرعة استجابة الإنترنت (Internet Ping)",
+            initial_value="38.0",
             unit="ms",
-            desc=tr("card_external_desc"),
-        )
-        self.card_jitter = StatusCard(
-            title=tr("card_jitter_title"),
-            unit="ms",
-            desc=tr("card_jitter_desc"),
+            desc="يقيس سرعة استجابة السيرفرات الخارجية وسيرفرات الألعاب والتصفح العالمي.",
         )
         self.card_dns = StatusCard(
-            title=tr("card_dns_title"),
+            title="خوادم فتح المواقع (DNS Resolver)",
+            initial_value="22.0",
             unit="ms",
-            desc=tr("card_dns_desc"),
+            desc="يقيس سرعة ترجمة أسماء المواقع وتجاوب المتصفح مع الروابط الجديدة.",
         )
 
-        grid.addWidget(self.card_gateway, 0, 0)
-        grid.addWidget(self.card_external, 0, 1)
-        grid.addWidget(self.card_jitter, 1, 0)
-        grid.addWidget(self.card_dns, 1, 1)
+        bento_layout.addWidget(self.card_gateway)
+        bento_layout.addWidget(self.card_external)
+        bento_layout.addWidget(self.card_dns)
+        layout.addLayout(bento_layout)
 
-        layout.addLayout(grid)
+        # 3. Bottom Section: Real-Time Plot + Autonomous Activity Feed
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(16)
 
-        # 3. Real-Time Telemetry Chart
-        self.chart = RealTimePlotWidget(title=tr("chart_title"), y_label="ms")
-        layout.addWidget(self.chart, stretch=1)
+        # Live Latency Wave Plot
+        self.chart = RealTimePlotWidget(title="مخطط البنج واستقرار الاتصال لحظة بلحظة", y_label="ms")
+        bottom_layout.addWidget(self.chart, stretch=1)
 
-    def apply_language(self) -> None:
-        """Refresh all static texts according to current i18n locale."""
-        self.mode_pill.setText(tr("mode_autonomous"))
-        self.btn_quick_fix.setText(tr("quick_fix_btn"))
-        self.btn_flush_dns.setText(tr("flush_dns_btn"))
-        self.btn_recheck_gw.setText(tr("recheck_gw_btn"))
+        # Autonomous Live Feed
+        self.activity_feed = ActivityFeedWidget()
+        self.activity_feed.setMinimumWidth(420)
+        bottom_layout.addWidget(self.activity_feed)
 
-        self.card_gateway.set_texts(tr("card_gateway_title"), "ms", tr("card_gateway_desc"))
-        self.card_external.set_texts(tr("card_external_title"), "ms", tr("card_external_desc"))
-        self.card_jitter.set_texts(tr("card_jitter_title"), "ms", tr("card_jitter_desc"))
-        self.card_dns.set_texts(tr("card_dns_title"), "ms", tr("card_dns_desc"))
+        layout.addLayout(bottom_layout, stretch=1)
 
-    def set_status(self, title: str, description: str, color_hex: str = "#3fb950") -> None:
-        self.status_title.setText(title)
-        self.status_title.setStyleSheet(f"font-size: 18px; font-weight: 800; color: {color_hex};")
-        self.status_desc.setText(description)
+        # Initial feed entries
+        now_str = datetime.now().strftime("%H:%M:%S")
+        self.activity_feed.add_event(
+            now_str,
+            "بدء تشغيل الحارس الذكي للشبكة",
+            "تم تشغيل محرك الرصد المستقل وحماية اتصالك بالإنترنت بنجاح.",
+            level="info",
+        )
+
+    def update_telemetry(self, obs, last_diag: Diagnosis | None) -> None:
+        """Called every second by MainWindow timer to refresh UI without user intervention."""
+        # 1. Update KPI Cards
+        gw_sample = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
+        if gw_sample:
+            is_high = gw_sample.raw_value >= 40.0
+            stat_text = "تذبذب أو بطء" if is_high else "متصل وممتاز"
+            self.card_gateway.update_metric(f"{gw_sample.raw_value:.1f}", stat_text, is_warning=is_high)
+
+        ext_sample = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
+        if ext_sample:
+            is_high = ext_sample.raw_value >= 80.0
+            stat_text = "بطء استجابة" if is_high else "سريع ومستقر"
+            self.card_external.update_metric(f"{ext_sample.raw_value:.1f}", stat_text, is_warning=is_high)
+
+        dns_sample = obs.get_latest_measurement(MetricType.DNS_LATENCY)
+        if dns_sample:
+            is_slow = dns_sample.raw_value >= 60.0
+            stat_text = "تصفح متثاقل" if is_slow else "استجابة فورية"
+            self.card_dns.update_metric(f"{dns_sample.raw_value:.1f}", stat_text, is_warning=is_slow)
+
+        # 2. Update Live Chart
+        ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY)
+        if ext_window:
+            y_vals = [s.raw_value for s in ext_window]
+            self.chart.update_data(y_vals)
+
+        # 3. Update Health Radar & Smart Diagnosis Card
+        if last_diag:
+            self.diag_card.update_with_diagnosis(last_diag)
+            
+            if last_diag.probable_cause == ProbableCause.HEALTHY:
+                self.radar.set_health(
+                    99,
+                    "الشبكة محمية ومستقرة",
+                    "المراقبة التنبؤية نشطة · الإصلاح الذاتي التلقائي مفعل",
+                    "#2ea043",
+                )
+            elif last_diag.probable_cause in (ProbableCause.LOCAL_GATEWAY_HIGH_LATENCY, ProbableCause.DNS_HIGH_LATENCY):
+                self.radar.set_health(
+                    78,
+                    "تنبيه: تم رصد بطء في الاتصال",
+                    "يقوم NetGuard بمتابعة الحالة ومعالجة المسار ذاتياً",
+                    "#e3b341",
+                )
+            else:
+                self.radar.set_health(
+                    45,
+                    "عطل في الشبكة قيد المعالجة",
+                    "جاري تطبيق بروتوكول التعافي الذاتي الآمن",
+                    "#f85149",
+                )
+
+    def log_autonomous_action(self, title: str, description: str, level: str = "success") -> None:
+        """Public method to push live autonomous actions to the activity stream."""
+        time_str = datetime.now().strftime("%H:%M:%S")
+        self.activity_feed.add_event(time_str, title, description, level=level)
