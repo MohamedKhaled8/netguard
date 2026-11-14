@@ -113,3 +113,6 @@ class DNSBenchmark:
         scores = await asyncio.gather(*tasks)
         sorted_scores = sorted(scores, key=lambda s: s.composite_score, reverse=True)
         return sorted_scores
+
+    # Compatibility alias
+    benchmark_all = rank_all
