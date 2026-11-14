@@ -17,9 +17,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        default="guard",
+        default="gui",
         choices=["guard", "monitor", "diagnose", "actions", "gui"],
-        help="Command to execute (default: guard)",
+        help="Command to execute (default: gui)",
     )
     parser.add_argument(
         "--mode",
@@ -117,11 +117,22 @@ def run_gui(app) -> None:
 
     # Start core background loop in a separate worker thread or async runner
     loop = asyncio.new_event_loop()
+
+    def _run_async_loop() -> None:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(app.start())
+        loop.run_forever()
+
     import threading
-    t = threading.Thread(target=lambda: loop.run_until_complete(app.start()), daemon=True)
+    t = threading.Thread(target=_run_async_loop, daemon=True)
     t.start()
 
-    sys.exit(qt_app.exec())
+    exit_code = qt_app.exec()
+    try:
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        pass
+    sys.exit(exit_code)
 
 
 def main() -> None:

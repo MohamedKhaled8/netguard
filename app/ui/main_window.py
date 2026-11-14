@@ -99,6 +99,11 @@ class MainWindow(QMainWindow):
         # Set initial active tab
         self.btn_dash.setChecked(True)
 
+        # Wire Action Buttons
+        self.view_dns.benchmark_btn.clicked.connect(self._on_run_dns_benchmark)
+        self.view_settings.apply_btn.clicked.connect(self._on_apply_settings)
+        self.view_settings.mode_combo.setCurrentText(self.app_core.orchestrator.mode.value)
+
         # UI Refresh Timer (1 second interval)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._on_ui_tick)
@@ -153,3 +158,40 @@ class MainWindow(QMainWindow):
                 self.view_dashboard.set_status("SYSTEM STATUS: HEALTHY", "Continuous autonomous network protection active.", "#3fb950")
             else:
                 self.view_dashboard.set_status(f"ANOMALY: {last_diag.probable_cause.value.upper()}", last_diag.explanation, "#f85149")
+
+        # Update Remediation view audit records
+        if self.stack.currentWidget() == self.view_remediation:
+            audit_records = self.app_core.ctx.audit.get_recent(limit=30)
+            self.view_remediation.update_audit_log(audit_records)
+
+        # Update Incident History view
+        if self.stack.currentWidget() == self.view_history:
+            incidents = self.app_core.ctx.incidents.get_recent(limit=30)
+            self.view_history.update_incidents(incidents)
+
+    def _on_run_dns_benchmark(self) -> None:
+        self.view_dns.benchmark_btn.setEnabled(False)
+        self.view_dns.benchmark_btn.setText("Benchmarking...")
+
+        import threading
+        def _worker():
+            from app.dns.benchmark import DNSBenchmark
+            bench = DNSBenchmark()
+            import asyncio
+            scores = asyncio.run(bench.benchmark_all())
+            QTimer.singleShot(0, lambda: self._on_dns_benchmark_done(scores))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_dns_benchmark_done(self, scores) -> None:
+        self.view_dns.update_rankings(scores)
+        self.view_dns.benchmark_btn.setEnabled(True)
+        self.view_dns.benchmark_btn.setText("Run Benchmark")
+
+    def _on_apply_settings(self) -> None:
+        from app.core.models.metrics import OperatingMode
+        new_mode = self.view_settings.mode_combo.currentText()
+        self.app_core.orchestrator.set_operating_mode(OperatingMode(new_mode))
+        self.view_dashboard.mode_pill.setText(new_mode.upper().replace("_", " "))
+        self.view_settings.apply_btn.setText("Saved!")
+        QTimer.singleShot(1500, lambda: self.view_settings.apply_btn.setText("Save & Apply Settings"))

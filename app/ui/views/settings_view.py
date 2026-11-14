@@ -68,5 +68,19 @@ class SettingsView(QWidget):
         self.dns_interval_spin.setSuffix(" sec")
         form_layout.addRow(QLabel("DNS Probe Interval:"), self.dns_interval_spin)
 
+        self.apply_btn = QPushButton("Save & Apply Settings")
+        self.apply_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1f6feb;
+                color: #ffffff;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #388bfd; }
+        """)
+        form_layout.addRow(QLabel(""), self.apply_btn)
+
         layout.addWidget(form_frame)
         layout.addStretch()
