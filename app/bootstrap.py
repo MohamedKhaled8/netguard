@@ -14,6 +14,7 @@ from app.storage.database import DatabaseManager
 from app.storage.repositories.measurement_repo import MeasurementRepository
 from app.storage.repositories.incident_repo import IncidentRepository
 from app.storage.repositories.audit_repo import AuditRepository
+from app.core.settings import UserSettings
 
 
 class ApplicationContext:
@@ -28,6 +29,7 @@ class ApplicationContext:
         measurement_repo: MeasurementRepository,
         incident_repo: IncidentRepository,
         audit_repo: AuditRepository,
+        settings: Optional[UserSettings] = None,
     ) -> None:
         self.config = config
         self.event_bus = event_bus
@@ -36,6 +38,7 @@ class ApplicationContext:
         self.measurements = measurement_repo
         self.incidents = incident_repo
         self.audit = audit_repo
+        self.settings = settings
         self.logger = setup_logger(
             name="netguard",
             level=config.logging.level,
@@ -75,6 +78,8 @@ def bootstrap_application(config_path: Optional[Path | str] = None, in_memory_db
     incident_repo = IncidentRepository(db_manager)
     audit_repo = AuditRepository(db_manager)
 
+    settings = UserSettings(config=config, event_bus=event_bus)
+
     context = ApplicationContext(
         config=config,
         event_bus=event_bus,
@@ -83,6 +88,7 @@ def bootstrap_application(config_path: Optional[Path | str] = None, in_memory_db
         measurement_repo=measurement_repo,
         incident_repo=incident_repo,
         audit_repo=audit_repo,
+        settings=settings,
     )
     logger.info("NetGuard AI Bootstrap completed successfully.")
     return context

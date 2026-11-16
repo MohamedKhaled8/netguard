@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from app.core.models.metrics import Measurement, MetricType, ProbeStatus, MeasurementSource
 from app.storage.database import DatabaseManager
@@ -75,6 +75,18 @@ class MeasurementRepository:
             for row in cur.fetchall():
                 results.append(self._row_to_measurement(row))
         return results
+
+    def prune_older_than(self, days: int) -> int:
+        """Deletes measurements older than specified days, returning count of deleted rows."""
+        if days < 1:
+            raise ValueError(f"Retention days must be >= 1, got {days}")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        query = "DELETE FROM measurements WHERE timestamp < ?;"
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (cutoff,))
+            conn.commit()
+            return cur.rowcount
 
     @staticmethod
     def _row_to_measurement(row: dict) -> Measurement:

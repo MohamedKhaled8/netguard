@@ -76,7 +76,7 @@ class ObservabilityEngine:
             ),
             WifiMetricsCollector(
                 platform_adapter=self.platform,
-                interval_sec=3.0,
+                interval_sec=getattr(self.config, "wifi_interval_sec", 3.0),
             ),
             ActiveConnectionCollector(
                 platform_adapter=self.platform,
@@ -175,3 +175,17 @@ class ObservabilityEngine:
         if window and len(window) > 0:
             return window[-1]
         return None
+
+    def update_probing_interval(self, interval_sec: float) -> None:
+        """Dynamically updates the polling interval for running probes live."""
+        val = float(interval_sec)
+        if val <= 0.0:
+            raise ValueError(f"Probing interval must be > 0, got {val}")
+        logger.info("Updating observability probing interval to %.2fs", val)
+        if hasattr(self.config, "gateway_interval_sec"):
+            self.config.gateway_interval_sec = val
+        for probe in self._probes:
+            if isinstance(probe, (GatewayProbe, ExternalConnectivityProbe, DNSResolutionProbe)):
+                probe.interval_sec = val
+            elif hasattr(probe, "interval_sec"):
+                probe.interval_sec = max(val, getattr(probe, "interval_sec", val))

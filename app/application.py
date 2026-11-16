@@ -15,6 +15,7 @@ from app.remediation.actions.switch_dns import SwitchDNSResolverAction
 from app.remediation.actions.renew_dhcp import RenewIPLeaseAction
 from app.remediation.actions.recheck_gateway import RecheckGatewayAction
 from app.core.models.metrics import Diagnosis, OperatingMode
+from app.core.settings import UserSettings
 
 logger = logging.getLogger("netguard.application")
 
@@ -72,8 +73,29 @@ class NetGuardApplication:
             orchestrator=self.orchestrator,
         )
 
+        # 5. User Settings Persistence & Dynamic Synchronization
+        self.settings = getattr(self.ctx, "settings", None) or UserSettings(
+            config=self.config,
+            event_bus=self.ctx.event_bus,
+        )
+        self.settings.changed.connect(self._on_settings_changed)
+
         self._running = False
         self._diagnostic_loop_task: Optional[asyncio.Task] = None
+
+    def _on_settings_changed(self, key: str, value: Any) -> None:
+        if "interval" in key or key == "probing_interval":
+            if hasattr(self, "observability") and self.observability:
+                self.observability.update_probing_interval(float(value))
+        elif key == "mode":
+            if hasattr(self, "orchestrator") and self.orchestrator:
+                self.orchestrator.set_operating_mode(OperatingMode(value))
+        elif key == "retention_days":
+            if hasattr(self.ctx, "measurements") and self.ctx.measurements:
+                try:
+                    self.ctx.measurements.prune_older_than(int(value))
+                except Exception as exc:
+                    logger.warning("Failed to prune measurements on retention change: %s", exc)
 
     def _register_default_actions(self) -> None:
         self.action_registry.register(RecheckGatewayAction())

@@ -65,6 +65,24 @@ def test_database_and_repositories(tmp_path: Path):
     assert latest[0].raw_value == 4.2
     assert latest[0].target_or_interface == "192.168.1.1"
 
+    # Test Retention Pruning
+    from datetime import timedelta
+    old_ts = datetime.now(timezone.utc) - timedelta(days=45)
+    m_old = Measurement(
+        timestamp=old_ts,
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="192.168.1.1",
+        metric_type=MetricType.GATEWAY_LATENCY,
+        raw_value=10.0,
+        normalized_value=10.0,
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        confidence=1.0,
+    )
+    meas_repo.save(m_old)
+    pruned = meas_repo.prune_older_than(days=30)
+    assert pruned == 1
+
     # 2. Test Incident Save & Query
     diag = Diagnosis(
         probable_cause=ProbableCause.LOCAL_GATEWAY_HIGH_LATENCY,
