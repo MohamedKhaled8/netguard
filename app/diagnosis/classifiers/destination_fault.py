@@ -35,9 +35,10 @@ class DestinationSpecificClassifier(BaseClassifier):
         failing_targets = []
         healthy_targets = []
 
+        fail_ratio_thresh = getattr(getattr(self.thresholds, "loss", None), "destination_isolated_fail_ratio", 0.75)
         for target, statuses in target_statuses.items():
             fail_count = sum(1 for st in statuses if st in (ProbeStatus.FAILED, ProbeStatus.TIMEOUT))
-            if fail_count / len(statuses) >= 0.75:
+            if fail_count / len(statuses) >= fail_ratio_thresh:
                 failing_targets.append(target)
             else:
                 healthy_targets.append(target)

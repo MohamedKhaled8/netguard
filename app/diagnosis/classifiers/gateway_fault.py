@@ -29,8 +29,9 @@ class GatewayHealthClassifier(BaseClassifier):
 
         # 1. Total Gateway Unreachability
         # Require sustained failure (failure ratio >= threshold or multiple failures)
+        gw_unreachable_thresh = getattr(getattr(self.thresholds, "loss", None), "gateway_unreachable_ratio", 0.50)
         is_sustained_loss = (
-            (gw_reach and gw_reach.failure_ratio >= 0.50)
+            (gw_reach and gw_reach.failure_ratio >= gw_unreachable_thresh)
             or (gw_loss and gw_loss.failure_ratio >= self.thresholds.gateway_packet_loss_critical)
             or (gw_reach and gw_reach.latest_value == 0.0 and gw_reach.count == 1)
         )
@@ -61,7 +62,7 @@ class GatewayHealthClassifier(BaseClassifier):
 
             # Check if external is also down
             ext_loss = summaries.get(MetricType.EXTERNAL_PACKET_LOSS)
-            confidence = 0.95 if (ext_loss and ext_loss.latest_value >= 0.5) else 0.85
+            confidence = 0.95 if (ext_loss and ext_loss.latest_value >= gw_unreachable_thresh) else 0.85
 
             return Diagnosis(
                 id=str(uuid.uuid4()),

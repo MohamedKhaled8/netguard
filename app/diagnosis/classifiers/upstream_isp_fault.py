@@ -29,9 +29,10 @@ class UpstreamISPClassifier(BaseClassifier):
             return None
 
         # Verify gateway health: local gateway must be reachable with low packet loss
+        gw_healthy_loss_max = getattr(getattr(self.thresholds, "loss", None), "gateway_healthy_max_ratio", 0.20)
         gateway_healthy = (
             (gw_reach and gw_reach.latest_value == 1.0)
-            and (not gw_loss or gw_loss.latest_value < 0.20)
+            and (not gw_loss or gw_loss.latest_value < gw_healthy_loss_max)
             and (not gw_lat or gw_lat.mean < self.thresholds.gateway_latency_critical_ms)
         )
 

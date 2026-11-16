@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 
+from app.core.thresholds import DEFAULT_THRESHOLDS
 from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.day_strip import DayStrip
@@ -390,7 +391,7 @@ class DashboardView(QWidget):
         )
         if is_ext_valid:
             lat_val = ext.raw_value
-            is_warn = lat_val >= 80.0
+            is_warn = lat_val >= DEFAULT_THRESHOLDS.latency.external_warning_ms
             ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY) or []
             ext_samples = [
                 s.raw_value for s in ext_window
@@ -415,7 +416,7 @@ class DashboardView(QWidget):
         )
         if is_jit_valid:
             jit_val = jit.raw_value
-            is_warn = jit_val >= 10.0
+            is_warn = jit_val >= DEFAULT_THRESHOLDS.jitter.ui_warning_ms
             jit_window = obs.get_sliding_window(MetricType.JITTER_MS) or []
             jit_samples = [
                 s.raw_value for s in jit_window
@@ -440,7 +441,7 @@ class DashboardView(QWidget):
         )
         if is_loss_valid:
             loss_val = loss.raw_value * 100.0
-            is_warn = loss_val > 1.0
+            is_warn = loss_val > DEFAULT_THRESHOLDS.loss.dashboard_warning_pct
             loss_window = obs.get_sliding_window(MetricType.GATEWAY_PACKET_LOSS) or []
             loss_samples = [
                 s.raw_value * 100.0 for s in loss_window

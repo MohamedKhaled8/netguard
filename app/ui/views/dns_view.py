@@ -27,6 +27,7 @@ from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.bar_row import HorizontalProgressBar
+from app.core.thresholds import DEFAULT_THRESHOLDS
 
 
 class RankedServerRow(QWidget):
@@ -45,9 +46,9 @@ class RankedServerRow(QWidget):
         layout.addWidget(lbl_ms)
 
         frac = max(0.12, min(1.0, ms_val / max(1.0, max_ms)))
-        if is_top or ms_val <= 45.0:
+        if is_top or ms_val <= DEFAULT_THRESHOLDS.dns.ui_fast_cutoff_ms:
             color = tokens.STATUS_OK
-        elif ms_val <= 75.0:
+        elif ms_val <= DEFAULT_THRESHOLDS.dns.ui_warn_cutoff_ms:
             color = tokens.STATUS_WARN
         else:
             color = tokens.STATUS_BAD
@@ -312,9 +313,9 @@ class DNSView(QWidget):
 
         # Health color determinations
         def _get_color(ms_val: float) -> str:
-            if ms_val <= 55.0:
+            if ms_val <= DEFAULT_THRESHOLDS.dns.ui_fast_cutoff_ms:
                 return tokens.STATUS_OK
-            elif ms_val <= 85.0:
+            elif ms_val <= DEFAULT_THRESHOLDS.dns.ui_warn_cutoff_ms:
                 return tokens.STATUS_WARN
             return tokens.STATUS_BAD
 
@@ -323,14 +324,14 @@ class DNSView(QWidget):
 
         self.lbl_curr_ms.setText(f"{act_ms:.1f} ms")
         self.lbl_curr_ms.setStyleSheet(f"color: {curr_color};")
-        self.bar_curr.set_fraction(max(0.12, min(1.0, act_ms / 80.0)), fill_color=curr_color)
+        self.bar_curr.set_fraction(max(0.12, min(1.0, act_ms / DEFAULT_THRESHOLDS.latency.gateway_critical_ms)), fill_color=curr_color)
 
         self.lbl_fast_ms.setText(f"{best_ms:.1f} ms")
         self.lbl_fast_ms.setStyleSheet(f"color: {fast_color};")
-        self.bar_fast.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=fast_color)
+        self.bar_fast.set_fraction(max(0.12, min(1.0, best_ms / DEFAULT_THRESHOLDS.latency.gateway_critical_ms)), fill_color=fast_color)
 
         self._has_benchmark_rankings = True
-        if is_optimal or abs(act_ms - best_ms) <= 8.0:
+        if is_optimal or abs(act_ms - best_ms) <= DEFAULT_THRESHOLDS.dns.switching_hysteresis_ms:
             name_label = active_name or best.name.replace(" Primary", "").replace(" Secondary", "")
             self.lbl_curr_name.setText(f"الخادم النشط بجهازك ({name_label}) — الأسرع حالياً ✓")
             self.lbl_fast_name.setText(f"{best.name} · {best.ip} (المرشح الأفضل)")

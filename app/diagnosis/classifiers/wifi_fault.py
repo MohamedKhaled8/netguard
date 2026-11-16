@@ -26,15 +26,16 @@ class WifiInstabilityClassifier(BaseClassifier):
         if not wifi_sig or wifi_sig.count == 0:
             return None
 
-        # Critical Wi-Fi threshold: signal < 25%
-        if wifi_sig.latest_value < 25.0:
+        # Critical Wi-Fi threshold: signal < critical percent
+        wifi_crit = getattr(getattr(self.thresholds, "wifi", None), "signal_critical_pct", 25.0)
+        if wifi_sig.latest_value < wifi_crit:
             supporting = [
                 Evidence(
                     metric_type=MetricType.WIFI_SIGNAL_PERCENT,
                     target="wifi_link",
                     observed_value=wifi_sig.latest_value,
-                    threshold_value=25.0,
-                    condition="wifi_signal < 25%",
+                    threshold_value=wifi_crit,
+                    condition=f"wifi_signal < {wifi_crit}%",
                     weight=1.5,
                 )
             ]

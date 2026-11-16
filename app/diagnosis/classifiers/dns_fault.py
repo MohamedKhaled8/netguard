@@ -28,11 +28,13 @@ class DNSHealthClassifier(BaseClassifier):
             return None
 
         # Check if direct IP connectivity is available (Gateway and External are reachable)
+        ext_healthy_max = getattr(getattr(self.thresholds, "loss", None), "external_healthy_max_ratio", 0.20)
+        dns_fail_thresh = getattr(getattr(self.thresholds, "loss", None), "dns_failure_rate_threshold", 0.50)
         gateway_healthy = gw_reach and gw_reach.latest_value == 1.0
-        external_ip_healthy = ext_loss and ext_loss.latest_value <= 0.20
+        external_ip_healthy = ext_loss and ext_loss.latest_value <= ext_healthy_max
 
         # Case 1: Total DNS Resolution Failure
-        if dns_success and dns_success.latest_value < 0.50:
+        if dns_success and dns_success.latest_value < dns_fail_thresh:
             # If external IP is healthy, we have high confidence this is purely a DNS problem!
             confidence = 0.95 if (gateway_healthy and external_ip_healthy) else 0.70
             severity = DiagnosisSeverity.HIGH
@@ -42,8 +44,8 @@ class DNSHealthClassifier(BaseClassifier):
                     metric_type=MetricType.DNS_SUCCESS_RATE,
                     target="dns_resolver",
                     observed_value=dns_success.latest_value,
-                    threshold_value=0.50,
-                    condition="dns_success_rate < 0.50",
+                    threshold_value=dns_fail_thresh,
+                    condition=f"dns_success_rate < {dns_fail_thresh}",
                     weight=1.5,
                 )
             ]
@@ -54,7 +56,7 @@ class DNSHealthClassifier(BaseClassifier):
                         metric_type=MetricType.EXTERNAL_PACKET_LOSS,
                         target="wan_ip",
                         observed_value=ext_loss.latest_value if ext_loss else 1.0,
-                        threshold_value=0.20,
+                        threshold_value=ext_healthy_max,
                         condition="external_ip_loss_high (possible general outage)",
                         weight=1.0,
                     )
