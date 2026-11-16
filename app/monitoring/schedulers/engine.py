@@ -7,7 +7,7 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional
 from app.core.config.models import ProbingConfig
-from app.core.events.bus import EventBus
+from app.core.bus import EventBus, EventTopics
 from app.core.models.metrics import Measurement, MetricType
 from app.monitoring.models.probe_result import ProbeResult
 from app.monitoring.probes.base import BaseProbe
@@ -160,7 +160,7 @@ class ObservabilityEngine:
             logger.warning("Failed to persist measurement %s: %s", m.metric_type.value, exc)
 
         # Publish event
-        topic = f"telemetry.{m.metric_type.value}"
+        topic = f"{EventTopics.TELEMETRY_PREFIX}{m.metric_type.value}"
         await self.event_bus.publish(topic, m)
 
     def get_sliding_window(self, metric_type: MetricType) -> List[Measurement]:

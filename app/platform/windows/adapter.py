@@ -10,13 +10,30 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 import psutil
 from app.platform.interfaces import IPlatformAdapter
 
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
 
 class WindowsPlatformAdapter(IPlatformAdapter):
     """Windows-specific implementation using allowlisted system commands and native sockets."""
 
+    supports_auto_elevate: bool = True
+
     def __init__(self) -> None:
         self._cached_gateway: Optional[str] = None
         self._cached_interface: Optional[str] = None
+        self._last_elevation_request_time: float = 0.0
+
+    def restart_as_administrator(self) -> bool:
+        """Relaunches NetGuard AI process elevated with Administrator privileges."""
+        try:
+            import sys, ctypes
+            if self.is_elevated():
+                return True
+            params = " ".join([f'"{arg}"' for arg in sys.argv])
+            res = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+            return res > 32
+        except Exception as exc:
+            return False
 
     def is_elevated(self) -> bool:
         """Check whether the current running process has administrator privileges on Windows."""
@@ -36,6 +53,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=3.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             for line in proc.stdout.splitlines():
                 parts = line.strip().split()
@@ -67,6 +85,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=3.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             interface_ip = None
             for line in proc.stdout.splitlines():
@@ -107,6 +126,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=timeout_sec + 1.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             duration_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -154,6 +174,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=5.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             if proc.returncode == 0:
                 return True, "Successfully flushed DNS Cache via PowerShell Clear-DnsClientCache."
@@ -168,6 +189,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=5.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             if proc.returncode == 0:
                 return True, "Successfully flushed the DNS Resolver Cache."
@@ -184,6 +206,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=5.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             servers = []
             for line in proc.stdout.splitlines():
@@ -206,6 +229,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                     text=True,
                     timeout=8.0,
                     check=False,
+                    creationflags=_NO_WINDOW,
                 )
                 return proc.returncode == 0, proc.stdout or proc.stderr
             except Exception as exc:
@@ -220,8 +244,12 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=8.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             if proc.returncode != 0:
+                out = (proc.stderr or "") + (proc.stdout or "")
+                if "elevation" in out.lower() or "administrator" in out.lower() or "access is denied" in out.lower():
+                    return False, "Requires Administrator privileges to modify network adapter DNS."
                 return False, proc.stderr or proc.stdout
 
             # Add subsequent servers as index=2, 3...
@@ -232,6 +260,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                     text=True,
                     timeout=5.0,
                     check=False,
+                    creationflags=_NO_WINDOW,
                 )
             return True, f"Configured DNS to {', '.join(servers)}"
         except Exception as exc:
@@ -250,6 +279,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=12.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             if proc.returncode == 0:
                 return True, "DHCP lease renewed successfully."
@@ -274,6 +304,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 text=True,
                 timeout=4.0,
                 check=False,
+                creationflags=_NO_WINDOW,
             )
             if proc.returncode == 0:
                 metrics["is_wifi"] = True

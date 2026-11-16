@@ -5,7 +5,7 @@ import asyncio
 from unittest.mock import MagicMock
 from datetime import datetime, timezone
 from app.core.config.models import ProbingConfig
-from app.core.events.bus import EventBus
+from app.core.bus import EventBus, EventTopics
 from app.core.models.metrics import MetricType, ProbeStatus, MeasurementSource, Measurement
 from app.storage.database import DatabaseManager
 from app.storage.repositories.measurement_repo import MeasurementRepository
@@ -146,7 +146,7 @@ async def test_observability_engine_cycle(tmp_path):
     async def capture_event(topic: str, payload: Measurement):
         received_events.append((topic, payload))
 
-    await bus.subscribe("telemetry.*", capture_event)
+    await bus.subscribe(EventTopics.TELEMETRY_ALL, capture_event)
 
     # Run single cycle
     measurements = await engine.run_single_cycle()

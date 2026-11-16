@@ -11,7 +11,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "ar": {
         # App Header & Navigation
         "app_title": "NETGUARD AI",
-        "app_subtitle": "الحارس الذكي للشبكة والإنترنت",
+        "app_subtitle": "نظام مراقبة وإدارة استقرار الشبكة",
         "version": "الإصدار 2.0.0 · PySide6",
         "lang_toggle": "🌐 English",
         "nav_dashboard": "📊 لوحة التحكم",
@@ -288,3 +288,35 @@ def get_language() -> str:
 def tr(key: str, default: str = "") -> str:
     """Retrieve localized string for the active language."""
     return STRINGS.get(_current_lang, {}).get(key, default or key)
+
+
+def get_friendly_diagnosis_explanation(cause_val: str, raw_explanation: str = "") -> str:
+    """Converts internal diagnostic explanations into crisp, natural Arabic."""
+    cause_str = cause_val.lower() if isinstance(cause_val, str) else str(cause_val).lower()
+
+    if "healthy" in cause_str:
+        return "الشبكة مستقرة وتعمل بكفاءة تامة دون أي تذبذب أو بطء."
+    elif "upstream" in cause_str or "isp" in cause_str:
+        return "تذبذب مؤقت في شبكة مزود الخدمة (WE / Orange). الاتصال بالراوتر ممتاز، والمشكلة بالخط الخارجي."
+    elif "gateway_unreachable" in cause_str or "unreachable" in cause_str:
+        return "انقطع الاتصال بالراوتر المحلي. يرجى التحقق من تشغيل الراوتر أو اتصال الكابل."
+    elif "gateway_high_latency" in cause_str or "gateway" in cause_str and "latency" in cause_str:
+        return "تذبذب بين جهازك والراوتر. ينصح بالاقتراب أو استخدام شبكة 5GHz لتقليل التداخل."
+    elif "unresponsive" in cause_str or "dns_failure" in cause_str:
+        return "خادم DNS لا يستجيب. يقوم النظام بالتحويل التلقائي لأسرع خادم مستقر (Google / Cloudflare)."
+    elif "dns" in cause_str and "latency" in cause_str:
+        return "خادم DNS الحالي بطيء الاستجابة. ينصح باعتماد خادم أسرع لتسريع فتح الروابط."
+    elif "wi_fi" in cause_str or "wifi" in cause_str:
+        return "إشارة الواي فاي ضعيفة أو توجد عوائق لاسلكية تؤثر على ثبات البنج."
+    elif "bufferbloat" in cause_str:
+        return "ارتفاع البنج بسبب ضغط تحميل أو رفع ملفات على الشبكة في نفس الوقت."
+    elif "background_app" in cause_str:
+        return "تطبيق في الخلفية يستهلك جزءاً كبيراً من سرعة الاتصال."
+    elif "destination" in cause_str:
+        return "الإنترنت يعمل لديك بشكل طبيعي، والمشكلة مؤقتة في السيرفر الخارجي المستهدف."
+
+    if raw_explanation and any(w in raw_explanation.lower() for w in ["gateway", "packet loss", "upstream", "isp"]):
+        return "تذبذب في خط مزود الخدمة الخارجي (Upstream). الاتصال بالراوتر سليم، وتتم المراقبة تلقائياً."
+
+    return raw_explanation or "يراقب النظام مسارات الشبكة ويعالج أي اختناق تلقائياً."
+

@@ -57,3 +57,7 @@ class IPlatformAdapter(ABC):
     def get_wifi_metrics(self, interface_name: Optional[str] = None) -> Dict[str, Any]:
         """Retrieve Wi-Fi signal strength (%), link speed, and BSSID if connected."""
         pass
+
+    def restart_as_administrator(self) -> bool:
+        """Relaunch the application elevated as Administrator/root."""
+        return False

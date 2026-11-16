@@ -32,7 +32,7 @@ class SwitchDNSResolverAction(RemediationAction):
         iface = context.get("interface_name") or platform.get_primary_interface()
         if not iface:
             return False, "Cannot switch DNS: No primary network adapter detected"
-        return True, f"Primary interface '{iface}' detected (elevated privileges confirmed)"
+        return True, f"Primary interface '{iface}' detected"
 
     async def execute(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Any:
         loop = asyncio.get_running_loop()

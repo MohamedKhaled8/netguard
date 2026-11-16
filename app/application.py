@@ -43,6 +43,9 @@ class NetGuardApplication:
         )
 
         # 3. Remediation Subsystem
+        from app.traffic.controller import TrafficController
+        self.traffic_controller = TrafficController(event_bus=self.ctx.event_bus)
+
         self.action_registry = ActionRegistry()
         self._register_default_actions()
 
@@ -58,6 +61,15 @@ class NetGuardApplication:
             platform_adapter=self.ctx.platform,
             audit_repo=self.ctx.audit,
             event_bus=self.ctx.event_bus,
+            meeting_guard_check=self.traffic_controller.is_critical_meeting_active,
+        )
+
+        # 4. Intelligent Autonomous DNS Optimizer
+        from app.dns.optimizer import DNSOptimizer
+        self.dns_optimizer = DNSOptimizer(
+            platform_adapter=self.ctx.platform,
+            event_bus=self.ctx.event_bus,
+            orchestrator=self.orchestrator,
         )
 
         self._running = False
@@ -132,6 +144,13 @@ class NetGuardApplication:
                 diagnosis = await self.diagnosis.evaluate_windows(windows)
                 if diagnosis and diagnosis.auto_remediation_permitted:
                     await self.orchestrator.handle_diagnosis(diagnosis)
+                    # When DNS resolution fails or latency spikes, autonomously optimize DNS immediately!
+                    from app.core.models.metrics import ProbableCause
+                    if diagnosis.probable_cause in (
+                        ProbableCause.DNS_RESOLVER_UNRESPONSIVE,
+                        ProbableCause.DNS_RESOLVER_HIGH_LATENCY,
+                    ):
+                        asyncio.create_task(self.dns_optimizer.auto_optimize_dns())
             except asyncio.CancelledError:
                 break
             except Exception as exc:

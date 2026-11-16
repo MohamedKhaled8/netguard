@@ -5,11 +5,11 @@ import asyncio
 import time
 import uuid
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 from datetime import datetime, timezone
 
 from app.core.config.models import RemediationConfig
-from app.core.events.bus import EventBus
+from app.core.bus import EventBus, EventTopics
 from app.core.models.metrics import (
     Diagnosis,
     DiagnosisSeverity,
@@ -38,6 +38,7 @@ class RemediationOrchestrator:
         platform_adapter: IPlatformAdapter,
         audit_repo: AuditRepository,
         event_bus: EventBus,
+        meeting_guard_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -45,6 +46,7 @@ class RemediationOrchestrator:
         self.platform = platform_adapter
         self.audit = audit_repo
         self.event_bus = event_bus
+        self.meeting_guard_check = meeting_guard_check
         self.mode = OperatingMode(config.mode)
 
     def set_operating_mode(self, mode: OperatingMode) -> None:
@@ -82,7 +84,7 @@ class RemediationOrchestrator:
 
         if self.mode == OperatingMode.ASSISTED:
             logger.info("Assisted Mode: action '%s' awaiting user approval", selected_action.action_id)
-            await self.event_bus.publish("remediation.approval_required", {
+            await self.event_bus.publish(EventTopics.REMEDIATION_APPROVAL_REQUIRED, {
                 "diagnosis": diagnosis.model_dump(mode="json"),
                 "action_id": selected_action.action_id,
                 "action_name": selected_action.name,
@@ -94,6 +96,19 @@ class RemediationOrchestrator:
         if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE and not self.config.allow_level_3_disruptive:
             logger.warning("Disruptive action '%s' blocked by safety policy (allow_level_3_disruptive=False)", selected_action.action_id)
             return None
+
+        # Meeting Guard Safety Gate: Never drop active streaming/conferencing sockets
+        if self.meeting_guard_check and self.meeting_guard_check():
+            if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE:
+                logger.warning(
+                    "Meeting Guard Safety: Disruptive action '%s' blocked to protect active Zoom/Meet call",
+                    selected_action.action_id,
+                )
+                await self.event_bus.publish(EventTopics.REMEDIATION_ACTION_SUPPRESSED, {
+                    "action_id": selected_action.action_id,
+                    "reason": "حماية مكالمة الفيديو النشطة: تم تأجيل الإجراء المربك لضمان عدم انقطاع البث والصوت.",
+                })
+                return None
 
         # Check OS support
         if not selected_action.is_os_supported():
@@ -139,7 +154,14 @@ class RemediationOrchestrator:
         rollback_success = None
 
         logger.info("Executing recovery action: %s (%s)", action.name, action.action_id)
-        await self.event_bus.publish("remediation.started", {"action_id": action.action_id, "name": action.name})
+        await self.event_bus.publish(
+            EventTopics.REMEDIATION_STARTED,
+            {
+                "action_id": action.action_id,
+                "name": action.name,
+                "action_name": action.name,
+            },
+        )
 
         # 7: EXECUTE
         try:
@@ -238,4 +260,6 @@ class RemediationOrchestrator:
         except Exception as exc:
             logger.warning("Failed to persist action audit log: %s", exc)
 
-        await self.event_bus.publish("remediation.finished", record)
+        payload = record.model_dump(mode="json")
+        payload["name"] = record.action_name
+        await self.event_bus.publish(EventTopics.REMEDIATION_COMPLETED, payload)

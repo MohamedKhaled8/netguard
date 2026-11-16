@@ -56,6 +56,27 @@ class DNSOptimizer:
             target_ips.append(second_best.ip)
 
         logger.info("Optimal resolver pair selected: %s", target_ips)
+
+        # Autonomously apply the best DNS to the active interface
+        iface = self.platform.get_primary_interface() or "Wi-Fi"
+        try:
+            current_servers = self.platform.get_interface_dns_servers(iface)
+            if not current_servers or current_servers[0] != best_resolver.ip:
+                logger.info("Autonomously applying top-ranked DNS resolver %s on %s...", target_ips, iface)
+                ok, msg = self.platform.set_interface_dns_servers(iface, target_ips)
+                self.platform.flush_dns_cache()
+                await self.event_bus.publish("dns.switched", {
+                    "interface": iface,
+                    "previous_servers": current_servers,
+                    "target_servers": target_ips,
+                    "provider": best_resolver.name,
+                    "latency_ms": best_resolver.mean_latency_ms,
+                    "status": "applied" if ok else "requested",
+                    "message": msg,
+                })
+        except Exception as exc:
+            logger.error("Failed to autonomously switch DNS: %s", exc)
+
         return best_resolver
 
     @property

@@ -2,11 +2,12 @@
 
 import pytest
 import asyncio
+from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 from app.core.config.models import AppConfig
 from app.core.config.loader import load_config
-from app.core.events.bus import EventBus
+from app.core.bus import EventBus, EventTopics
 from app.core.models.metrics import (
     Measurement,
     MetricType,
@@ -155,3 +156,119 @@ def test_bootstrap():
     assert ctx.config is not None
     assert ctx.platform is not None
     assert ctx.measurements is not None
+
+
+def test_event_topics_definition_and_alias():
+    """Verify EventTopics constants and convenience alias in app/core/bus.py."""
+    from app.core.events.bus import EventTopics as CoreEventTopics
+    from app.core.bus import EventTopics as AliasEventTopics
+
+    assert CoreEventTopics is AliasEventTopics
+    assert AliasEventTopics.TELEMETRY_ALL == "telemetry.*"
+    assert AliasEventTopics.DIAGNOSIS_INCIDENT == "diagnosis.incident"
+    assert AliasEventTopics.REMEDIATION_STARTED == "remediation.started"
+    assert AliasEventTopics.REMEDIATION_COMPLETED == "remediation.completed"
+    assert AliasEventTopics.REMEDIATION_APPROVAL_REQUIRED == "remediation.approval_required"
+    assert AliasEventTopics.REMEDIATION_ACTION_SUPPRESSED == "remediation.action_suppressed"
+    assert AliasEventTopics.DNS_BENCHMARK_COMPLETED == "dns.benchmark.completed"
+    assert AliasEventTopics.DNS_SWITCHED == "dns.switched"
+    assert AliasEventTopics.TRAFFIC_WORKLOAD_UPDATE == "traffic.workload_update"
+    assert AliasEventTopics.BUFFERBLOAT_REPORT == "bufferbloat.report"
+    assert AliasEventTopics.MODE_CHANGED == "mode.changed"
+    assert AliasEventTopics.SETTINGS_CHANGED == "settings.changed"
+
+
+@pytest.mark.asyncio
+async def test_event_bus_topic_standardization_and_wildcards():
+    """Verify pub/sub with EventTopics constants and wildcard patterns."""
+    bus = EventBus()
+    received_telemetry = []
+    received_remediation = []
+
+    async def on_telemetry(topic: str, payload: Any):
+        received_telemetry.append((topic, payload))
+
+    async def on_remediation(topic: str, payload: Any):
+        received_remediation.append((topic, payload))
+
+    await bus.subscribe(EventTopics.TELEMETRY_ALL, on_telemetry)
+    await bus.subscribe(EventTopics.REMEDIATION_PREFIX + "*", on_remediation)
+
+    await bus.publish(f"{EventTopics.TELEMETRY_PREFIX}gateway_latency", {"latency": 5.0})
+    await bus.publish(EventTopics.REMEDIATION_STARTED, {"action_id": "flush_dns", "name": "Flush DNS"})
+    await bus.publish(EventTopics.REMEDIATION_COMPLETED, {"action_id": "flush_dns", "status": "succeeded"})
+
+    assert len(received_telemetry) == 1
+    assert received_telemetry[0][0] == "telemetry.gateway_latency"
+
+    assert len(received_remediation) == 2
+    assert received_remediation[0][0] == EventTopics.REMEDIATION_STARTED
+    assert received_remediation[1][0] == EventTopics.REMEDIATION_COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_remediation_orchestrator_publish_contract(tmp_path):
+    """Verify orchestrator publishes EventTopics.REMEDIATION_COMPLETED as a dict payload with action_name."""
+    from typing import Any
+    from app.core.config.models import RemediationConfig
+    from app.remediation.orchestrator import RemediationOrchestrator
+    from app.remediation.registry import ActionRegistry
+    from app.remediation.safety import ActionSafetyManager
+    from tests.unit.test_remediation import ControllableAction, MockPlatformAdapterForRemediation
+
+    bus = EventBus()
+    completed_events = []
+    started_events = []
+
+    async def on_started(topic: str, data: Any):
+        started_events.append((topic, data))
+
+    async def on_completed(topic: str, data: Any):
+        completed_events.append((topic, data))
+
+    await bus.subscribe(EventTopics.REMEDIATION_STARTED, on_started)
+    await bus.subscribe(EventTopics.REMEDIATION_COMPLETED, on_completed)
+
+    db_manager = DatabaseManager(db_path=tmp_path / "rem_test.db", enable_wal=False)
+    audit_repo = AuditRepository(db_manager)
+    platform = MockPlatformAdapterForRemediation()
+    safety = ActionSafetyManager(failure_threshold=3, reset_timeout_sec=0.5)
+    registry = ActionRegistry()
+    config = RemediationConfig(mode="autonomous_safe", cooldown_period_sec=0.01)
+
+    orchestrator = RemediationOrchestrator(
+        config=config,
+        registry=registry,
+        safety_manager=safety,
+        platform_adapter=platform,
+        audit_repo=audit_repo,
+        event_bus=bus,
+    )
+
+    action = ControllableAction(action_id="test_act", fail_verify=False)
+    registry.register(action)
+
+    diag = Diagnosis(
+        probable_cause=ProbableCause.DNS_RESOLVER_UNRESPONSIVE,
+        confidence=0.95,
+        severity=DiagnosisSeverity.HIGH,
+        recommended_actions=["test_act"],
+        auto_remediation_permitted=True,
+    )
+
+    record = await orchestrator.handle_diagnosis(diag)
+    assert record.status == ActionExecutionStatus.SUCCEEDED
+
+    assert len(started_events) == 1
+    assert started_events[0][0] == EventTopics.REMEDIATION_STARTED
+    assert started_events[0][1]["action_id"] == "test_act"
+    assert "name" in started_events[0][1]
+
+    assert len(completed_events) == 1
+    assert completed_events[0][0] == EventTopics.REMEDIATION_COMPLETED
+    completed_data = completed_events[0][1]
+    assert isinstance(completed_data, dict)
+    assert completed_data["action_id"] == "test_act"
+    assert completed_data["action_name"] == action.name
+    assert completed_data["name"] == action.name
+    assert completed_data["status"] == "succeeded"

@@ -33,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to YAML configuration file",
     )
+    parser.add_argument(
+        "--no-elevate",
+        action="store_true",
+        help="Do not attempt UAC administrator elevation",
+    )
     return parser.parse_args()
 
 
@@ -137,6 +142,25 @@ def run_gui(app) -> None:
 
 def main() -> None:
     args = parse_args()
+
+    # Auto-elevate to Administrator mode on Windows startup for GUI
+    if (
+        sys.platform == "win32"
+        and args.command == "gui"
+        and "--no-elevate" not in sys.argv
+        and "pytest" not in sys.modules
+    ):
+        import ctypes
+        try:
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                script = sys.argv[0]
+                cmd_args = " ".join([f'"{a}"' for a in sys.argv[1:] if a != "--no-elevate"])
+                ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {cmd_args}', None, 1)
+                if ret > 32:
+                    sys.exit(0)
+        except Exception:
+            pass
+
     app = create_application(config_path=args.config)
 
     if args.command == "actions":

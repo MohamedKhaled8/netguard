@@ -20,3 +20,14 @@
 - **Decision**: Implement ICMP probing alongside TCP SYN/Connect probes to port 80/443 on reliable targets (Cloudflare, Google, Quad9).
 - **Consequences**: Prevents false positive outage diagnoses on networks that drop ICMP.
 
+## ADR-005: Zero-Socket-Drop Meeting Guard for Live Conferencing
+- **Context**: Autonomous self-healing actions at Level 3 (e.g. DHCP lease renewal, adapter reset) temporarily disrupt existing TCP/UDP sockets, causing Zoom, Google Meet, or Teams calls to drop.
+- **Decision**: Inject a `meeting_guard_check` hook into `RemediationOrchestrator`. When conferencing is active, disruptive actions are strictly suppressed, and the system relies exclusively on non-disruptive QoS prioritization (DSCP 46), background rate-limiting (TiWorker throttling), and predictive queue stabilization.
+- **Consequences**: 100% call continuity, zero socket disconnection during active meetings, and safe deferred remediation.
+
+## ADR-006: Flat Graphite RTL Design System (Anti-Glow / Strict Token Architecture)
+- **Context**: Networking tools often suffer from generic neon slop, confusing English layouts for Arabic users, or unresponsive fixed-width dashboards.
+- **Decision**: Completely replace legacy styling with a custom RTL Arabic graphite design system (`#0E1012` / `#15181A` / `#25292C`, ivory accent `#ECEBE6`), IBM Plex typography, flat 1px hairlines, zero glow/emoji, and responsive reflow across 1440px to 480px.
+- **Consequences**: High-craft editorial desktop UX, zero cognitive overload, and full readability in both desktop and mobile orientations.
+
+

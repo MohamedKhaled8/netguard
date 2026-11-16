@@ -12,8 +12,11 @@ from app.core.exceptions.base import ConfigurationError
 def load_config(config_path: Optional[Path | str] = None) -> AppConfig:
     """Loads configuration from YAML file or returns validated defaults."""
     if config_path is None:
+        import sys
+        base = Path(sys._MEIPASS) if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS") else Path(".")
         # Check standard paths
         candidates = [
+            base / "config" / "default_config.yaml",
             Path("config/default_config.yaml"),
             Path("config/config.yaml"),
             Path("netguard.yaml"),

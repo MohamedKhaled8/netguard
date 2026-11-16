@@ -49,6 +49,7 @@ from app.ui.views.history_view import HistoryView
 from app.ui.views.settings_view import SettingsView
 from app.traffic.controller import TrafficController
 from app.core.models.metrics import OperatingMode
+from app.core.bus import EventTopics
 
 
 class UIAsyncBridge(QObject):
@@ -400,15 +401,15 @@ class MainWindow(QMainWindow):
         event_bus = self.app_core.ctx.event_bus
 
         async def _on_rem_started(topic: str, event_data: Any):
-            data = event_data if isinstance(event_data, dict) else {}
+            data = event_data.model_dump(mode="json") if hasattr(event_data, "model_dump") else (event_data if isinstance(event_data, dict) else {})
             self.bridge.remediation_event_received.emit("started", data)
 
         async def _on_rem_completed(topic: str, event_data: Any):
-            data = event_data if isinstance(event_data, dict) else {}
+            data = event_data.model_dump(mode="json") if hasattr(event_data, "model_dump") else (event_data if isinstance(event_data, dict) else {})
             self.bridge.remediation_event_received.emit("completed", data)
 
-        event_bus.subscribe_sync("remediation.started", _on_rem_started)
-        event_bus.subscribe_sync("remediation.completed", _on_rem_completed)
+        event_bus.subscribe_sync(EventTopics.REMEDIATION_STARTED, _on_rem_started)
+        event_bus.subscribe_sync(EventTopics.REMEDIATION_COMPLETED, _on_rem_completed)
 
         # Wire view actions
         self.view_settings.apply_btn.clicked.connect(self._on_apply_settings)
@@ -451,7 +452,7 @@ class MainWindow(QMainWindow):
             self.view_dashboard.update_telemetry(self.app_core.observability, last_diag)
 
     def _on_remediation_event_received(self, stage: str, data: Dict[str, Any]) -> None:
-        action_name = data.get("name", "إجراء تعافي ذكي")
+        action_name = data.get("action_name") or data.get("name", "إجراء تعافي ذكي")
         if stage == "started":
             self.view_dashboard.log_autonomous_action(
                 f"تدخل ذاتي تلقائي: {action_name}",

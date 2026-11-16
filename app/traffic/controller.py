@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import psutil
 from app.core.events.bus import EventBus
 from app.traffic.applications import ApplicationCatalog, ProcessNetworkProfile, WorkloadCategory
+from app.traffic.session_tracker import AppSessionTracker, AppSessionRecord
 
 logger = logging.getLogger("netguard.traffic.controller")
 
@@ -16,6 +17,7 @@ class TrafficController:
 
     def __init__(self, event_bus: EventBus) -> None:
         self.event_bus = event_bus
+        self.session_tracker = AppSessionTracker()
         self._last_profiles: Dict[int, ProcessNetworkProfile] = {}
 
     async def scan_active_applications(self) -> List[ProcessNetworkProfile]:
@@ -57,7 +59,38 @@ class TrafficController:
         self._last_profiles = {p.pid: p for p in profiles}
 
         # Check if conferencing is active (Zoom, Teams)
-        conferencing_active = any(p.category == WorkloadCategory.CONFERENCING for p in profiles)
+        current_names = {p.name.lower() for p in profiles}
+
+        for p in profiles:
+            if p.category in (WorkloadCategory.CONFERENCING, WorkloadCategory.STREAMING):
+                # Update or track ongoing session
+                display_name = p.name
+                if "zoom" in p.name.lower():
+                    display_name = "Zoom Cloud Meetings"
+                elif "teams" in p.name.lower():
+                    display_name = "Microsoft Teams"
+                elif "discord" in p.name.lower():
+                    display_name = "Discord"
+                elif "chrome" in p.name.lower():
+                    display_name = "Google Meet / Live Stream"
+
+                self.session_tracker.start_or_update_session(
+                    app_name=display_name,
+                    process_name=p.name,
+                    pid=p.pid,
+                    category=p.category.value,
+                )
+
+        # Check for closed sessions
+        for active_session in list(self.session_tracker.get_active_sessions()):
+            if active_session.process_name.lower() not in current_names:
+                # Closed!
+                self.session_tracker.close_session(active_session.process_name)
+
+        conferencing_active = (
+            any(p.category == WorkloadCategory.CONFERENCING for p in profiles)
+            or self.session_tracker.has_active_conferencing()
+        )
         gaming_active = any(p.category == WorkloadCategory.GAMING for p in profiles)
 
         await self.event_bus.publish("traffic.workload_update", {
@@ -65,10 +98,31 @@ class TrafficController:
             "conferencing_active": conferencing_active,
             "gaming_active": gaming_active,
             "profiles": [p.model_dump(mode="json") for p in profiles[:15]],
+            "active_sessions": [s.model_dump(mode="json") for s in self.session_tracker.get_active_sessions()],
+            "completed_sessions": [s.model_dump(mode="json") for s in self.session_tracker.get_completed_sessions()[:10]],
         })
 
         return profiles
 
     def is_critical_meeting_active(self) -> bool:
         """Safety check: Returns True if Zoom, Teams, or conferencing app has active sockets."""
-        return any(p.category == WorkloadCategory.CONFERENCING for p in self._last_profiles.values())
+        return (
+            any(p.category == WorkloadCategory.CONFERENCING for p in self._last_profiles.values())
+            or self.session_tracker.has_active_conferencing()
+        )
+
+    def simulate_start_meeting_session(self, app_name: str = "Zoom Cloud Meetings", proc_name: str = "zoom.exe") -> AppSessionRecord:
+        """Helper to simulate launching a protected Zoom session."""
+        session = self.session_tracker.start_or_update_session(
+            app_name=app_name,
+            process_name=proc_name,
+            pid=7812,
+            category="conferencing",
+            avg_bitrate=3.6,
+            avg_latency=17.5,
+        )
+        return session
+
+    def simulate_close_meeting_session(self, proc_name: str = "zoom.exe") -> Optional[AppSessionRecord]:
+        """Helper to simulate closing a Zoom session and generating its final report."""
+        return self.session_tracker.close_session(proc_name)
