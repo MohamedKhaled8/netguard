@@ -39,6 +39,7 @@ class RemediationOrchestrator:
         audit_repo: AuditRepository,
         event_bus: EventBus,
         meeting_guard_check: Optional[Callable[[], bool]] = None,
+        user_settings: Optional[Any] = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -47,22 +48,42 @@ class RemediationOrchestrator:
         self.audit = audit_repo
         self.event_bus = event_bus
         self.meeting_guard_check = meeting_guard_check
+        self.user_settings = user_settings
+        self._policies: Dict[str, bool] = {}
         self.mode = OperatingMode(config.mode)
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
         if self.event_bus:
             self.event_bus.subscribe_sync(EventTopics.MODE_CHANGED, self._on_mode_changed_event)
+            self.event_bus.subscribe_sync(EventTopics.SETTINGS_CHANGED, self._on_settings_changed_event)
 
     DRASTIC_ACTION_IDS = {
-        "renew_ip_lease",
         "reset_winsock",
         "reset_tcpip",
         "restart_adapter",
         "reset_winsock_catalog",
     }
 
+    ACTION_TO_POLICY_MAP = {
+        "flush_dns_cache": "allow_flush_dns",
+        "switch_dns_resolver": "allow_switch_dns",
+        "renew_ip_lease": "allow_renew_ip",
+        "meeting_guard_qos": "meeting_guard",
+    }
+
     async def _on_mode_changed_event(self, topic: str, data: Any) -> None:
         mode_val = data.get("mode") if isinstance(data, dict) else str(data)
         self.set_operating_mode(OperatingMode(mode_val))
+
+    async def _on_settings_changed_event(self, topic: str, data: Any) -> None:
+        if isinstance(data, dict):
+            if "policy" in data and "enabled" in data:
+                self.set_policy(data["policy"], data["enabled"])
+
+    def set_policy(self, name: str, enabled: bool) -> None:
+        """Update policy toggle."""
+        self._policies[name] = bool(enabled)
+        if self.user_settings:
+            self.user_settings.set_policy(name, enabled)
 
     def set_operating_mode(self, mode: OperatingMode | str) -> None:
         """Switch operating mode (Observation, Assisted, Autonomous Safe)."""
@@ -96,6 +117,23 @@ class RemediationOrchestrator:
             return None
 
         # 6: Check Safety & Policy Authorization
+        # Policy Toggles Gate
+        policy_key = self.ACTION_TO_POLICY_MAP.get(selected_action.action_id)
+        if policy_key is not None:
+            policy_enabled = True
+            if self.user_settings:
+                policy_enabled = self.user_settings.get_policy(policy_key)
+            elif policy_key in self._policies:
+                policy_enabled = self._policies[policy_key]
+
+            if not policy_enabled:
+                logger.info("Action '%s' suppressed by policy toggle '%s'=False", selected_action.action_id, policy_key)
+                await self.event_bus.publish(
+                    EventTopics.REMEDIATION_ACTION_SUPPRESSED,
+                    {"action_id": selected_action.action_id, "reason": f"Policy '{policy_key}' is disabled"},
+                )
+                return None
+
         # Meeting Guard Safety Gate: Never drop active streaming/conferencing sockets
         if self.meeting_guard_check and self.meeting_guard_check():
             if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE or selected_action.action_id in self.DRASTIC_ACTION_IDS:
@@ -110,8 +148,8 @@ class RemediationOrchestrator:
                 return None
 
         is_drastic = (
-            selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE
-            or selected_action.action_id in self.DRASTIC_ACTION_IDS
+            selected_action.action_id in self.DRASTIC_ACTION_IDS
+            or (selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE and not self.config.allow_level_3_disruptive)
         )
         if is_drastic:
             logger.warning("Drastic action '%s' intercepted; requires explicit user approval in all modes", selected_action.action_id)
