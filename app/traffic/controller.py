@@ -28,12 +28,14 @@ class TrafficController:
         self.session_tracker = AppSessionTracker()
         self._last_profiles: Dict[int, ProcessNetworkProfile] = {}
         self._applied_dscp_policies: Set[str] = set()
+        self._last_net_io: Optional[tuple[float, Any]] = None
 
     async def scan_active_applications(self) -> List[ProcessNetworkProfile]:
         """Scans all active TCP/UDP connections and builds workload profiles."""
         loop = asyncio.get_running_loop()
 
         def _scan():
+            import time
             connections = psutil.net_connections(kind="inet")
             active_pids: Dict[int, List[str]] = {}
 
@@ -41,6 +43,18 @@ class TrafficController:
                 if conn.pid and conn.status == psutil.CONN_ESTABLISHED:
                     remote_str = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "listening"
                     active_pids.setdefault(conn.pid, []).append(remote_str)
+
+            total_sockets = sum(len(eps) for eps in active_pids.values())
+            now_t = time.perf_counter()
+            io_now = psutil.net_io_counters()
+            total_mbps = 0.0
+            if self._last_net_io:
+                prev_t, prev_io = self._last_net_io
+                dt = max(0.1, now_t - prev_t)
+                delta_bytes = (io_now.bytes_recv + io_now.bytes_sent) - (prev_io.bytes_recv + prev_io.bytes_sent)
+                if delta_bytes >= 0:
+                    total_mbps = (delta_bytes * 8.0) / (dt * 1_000_000.0)
+            self._last_net_io = (now_t, io_now)
 
             profiles = []
             for pid, endpoints in active_pids.items():
@@ -51,14 +65,18 @@ class TrafficController:
                     continue
 
                 category, priority, is_protected = ApplicationCatalog.classify(pname)
+                s_cnt = len(endpoints)
+                est_mbps = round(total_mbps * (s_cnt / max(1, total_sockets)), 2) if total_sockets > 0 else 0.0
                 profile = ProcessNetworkProfile(
                     pid=pid,
                     name=pname,
                     category=category,
                     priority_level=priority,
-                    active_socket_count=len(endpoints),
+                    active_socket_count=s_cnt,
                     remote_endpoints=endpoints[:5],  # top 5 endpoints
                     is_protected_system_process=is_protected,
+                    is_estimated=True,
+                    estimated_bandwidth_mbps=est_mbps,
                 )
                 profiles.append(profile)
 

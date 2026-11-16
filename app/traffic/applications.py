@@ -29,6 +29,8 @@ class ProcessNetworkProfile(BaseModel):
     active_socket_count: int = 0
     remote_endpoints: List[str] = Field(default_factory=list)
     is_protected_system_process: bool = False
+    is_estimated: bool = True
+    estimated_bandwidth_mbps: Optional[float] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

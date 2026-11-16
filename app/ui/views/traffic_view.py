@@ -391,7 +391,11 @@ class TrafficView(QWidget):
 
             # 3. Bar & Sockets Cell
             frac = min(1.0, max(0.08, sockets_cnt / max(1, max_sockets)))
-            speed_txt = f"{sockets_cnt} اتصالات"
+            est_mb = getattr(p, "estimated_bandwidth_mbps", None)
+            if est_mb and est_mb > 0.05:
+                speed_txt = f"{sockets_cnt} · ~{est_mb:.1f}M (تقديري)"
+            else:
+                speed_txt = f"{sockets_cnt} اتصالات (مقاسة)"
             cell_w = ProcessTableCell(speed_txt, frac, is_throttled=is_throttled)
             self.table.setCellWidget(r, 3, cell_w)
 

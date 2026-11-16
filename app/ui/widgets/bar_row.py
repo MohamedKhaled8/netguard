@@ -140,7 +140,7 @@ class TrafficConsumersPanel(QFrame):
         self.lbl_title.setFont(tokens.get_sans_font(18, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
 
-        self.lbl_sub = QLabel("أكثر البرامج استخداماً لسرعة التنزيل.")
+        self.lbl_sub = QLabel("أكثر البرامج استهلاكاً للشبكة (حسب الاتصالات النشطة المقاسة - تقديري)")
         self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
@@ -183,7 +183,12 @@ class TrafficConsumersPanel(QFrame):
                 frac = min(1.0, max(0.08, s_cnt / max(1, max_sockets)))
                 color = tokens.STATUS_OK if getattr(p.category, "value", str(getattr(p, "category", ""))) in ("conferencing", "critical") else tokens.ACCENT
                 rows[i].lbl_name.setText(pname)
-                rows[i].update_data(f"{s_cnt} اتصالات", frac, color)
+                est_mb = getattr(p, "estimated_bandwidth_mbps", None)
+                if est_mb and est_mb > 0.05:
+                    text_data = f"{s_cnt} اتصال · ~{est_mb:.1f}M (تقديري)"
+                else:
+                    text_data = f"{s_cnt} اتصالات (مقاسة)"
+                rows[i].update_data(text_data, frac, color)
             else:
                 rows[i].lbl_name.setText("—")
                 rows[i].update_data("—", 0.0)
