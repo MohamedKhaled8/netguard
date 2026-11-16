@@ -100,8 +100,12 @@ class LayerChecklistRow(QFrame):
             self.lbl_desc.setText(desc)
         if status == "ok":
             self.chip.set_variant("ok-soft", "سليم")
+        elif status == "warn":
+            self.chip.set_variant("tag-warn", "يحتاج تحسين")
+        elif status in ("bad", "error"):
+            self.chip.set_variant("bad-soft", "خلل / انقطاع")
         else:
-            self.chip.set_variant("bad-soft", "يحتاج تحسين")
+            self.chip.set_variant("neutral", "غير متوفر")
 
 
 class DiagnosisView(QWidget):
@@ -134,12 +138,12 @@ class DiagnosisView(QWidget):
         v_col = QVBoxLayout()
         v_col.setSpacing(4)
 
-        self.cause_lbl = QLabel("الشبكة سليمة (لا توجد أعطال)")
+        self.cause_lbl = QLabel("جاهز للفحص الشامل")
         self.cause_lbl.setFont(tokens.get_sans_font(24, 600))
-        self.cause_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
+        self.cause_lbl.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.explanation_lbl = QLabel(
-            "جميع مسارات البيانات والراوتر وخوادم DNS تعمل ضمن الحدود المثالية دون أي تذبذب أو فقد حزم."
+            "اضغط على زر 'فحص شامل ودقيق الآن' لإجراء اختبار تفصيلي لجميع مسارات الاتصال والراوتر وخوادم DNS."
         )
         self.explanation_lbl.setFont(tokens.get_sans_font(14, 400))
         self.explanation_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.6;")
@@ -156,25 +160,25 @@ class DiagnosisView(QWidget):
         layout.addWidget(verdict_panel)
 
         # -------------------------------------------------------------
-        # 2. Vertical Checklist of the 5 Path Layers
+        # 2. Vertical Checklist of the 5 Path Layers + MTU/Buffer
         # -------------------------------------------------------------
         layers_panel = Panel(
-            title="طبقات مسار الاتصال الخمس",
+            title="طبقات مسار الاتصال الميدانية",
             subtitle="تدقيق تفصيلي لكل محطة في رحلة بياناتك",
             parent=self,
         )
 
-        self.row_l1 = LayerChecklistRow("01", "جهازك وبطاقة الشبكة", "1 ms", "بطاقة الشبكة وبرامج النظام تعمل بكفاءة ولا يوجد استنزاف للمعالج.", "ok")
-        self.row_l2 = LayerChecklistRow("02", "الراوتر المنزلي والواي فاي", "3 ms", "الاتصال بالراوتر المنزلي عبر 5GHz مستقر وقوة الإشارة ممتازة.", "ok")
-        self.row_l3 = LayerChecklistRow("03", "مزود الخدمة وكابل الألياف", "14 ms", "كابينة الألياف الضوئية ومسار التوصيل بشركة الاتصالات مستقر وطبيعي.", "ok")
-        self.row_l4 = LayerChecklistRow("04", "خوادم ترجمة العناوين (DNS)", "38 ms", "الخادم الحالي يعمل ولكن يوجد خادم أسرع متاح يقلل وقت فتح المواقع.", "warn")
-        self.row_l5 = LayerChecklistRow("05", "الإنترنت والشبكات السحابية", "27 ms", "الوصول للخوادم العالمية مستقر ونسبة فقدان الحزم 0%.", "ok")
+        self.row_l1 = LayerChecklistRow("01", "جهازك وبطاقة الشبكة", "—", "فحص بطاقة الشبكة والاتصال الداخلي.", "none")
+        self.row_l2 = LayerChecklistRow("02", "الراوتر المنزلي والواي فاي", "—", "فحص الاتصال بالراوتر المنزلي والبوابة الافتراضية.", "none")
+        self.row_l3 = LayerChecklistRow("03", "مزود الخدمة وكابل الألياف", "—", "فحص مسار التوصيل بالبنية التحتية لمزود الخدمة (ISP).", "none")
+        self.row_l4 = LayerChecklistRow("04", "خوادم ترجمة العناوين (DNS)", "—", "فحص استجابة خوادم تحليل أسماء النطاقات.", "none")
+        self.row_l5 = LayerChecklistRow("05", "الإنترنت والشبكات السحابية", "—", "فحص الاتصال بالخوادم العالمية ومعدل فقدان الحزم.", "none")
         self.row_l6 = LayerChecklistRow(
             "06",
-            "جاهزية مكالمات الفيديو والبث الحي (Zoom / Meet QoS)",
-            "Bufferbloat A+ · 0% فقدان",
-            "أولويات حزم DSCP 46 مفعلة والتذبذب 1.1ms. البث الحي محمي استباقياً من أي تقطيع أو انقطاع.",
-            "ok",
+            "كفاءة الحزم والتحمل (MTU Buffer)",
+            "—",
+            "اختبار كفاءة الحزم الكبيرة والتحمل تحت الضغط.",
+            "none",
         )
 
         layers_panel.main_layout.addWidget(self.row_l1)
@@ -221,12 +225,12 @@ class DiagnosisView(QWidget):
 
     def _populate_evidence_table(self) -> None:
         rows = [
-            ("Gateway Ping (Wi-Fi)", "1.0 ms", "< 15.0 ms", "سليم", "استجابة فورية للراوتر"),
-            ("WAN Ping (Cloudflare)", "24.0 ms", "< 80.0 ms", "سليم", "بنج مستقر مع الخوادم"),
-            ("DNS Latency (1.1.1.1)", "38.0 ms", "< 30.0 ms", "يحتاج تحسين", "خادم أسرع متاح (11ms)"),
-            ("Jitter (Latency Variance)", "2.8 ms", "< 10.0 ms", "سليم", "تذبذب منخفض ومثالي"),
-            ("Packet Loss", "0.0 %", "< 1.0 %", "سليم", "لا يوجد أي فقد للحزم"),
-            ("Meeting Guard Readiness", "Grade A+ (< 5ms)", "Grade B فأعلى", "سليم", "محمي وجاهز لبث 1080p"),
+            ("Gateway Ping (الراوتر)", "—", "< 25.0 ms", "—", "في انتظار الفحص"),
+            ("WAN Ping (الإنترنت)", "—", "< 80.0 ms", "—", "في انتظار الفحص"),
+            ("DNS Latency (استعلام)", "—", "< 100.0 ms", "—", "في انتظار الفحص"),
+            ("MTU Buffer Test (تحمل الحزم)", "—", "< 40% loss", "—", "في انتظار الفحص"),
+            ("Packet Loss (فقدان الحزم)", "—", "< 1.0 %", "—", "في انتظار الفحص"),
+            ("Wi-Fi Signal / Link (جودة الربط)", "—", "> 35%", "—", "في انتظار الفحص"),
         ]
         self.table.setRowCount(len(rows))
         for r_idx, r_data in enumerate(rows):
@@ -236,9 +240,101 @@ class DiagnosisView(QWidget):
                     item.setFont(tokens.get_mono_font(13, 500))
                 else:
                     item.setFont(tokens.get_sans_font(13, 400))
-                if val == "سليم":
-                    item.setForeground(QColor(tokens.STATUS_OK))
                 self.table.setItem(r_idx, c_idx, item)
+
+    def update_from_deep_scan(self, report) -> None:
+        """Update checklist and evidence table from genuine DeepScanReport."""
+        if not report:
+            return
+
+        # 1. Hero Verdict
+        if report.overall_health:
+            self.cause_lbl.setText("الشبكة سليمة (فحص ميداني شامل)")
+            self.cause_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
+        else:
+            self.cause_lbl.setText(report.summary_arabic)
+            self.cause_lbl.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+        self.explanation_lbl.setText(report.explanation_arabic)
+
+        # 2. Checklist Rows
+        # Step 0: Gateway, Step 1: DNS, Step 2: Global, Step 3: Device, Step 4: MTU
+        step_map = {s.step_id: s for s in report.steps}
+
+        s_dev = step_map.get(4)
+        if s_dev:
+            lat_str = f"{s_dev.latency_ms:.1f} ms" if s_dev.latency_ms is not None else "—"
+            st = "ok" if s_dev.passed else "bad"
+            self.row_l1.update_status(lat_str, st, s_dev.details)
+
+        s_gw = step_map.get(1)
+        if s_gw:
+            lat_str = f"{s_gw.latency_ms:.1f} ms" if s_gw.latency_ms is not None else "—"
+            st = "ok" if s_gw.passed else "bad"
+            self.row_l2.update_status(lat_str, st, s_gw.details)
+
+        s_ext = step_map.get(3)
+        if s_ext and s_gw:
+            gw_m = s_gw.latency_ms or 0.0
+            ext_m = s_ext.latency_ms or 0.0
+            isp_lat = gw_m + max(2.0, (ext_m - gw_m) * 0.35)
+            lat_str = f"{isp_lat:.1f} ms" if s_ext.passed else "—"
+            st = "ok" if s_ext.passed else "warn"
+            self.row_l3.update_status(lat_str, st, f"مسار التوصيل بشركة الاتصالات مستقر وطبيعي ({lat_str})." if s_ext.passed else "تأخر طفيف في مسار مزود الخدمة.")
+
+        s_dns = step_map.get(2)
+        if s_dns:
+            lat_str = f"{s_dns.latency_ms:.1f} ms" if s_dns.latency_ms is not None else "—"
+            st = "ok" if s_dns.passed else "warn"
+            self.row_l4.update_status(lat_str, st, s_dns.details)
+
+        if s_ext:
+            lat_str = f"{s_ext.latency_ms:.1f} ms" if s_ext.latency_ms is not None else "—"
+            st = "ok" if s_ext.passed else "bad"
+            self.row_l5.update_status(lat_str, st, s_ext.details)
+
+        s_mtu = step_map.get(5)
+        if s_mtu:
+            lat_str = f"{s_mtu.loss_pct:.0f}% فقدان"
+            st = "ok" if s_mtu.passed else "warn"
+            self.row_l6.update_status(lat_str, st, s_mtu.details)
+
+        # 3. Evidence Table Updates
+        table_updates = [
+            (0, f"{report.gateway_latency_ms:.1f} ms" if report.gateway_latency_ms is not None else "—",
+             "سليم" if (report.gateway_latency_ms and report.gateway_latency_ms < 25.0) else "يحتاج تحسين",
+             "استجابة فورية للراوتر" if (report.gateway_latency_ms and report.gateway_latency_ms < 25.0) else "استجابة متأخرة"),
+            (1, f"{report.external_latency_ms:.1f} ms" if report.external_latency_ms is not None else "—",
+             "سليم" if (report.external_latency_ms and report.external_latency_ms < 80.0) else "يحتاج تحسين",
+             "بنج مستقر مع الخوادم السحابية" if report.external_latency_ms else "غير متصل"),
+            (2, f"{report.dns_latency_ms:.1f} ms" if report.dns_latency_ms is not None else "—",
+             "سليم" if (report.dns_latency_ms and report.dns_latency_ms < 100.0) else "يحتاج تحسين",
+             "استعلامات DNS فورية" if report.dns_latency_ms else "تأخير في الاستعلام"),
+            (3, f"{s_mtu.loss_pct:.0f}%" if s_mtu else "—",
+             "سليم" if (s_mtu and s_mtu.passed) else "يحتاج تحسين",
+             "تحمل ممتاز لحزم 1472-Byte" if (s_mtu and s_mtu.passed) else "فقدان في حزم MTU"),
+            (4, f"{report.packet_loss_pct:.1f}%",
+             "سليم" if report.packet_loss_pct < 1.0 else "خلل",
+             "لا يوجد أي فقد للحزم" if report.packet_loss_pct == 0.0 else f"فقدان {report.packet_loss_pct:.1f}%"),
+            (5, f"{report.wifi_signal_pct:.0f}%" if report.wifi_signal_pct else "سلكي",
+             "سليم" if (not report.wifi_signal_pct or report.wifi_signal_pct >= 35.0) else "ضعيف",
+             "إشارة لاسلكية ممتازة" if (report.wifi_signal_pct and report.wifi_signal_pct >= 50.0) else "اتصال سلكي مستقر"),
+        ]
+
+        for row_idx, val_txt, st_txt, eval_txt in table_updates:
+            if row_idx < self.table.rowCount():
+                v_item = self.table.item(row_idx, 1) or QTableWidgetItem()
+                s_item = self.table.item(row_idx, 3) or QTableWidgetItem()
+                e_item = self.table.item(row_idx, 4) or QTableWidgetItem()
+
+                v_item.setText(val_txt)
+                s_item.setText(st_txt)
+                s_col = tokens.STATUS_OK if st_txt == "سليم" else (tokens.STATUS_WARN if st_txt in ("يحتاج تحسين", "ضعيف") else tokens.STATUS_BAD)
+                s_item.setForeground(QColor(s_col))
+                e_item.setText(eval_txt)
+
+                self.table.setItem(row_idx, 1, v_item)
+                self.table.setItem(row_idx, 3, s_item)
+                self.table.setItem(row_idx, 4, e_item)
 
     def update_diagnosis(self, diag: Diagnosis) -> None:
         """Update live verdict from diagnosis engine."""

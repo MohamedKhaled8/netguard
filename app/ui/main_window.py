@@ -791,24 +791,44 @@ class MainWindow(QMainWindow):
 
     def _on_run_deep_diagnosis(self) -> None:
         self.view_diagnosis.btn_run_audit.setEnabled(False)
-        self.view_diagnosis.btn_run_audit.setText("جاري الفحص الشامل...")
+        self.view_diagnosis.btn_run_audit.setText("جاري بدء الفحص الشامل...")
+
+        def _progress(step_idx: int, total_steps: int, msg: str):
+            QTimer.singleShot(0, lambda s=step_idx, t=total_steps, m=msg: self.view_diagnosis.btn_run_audit.setText(f"جاري الفحص ({s}/{t}): {m}"))
 
         def _worker():
-            time.sleep(1.0)
-            QTimer.singleShot(0, self._on_deep_diagnosis_finished)
+            try:
+                from app.diagnosis.deep_scan import DeepScanner
+                scanner = DeepScanner(platform=self.app_core.ctx.platform)
+                report = scanner.run_scan(progress_callback=_progress)
+                QTimer.singleShot(0, lambda r=report: self._on_deep_diagnosis_finished(r))
+            except Exception as exc:
+                logger.error("Deep scan failed with exception: %s", exc, exc_info=True)
+                QTimer.singleShot(0, lambda e=str(exc): self._on_deep_diagnosis_failed(e))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_deep_diagnosis_finished(self) -> None:
+    def _on_deep_diagnosis_finished(self, report) -> None:
         self.view_diagnosis.btn_run_audit.setEnabled(True)
         self.view_diagnosis.btn_run_audit.setText("فحص شامل ودقيق الآن")
-        last_diag = self.app_core.diagnosis.last_diagnosis
-        if last_diag:
-            self.view_diagnosis.update_diagnosis(last_diag)
+        if hasattr(self.view_diagnosis, "update_from_deep_scan"):
+            self.view_diagnosis.update_from_deep_scan(report)
         self.view_dashboard.log_autonomous_action(
             "اكتمال التدقيق التشخيصي الشامل",
-            "تم تدقيق جميع مسارات الراوتر ومزود الخدمة وخوادم DNS · مؤشرات الاستقرار 100%.",
-            level="success",
+            report.explanation_arabic,
+            level="success" if report.overall_health else "warning",
+        )
+
+    def _on_deep_diagnosis_failed(self, error_msg: str) -> None:
+        self.view_diagnosis.btn_run_audit.setEnabled(True)
+        self.view_diagnosis.btn_run_audit.setText("فحص شامل ودقيق الآن")
+        self.view_diagnosis.cause_lbl.setText("تعذر إكمال الفحص الشامل")
+        self.view_diagnosis.cause_lbl.setStyleSheet(f"color: {tokens.STATUS_BAD};")
+        self.view_diagnosis.explanation_lbl.setText(f"حدث خطأ أثناء إجراء الاختبارات الميدانية: {error_msg}")
+        self.view_dashboard.log_autonomous_action(
+            "فشل التدقيق التشخيصي",
+            f"حدث خطأ فني أثناء تنفيذ فحص الشبكة: {error_msg}",
+            level="error",
         )
 
     def _on_quick_flush_dns(self) -> None:
