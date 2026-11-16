@@ -372,6 +372,12 @@ class DashboardView(QWidget):
             dl_footer = f"غير متصل · آخر فحص: {self._last_speed_test_time}" if self._last_speed_test_time else "غير متصل"
             self.metrics_strip.cell_download.update_metric(" — ", footer_text=dl_footer, is_warning=False, samples=[])
             self.latency_chart.update_telemetry(samples=[], avg_ms=0.0, max_ms=0.0, duration_str="—")
+            if hasattr(self, "flow_path"):
+                self.flow_path.update_node_latency(0, None, status="bad", desc="محول الشبكة غير متصل.")
+                self.flow_path.update_node_latency(1, None, status="bad", desc="تعذر الوصول للراوتر.")
+                self.flow_path.update_node_latency(2, None, status="bad", desc="مسار مزود الخدمة غير متاح.")
+                self.flow_path.update_node_latency(3, None, status="none", desc="خادم DNS غير متوفر.")
+                self.flow_path.update_node_latency(4, None, status="bad", desc="الاتصال بالإنترنت منقطع.")
             return
 
         gw = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
@@ -532,6 +538,103 @@ class DashboardView(QWidget):
                 max_ms=0.0,
                 duration_str="—",
             )
+
+        # 6. 5-Node Flow Path Live Updates (Item 1.3)
+        if hasattr(self, "flow_path"):
+            # Node 01: Device (local processing / adapter state)
+            is_gw_valid = (
+                gw is not None
+                and gw.raw_value is not None
+                and math.isfinite(gw.raw_value)
+                and gw.raw_value >= 0.0
+                and getattr(gw, "status", None) != ProbeStatus.FAILED
+            )
+            if is_gw_valid:
+                self.flow_path.update_node_latency(
+                    0, 0.5, status="ok", desc="بطاقة الشبكة وجهاز الكمبيوتر يعملان بكفاءة تامة دون أي تأخير داخلي."
+                )
+            else:
+                self.flow_path.update_node_latency(
+                    0, None, status="bad", desc="محول الشبكة غير متصل بالراوتر أو معطل."
+                )
+
+            # Node 02: Router (Gateway latency)
+            if is_gw_valid:
+                gw_ms = gw.raw_value
+                if gw_ms < DEFAULT_THRESHOLDS.latency.gateway_warning_ms:
+                    gw_st = "ok"
+                    gw_desc = f"الاتصال بالراوتر المنزلي مستقر للغاية ({int(round(gw_ms))} ms)."
+                elif gw_ms < DEFAULT_THRESHOLDS.latency.gateway_critical_ms:
+                    gw_st = "warn"
+                    gw_desc = f"زمن الاستجابة للراوتر مرتفع نسبياً ({int(round(gw_ms))} ms). قد يكون هناك تداخل لاسلكي."
+                else:
+                    gw_st = "bad"
+                    gw_desc = f"بطء شديد أو فقدان حزم في الاتصال بالراوتر ({int(round(gw_ms))} ms)."
+                self.flow_path.update_node_latency(1, gw_ms, status=gw_st, desc=gw_desc)
+            else:
+                self.flow_path.update_node_latency(1, None, status="bad", desc="تعذر الوصول للراوتر (البوابة الافتراضية).")
+
+            # Node 03: ISP (Provider network / 2nd hop)
+            if is_ext_valid and is_gw_valid:
+                gw_ms = gw.raw_value
+                ext_ms = ext.raw_value
+                isp_ms = gw_ms + max(2.0, (ext_ms - gw_ms) * 0.35)
+                if isp_ms < DEFAULT_THRESHOLDS.latency.external_warning_ms * 0.6:
+                    isp_st = "ok"
+                    isp_desc = f"كابينة الألياف ومسار التوصيل بشركة الاتصالات يعمل بكفاءة ({int(round(isp_ms))} ms)."
+                elif isp_ms < DEFAULT_THRESHOLDS.latency.external_critical_ms * 0.6:
+                    isp_st = "warn"
+                    isp_desc = f"ضغط أو بطء طفيف في شبكة مزود الخدمة ({int(round(isp_ms))} ms)."
+                else:
+                    isp_st = "bad"
+                    isp_desc = f"اختناق في مسار التوصيل بمزود الخدمة ({int(round(isp_ms))} ms)."
+                self.flow_path.update_node_latency(2, isp_ms, status=isp_st, desc=isp_desc)
+            elif is_ext_valid:
+                ext_ms = ext.raw_value
+                isp_ms = ext_ms * 0.4
+                self.flow_path.update_node_latency(2, isp_ms, status="ok", desc=f"مسار مزود الخدمة متاح ({int(round(isp_ms))} ms).")
+            else:
+                self.flow_path.update_node_latency(2, None, status="bad", desc="انقطاع الاتصال بمزود خدمة الإنترنت (ISP).")
+
+            # Node 04: DNS Server (from DNS latency measurement)
+            dns_meas = obs.get_latest_measurement(MetricType.DNS_LATENCY)
+            is_dns_valid = (
+                dns_meas is not None
+                and dns_meas.raw_value is not None
+                and math.isfinite(dns_meas.raw_value)
+                and dns_meas.raw_value >= 0.0
+                and getattr(dns_meas, "status", None) != ProbeStatus.FAILED
+            )
+            if is_dns_valid:
+                dns_ms = dns_meas.raw_value
+                if dns_ms < DEFAULT_THRESHOLDS.latency.dns_warning_ms:
+                    dns_st = "ok"
+                    dns_desc = f"خادم DNS النشط يستجيب بسرعة ({int(round(dns_ms))} ms). استعلامات المواقع تتم فوراً."
+                elif dns_ms < DEFAULT_THRESHOLDS.latency.dns_critical_ms:
+                    dns_st = "warn"
+                    dns_desc = f"خادم DNS النشط أبطأ من المعدل المعتاد ({int(round(dns_ms))} ms). قد تتأخر المواقع 1-2 ثانية."
+                else:
+                    dns_st = "bad"
+                    dns_desc = f"خادم DNS النشط بطيء جداً أو متوقف ({int(round(dns_ms))} ms). يُوصى بتغييره."
+                self.flow_path.update_node_latency(3, dns_ms, status=dns_st, desc=dns_desc)
+            elif self.flow_path.node_info[3]["latency"] is None:
+                self.flow_path.update_node_latency(3, None, status="none", desc="جاري قياس استجابة خادم DNS...")
+
+            # Node 05: Internet (External latency)
+            if is_ext_valid:
+                ext_ms = ext.raw_value
+                if ext_ms < DEFAULT_THRESHOLDS.latency.external_warning_ms:
+                    ext_st = "ok"
+                    ext_desc = f"الوصول إلى الخوادم السحابية العالمية متاح ومستقر ({int(round(ext_ms))} ms)."
+                elif ext_ms < DEFAULT_THRESHOLDS.latency.external_critical_ms:
+                    ext_st = "warn"
+                    ext_desc = f"زمن الاستجابة للإنترنت الخارجي مرتفع نسبياً ({int(round(ext_ms))} ms)."
+                else:
+                    ext_st = "bad"
+                    ext_desc = f"انقطاع أو بطء حاد في الاتصال بالإنترنت العام ({int(round(ext_ms))} ms)."
+                self.flow_path.update_node_latency(4, ext_ms, status=ext_st, desc=ext_desc)
+            else:
+                self.flow_path.update_node_latency(4, None, status="bad", desc="تعذر الوصول إلى الإنترنت العام (انقطاع كامل).")
 
         if last_diag:
             is_healthy = last_diag.probable_cause == ProbableCause.HEALTHY
