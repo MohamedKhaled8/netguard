@@ -833,47 +833,85 @@ class MainWindow(QMainWindow):
 
     def _on_quick_flush_dns(self) -> None:
         self.view_remediation.btn_flush_now.setEnabled(False)
-        self.view_remediation.btn_flush_now.setText("جاري التنظيف...")
+        self.view_remediation.btn_flush_now.setText("جاري تنظيف كاش DNS...")
 
         def _worker():
-            import subprocess
             try:
-                subprocess.run(
-                    ["ipconfig", "/flushdns"],
-                    check=True,
-                    capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-                )
-            except Exception:
-                pass
-            QTimer.singleShot(1000, lambda: self._on_quick_flush_dns_done())
+                ok, msg = self.app_core.ctx.platform.flush_dns_cache()
+                QTimer.singleShot(0, lambda s=ok, m=msg: self._on_quick_flush_dns_done(s, m))
+            except Exception as exc:
+                logger.error("Flush DNS failed: %s", exc, exc_info=True)
+                QTimer.singleShot(0, lambda e=str(exc): self._on_quick_flush_dns_done(False, e))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_quick_flush_dns_done(self) -> None:
+    def _on_quick_flush_dns_done(self, success: bool, msg: str) -> None:
         self.view_remediation.btn_flush_now.setEnabled(True)
-        self.view_remediation.btn_flush_now.setText("تم تفريغ كاش DNS بنجاح ✓")
+        if success:
+            self.view_remediation.btn_flush_now.setText("تم تفريغ كاش DNS بنجاح ✓")
+            self.view_dashboard.log_autonomous_action(
+                "تفريغ كاش الـ DNS الفوري",
+                f"تم تفريغ كاش العناوين بنجاح ({msg}).",
+                level="success",
+            )
+        else:
+            self.view_remediation.btn_flush_now.setText("فشل تفريغ DNS ✕")
+            self.view_dashboard.log_autonomous_action(
+                "فشل تفريغ كاش DNS",
+                f"تعذر تفريغ كاش أسماء النطاقات: {msg}",
+                level="error",
+            )
         QTimer.singleShot(2500, lambda: self.view_remediation.btn_flush_now.setText("تنظيف كاش DNS"))
-        self.view_dashboard.log_autonomous_action(
-            "تفريغ كاش الـ DNS الفوري",
-            "تم تفريغ كاش العناوين بالكامل وتحديث مسارات الوصول للمواقع العالمية بنجاح.",
-            level="success",
-        )
 
     def _on_quick_renew_ip(self) -> None:
-        self.view_remediation.btn_renew_ip.setEnabled(False)
-        self.view_remediation.btn_renew_ip.setText("جاري التجديد...")
-        QTimer.singleShot(1200, self._on_quick_renew_ip_done)
+        platform = self.app_core.ctx.platform
+        if not platform.is_elevated():
+            self.view_remediation.btn_renew_ip.setEnabled(True)
+            self.view_remediation.btn_renew_ip.setText("تجديد IP (يتطلب صلاحيات مسؤول)")
+            self.view_dashboard.log_autonomous_action(
+                "تعذر تجديد عنوان IP",
+                "يتطلب تجديد عنوان IP (DHCP Lease) صلاحيات مسؤول لنظام Windows. يُرجى تشغيل البرنامج كمسؤول.",
+                level="warning",
+            )
+            QTimer.singleShot(3500, lambda: self.view_remediation.btn_renew_ip.setText("تجديد مسار الاتصال"))
+            return
 
-    def _on_quick_renew_ip_done(self) -> None:
+        self.view_remediation.btn_renew_ip.setEnabled(False)
+        self.view_remediation.btn_renew_ip.setText("جاري تجديد IP (انقطاع لحظي)...")
+        iface = platform.get_primary_interface() or "Wi-Fi"
+        gw_before = platform.get_default_gateway()
+
+        def _worker():
+            try:
+                ok, msg = platform.renew_ip_lease(iface)
+                time.sleep(1.0)
+                gw_after = platform.get_default_gateway() or gw_before
+                ping_ok, ping_ms = platform.ping(gw_after, timeout_sec=2.0) if gw_after else (False, 0.0)
+                success = ok and ping_ok
+                QTimer.singleShot(0, lambda s=success, i=iface, g=gw_after, p=ping_ms, m=msg: self._on_quick_renew_ip_finished(s, i, g, p, m))
+            except Exception as exc:
+                logger.error("IP renewal failed: %s", exc, exc_info=True)
+                QTimer.singleShot(0, lambda i=iface, g=gw_before, e=str(exc): self._on_quick_renew_ip_finished(False, i, g, 0.0, e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_quick_renew_ip_finished(self, success: bool, iface: str, gw: Optional[str], ping_ms: float, msg: str) -> None:
         self.view_remediation.btn_renew_ip.setEnabled(True)
-        self.view_remediation.btn_renew_ip.setText("تم تجديد مسار الاتصال ✓")
-        QTimer.singleShot(2500, lambda: self.view_remediation.btn_renew_ip.setText("تجديد مسار الاتصال"))
-        self.view_dashboard.log_autonomous_action(
-            "تجديد مسار الاتصال بالراوتر",
-            "تم تأكيد استقرار عنوان IP الداخلي والاتصال عبر تردد 5GHz بنجاح.",
-            level="success",
-        )
+        if success:
+            self.view_remediation.btn_renew_ip.setText("تم تجديد عنوان IP بنجاح ✓")
+            self.view_dashboard.log_autonomous_action(
+                "تجديد عنوان IP (DHCP Lease)",
+                f"تم تجديد إيجار DHCP لمحول {iface} بنجاح والتأكد من استجابة البوابة {gw} خلال {ping_ms:.1f} ms.",
+                level="success",
+            )
+        else:
+            self.view_remediation.btn_renew_ip.setText("فشل تجديد IP ✕")
+            self.view_dashboard.log_autonomous_action(
+                "فشل تجديد عنوان IP",
+                f"فشل تجديد إيجار DHCP على المحول {iface}: {msg}",
+                level="error",
+            )
+        QTimer.singleShot(3000, lambda: self.view_remediation.btn_renew_ip.setText("تجديد مسار الاتصال"))
 
     def _on_apply_settings(self) -> None:
         mode_data = self.view_settings.mode_combo.currentData() or self.view_settings.mode_combo.currentText()
