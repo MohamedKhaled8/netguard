@@ -2,9 +2,11 @@
 
 import pytest
 import os
+import math
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from PySide6.QtWidgets import QApplication
+from app.ui import tokens
 from app.ui.widgets.status_card import StatusCard
 from app.ui.widgets.realtime_chart import RealTimePlotWidget
 from app.ui.widgets.metric_cell import MetricCell, MetricsStrip
@@ -243,4 +245,258 @@ def test_speed_test_scan_signal_and_window_integration(qapp):
     assert win._last_speed_test_time == "18:00"
     assert win.view_dashboard._last_speed_test_time == "18:00"
     assert "آخر فحص: 18:00" in win.view_dashboard.metrics_strip.cell_download.footer_lbl.text()
+
+
+def test_dashboard_telemetry_negative_bandwidth(qapp):
+    view = DashboardView()
+    now = datetime.now(timezone.utc)
+    mock_obs = MagicMock()
+
+    # Negative RX bandwidth measurement
+    neg_rx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_RX_BYTES_PER_SEC,
+        raw_value=-500.0,
+        normalized_value=-500.0,
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    mock_obs.get_latest_measurement.side_effect = lambda mt: neg_rx if mt == MetricType.BANDWIDTH_RX_BYTES_PER_SEC else None
+    mock_obs.get_sliding_window.return_value = []
+
+    view.update_telemetry(mock_obs, None)
+
+    # Negative RX must show " — ", not "-0.00"
+    assert view.metrics_strip.cell_download.val_lbl.text() == " — "
+    assert "غير متصل" in view.metrics_strip.cell_download.footer_lbl.text()
+    assert view.metrics_strip.cell_download.sparkline.samples == []
+    assert view.metrics_strip.cell_download.status_color == tokens.TEXT_MUTED
+
+    # Test negative TX with valid RX
+    valid_rx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_RX_BYTES_PER_SEC,
+        raw_value=12_500_000.0,
+        normalized_value=12_500_000.0,
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    neg_tx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_TX_BYTES_PER_SEC,
+        raw_value=-1000.0,
+        normalized_value=-1000.0,
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+
+    def get_latest_with_neg_tx(mt):
+        if mt == MetricType.BANDWIDTH_RX_BYTES_PER_SEC:
+            return valid_rx
+        if mt == MetricType.BANDWIDTH_TX_BYTES_PER_SEC:
+            return neg_tx
+        return None
+
+    mock_obs.get_latest_measurement.side_effect = get_latest_with_neg_tx
+    view.update_telemetry(mock_obs, None)
+
+    assert view.metrics_strip.cell_download.val_lbl.text() == "100"
+    # Negative TX must fallback to 0.0, not display negative Mbps
+    assert "الرفع 0.00 Mbps" in view.metrics_strip.cell_download.footer_lbl.text()
+
+
+def test_dashboard_telemetry_nan_bandwidth(qapp):
+    view = DashboardView()
+    now = datetime.now(timezone.utc)
+    mock_obs = MagicMock()
+
+    # NaN RX bandwidth measurement
+    nan_rx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_RX_BYTES_PER_SEC,
+        raw_value=float("nan"),
+        normalized_value=float("nan"),
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    mock_obs.get_latest_measurement.side_effect = lambda mt: nan_rx if mt == MetricType.BANDWIDTH_RX_BYTES_PER_SEC else None
+    mock_obs.get_sliding_window.return_value = []
+
+    view.update_telemetry(mock_obs, None)
+
+    # NaN RX must show " — ", not "nan"
+    assert view.metrics_strip.cell_download.val_lbl.text() == " — "
+    assert "غير متصل" in view.metrics_strip.cell_download.footer_lbl.text()
+    assert view.metrics_strip.cell_download.sparkline.samples == []
+    # Status dot must be muted, not STATUS_OK (green)
+    assert view.metrics_strip.cell_download.status_color == tokens.TEXT_MUTED
+
+    # Test NaN TX with valid RX
+    valid_rx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_RX_BYTES_PER_SEC,
+        raw_value=12_500_000.0,
+        normalized_value=12_500_000.0,
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    nan_tx = Measurement(
+        source=MeasurementSource.PSUTIL_INTERFACE,
+        target_or_interface="Ethernet",
+        metric_type=MetricType.BANDWIDTH_TX_BYTES_PER_SEC,
+        raw_value=float("nan"),
+        normalized_value=float("nan"),
+        unit="bytes/sec",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+
+    def get_latest_with_nan_tx(mt):
+        if mt == MetricType.BANDWIDTH_RX_BYTES_PER_SEC:
+            return valid_rx
+        if mt == MetricType.BANDWIDTH_TX_BYTES_PER_SEC:
+            return nan_tx
+        return None
+
+    mock_obs.get_latest_measurement.side_effect = get_latest_with_nan_tx
+    view.update_telemetry(mock_obs, None)
+
+    assert view.metrics_strip.cell_download.val_lbl.text() == "100"
+    assert "الرفع 0.00 Mbps" in view.metrics_strip.cell_download.footer_lbl.text()
+
+
+def test_dashboard_telemetry_nan_and_negative_latency_jitter_loss(qapp):
+    view = DashboardView()
+    now = datetime.now(timezone.utc)
+    mock_obs = MagicMock()
+
+    # NaN latency, jitter, loss
+    nan_lat = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="1.1.1.1",
+        metric_type=MetricType.EXTERNAL_LATENCY,
+        raw_value=float("nan"),
+        normalized_value=float("nan"),
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    nan_jit = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="1.1.1.1",
+        metric_type=MetricType.JITTER_MS,
+        raw_value=float("nan"),
+        normalized_value=float("nan"),
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    nan_loss = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="192.168.1.1",
+        metric_type=MetricType.GATEWAY_PACKET_LOSS,
+        raw_value=float("nan"),
+        normalized_value=float("nan"),
+        unit="ratio",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+
+    def get_latest_nan(mt):
+        return {
+            MetricType.EXTERNAL_LATENCY: nan_lat,
+            MetricType.JITTER_MS: nan_jit,
+            MetricType.GATEWAY_PACKET_LOSS: nan_loss,
+        }.get(mt)
+
+    mock_obs.get_latest_measurement.side_effect = get_latest_nan
+    # Sliding window with NaN values
+    mock_obs.get_sliding_window.side_effect = lambda mt: [nan_lat] if mt == MetricType.EXTERNAL_LATENCY else []
+
+    # Must execute cleanly without ValueError (cannot convert float NaN to integer)
+    view.update_telemetry(mock_obs, None)
+
+    assert view.metrics_strip.cell_latency.val_lbl.text() == " — "
+    assert "غير متصل" in view.metrics_strip.cell_latency.footer_lbl.text()
+    assert view.metrics_strip.cell_latency.sparkline.samples == []
+
+    assert view.metrics_strip.cell_jitter.val_lbl.text() == " — "
+    assert "غير متصل" in view.metrics_strip.cell_jitter.footer_lbl.text()
+    assert view.metrics_strip.cell_jitter.sparkline.samples == []
+
+    assert view.metrics_strip.cell_loss.val_lbl.text() == " — "
+    assert "غير متصل" in view.metrics_strip.cell_loss.footer_lbl.text()
+    assert view.metrics_strip.cell_loss.sparkline.samples == []
+
+    # Test negative latency, jitter, loss
+    neg_lat = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="1.1.1.1",
+        metric_type=MetricType.EXTERNAL_LATENCY,
+        raw_value=-25.0,
+        normalized_value=-25.0,
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    neg_jit = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="1.1.1.1",
+        metric_type=MetricType.JITTER_MS,
+        raw_value=-5.0,
+        normalized_value=-5.0,
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    neg_loss = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="192.168.1.1",
+        metric_type=MetricType.GATEWAY_PACKET_LOSS,
+        raw_value=-0.1,
+        normalized_value=-0.1,
+        unit="ratio",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+
+    def get_latest_neg(mt):
+        return {
+            MetricType.EXTERNAL_LATENCY: neg_lat,
+            MetricType.JITTER_MS: neg_jit,
+            MetricType.GATEWAY_PACKET_LOSS: neg_loss,
+        }.get(mt)
+
+    mock_obs.get_latest_measurement.side_effect = get_latest_neg
+    view.update_telemetry(mock_obs, None)
+
+    assert view.metrics_strip.cell_latency.val_lbl.text() == " — "
+    assert view.metrics_strip.cell_jitter.val_lbl.text() == " — "
+    assert view.metrics_strip.cell_loss.val_lbl.text() == " — "
+
+    # Test infinite values (math.isinf)
+    inf_lat = Measurement(
+        source=MeasurementSource.ICMP_ECHO,
+        target_or_interface="1.1.1.1",
+        metric_type=MetricType.EXTERNAL_LATENCY,
+        raw_value=float("inf"),
+        normalized_value=float("inf"),
+        unit="ms",
+        status=ProbeStatus.SUCCESS,
+        timestamp=now,
+    )
+    mock_obs.get_latest_measurement.side_effect = lambda mt: inf_lat if mt == MetricType.EXTERNAL_LATENCY else None
+    view.update_telemetry(mock_obs, None)
+    assert view.metrics_strip.cell_latency.val_lbl.text() == " — "
+
 

@@ -12,6 +12,7 @@ Full responsive reflow across >=1100px, 700-1099px, and <700px breakpoints.
 """
 
 from __future__ import annotations
+import math
 import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -380,11 +381,21 @@ class DashboardView(QWidget):
         tx = obs.get_latest_measurement(MetricType.BANDWIDTH_TX_BYTES_PER_SEC)
 
         # 1. Latency Tile
-        if ext and ext.raw_value is not None and getattr(ext, "status", None) != ProbeStatus.FAILED:
+        is_ext_valid = (
+            ext is not None
+            and ext.raw_value is not None
+            and math.isfinite(ext.raw_value)
+            and ext.raw_value >= 0.0
+            and getattr(ext, "status", None) != ProbeStatus.FAILED
+        )
+        if is_ext_valid:
             lat_val = ext.raw_value
             is_warn = lat_val >= 80.0
             ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY) or []
-            ext_samples = [s.raw_value for s in ext_window] if ext_window else []
+            ext_samples = [
+                s.raw_value for s in ext_window
+                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
+            ] if ext_window else []
             self.metrics_strip.cell_latency.update_metric(
                 f"{int(round(lat_val))}",
                 footer_text="تحذير · استجابة بطيئة" if is_warn else "ممتاز · مستقر",
@@ -395,11 +406,21 @@ class DashboardView(QWidget):
             self.metrics_strip.cell_latency.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
 
         # 2. Jitter Tile
-        if jit and jit.raw_value is not None and getattr(jit, "status", None) != ProbeStatus.FAILED:
+        is_jit_valid = (
+            jit is not None
+            and jit.raw_value is not None
+            and math.isfinite(jit.raw_value)
+            and jit.raw_value >= 0.0
+            and getattr(jit, "status", None) != ProbeStatus.FAILED
+        )
+        if is_jit_valid:
             jit_val = jit.raw_value
             is_warn = jit_val >= 10.0
             jit_window = obs.get_sliding_window(MetricType.JITTER_MS) or []
-            jit_samples = [s.raw_value for s in jit_window] if jit_window else []
+            jit_samples = [
+                s.raw_value for s in jit_window
+                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
+            ] if jit_window else []
             self.metrics_strip.cell_jitter.update_metric(
                 f"{jit_val:.1f}",
                 footer_text="تذبذب مرتفع" if is_warn else "جيد · يؤثر على المكالمات",
@@ -410,11 +431,21 @@ class DashboardView(QWidget):
             self.metrics_strip.cell_jitter.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
 
         # 3. Packet Loss Tile
-        if loss and loss.raw_value is not None and getattr(loss, "status", None) != ProbeStatus.FAILED:
+        is_loss_valid = (
+            loss is not None
+            and loss.raw_value is not None
+            and math.isfinite(loss.raw_value)
+            and loss.raw_value >= 0.0
+            and getattr(loss, "status", None) != ProbeStatus.FAILED
+        )
+        if is_loss_valid:
             loss_val = loss.raw_value * 100.0
             is_warn = loss_val > 1.0
             loss_window = obs.get_sliding_window(MetricType.GATEWAY_PACKET_LOSS) or []
-            loss_samples = [s.raw_value * 100.0 for s in loss_window] if loss_window else []
+            loss_samples = [
+                s.raw_value * 100.0 for s in loss_window
+                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
+            ] if loss_window else []
             self.metrics_strip.cell_loss.update_metric(
                 f"{loss_val:.1f}",
                 footer_text="فقدان حزم ملحوظ" if is_warn else "ممتاز · لا حزم ضائعة",
@@ -425,9 +456,23 @@ class DashboardView(QWidget):
             self.metrics_strip.cell_loss.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
 
         # 4. Download / Throughput Tile (Item 1.1)
-        if rx and rx.raw_value is not None and getattr(rx, "status", None) != ProbeStatus.FAILED:
+        is_rx_valid = (
+            rx is not None
+            and rx.raw_value is not None
+            and math.isfinite(rx.raw_value)
+            and rx.raw_value >= 0.0
+            and getattr(rx, "status", None) != ProbeStatus.FAILED
+        )
+        if is_rx_valid:
             rx_mbps = (rx.raw_value * 8.0) / 1_000_000.0
-            tx_mbps = ((tx.raw_value * 8.0) / 1_000_000.0) if (tx and tx.raw_value is not None and getattr(tx, "status", None) != ProbeStatus.FAILED) else 0.0
+            is_tx_valid = (
+                tx is not None
+                and tx.raw_value is not None
+                and math.isfinite(tx.raw_value)
+                and tx.raw_value >= 0.0
+                and getattr(tx, "status", None) != ProbeStatus.FAILED
+            )
+            tx_mbps = ((tx.raw_value * 8.0) / 1_000_000.0) if is_tx_valid else 0.0
 
             if rx_mbps >= 100.0:
                 val_str = f"{rx_mbps:.0f}"
@@ -443,7 +488,11 @@ class DashboardView(QWidget):
                 footer_text = upload_str
 
             rx_window = obs.get_sliding_window(MetricType.BANDWIDTH_RX_BYTES_PER_SEC) or []
-            rx_samples = [(s.raw_value * 8.0) / 1_000_000.0 for s in rx_window] if rx_window else []
+            rx_samples = [
+                (s.raw_value * 8.0) / 1_000_000.0
+                for s in rx_window
+                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
+            ] if rx_window else []
 
             self.metrics_strip.cell_download.update_metric(
                 val_str=val_str,
@@ -464,13 +513,16 @@ class DashboardView(QWidget):
 
         # 5. Latency Chart Sliding Window
         ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY) or []
-        if ext_window:
-            y_vals = [s.raw_value for s in ext_window]
+        valid_chart_samples = [
+            s.raw_value for s in ext_window
+            if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
+        ] if ext_window else []
+        if valid_chart_samples:
             self.latency_chart.update_telemetry(
-                samples=y_vals,
-                avg_ms=sum(y_vals) / len(y_vals),
-                max_ms=max(y_vals),
-                duration_str=f"{len(y_vals)} ث",
+                samples=valid_chart_samples,
+                avg_ms=sum(valid_chart_samples) / len(valid_chart_samples),
+                max_ms=max(valid_chart_samples),
+                duration_str=f"{len(valid_chart_samples)} ث",
             )
         else:
             self.latency_chart.update_telemetry(
