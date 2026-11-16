@@ -133,16 +133,16 @@ class DNSView(QWidget):
         self.lbl_curr_name = QLabel("DNS مزود الخدمة (المعتمد بجهازك حالياً)")
         self.lbl_curr_name.setFont(tokens.get_sans_font(14, 500))
         self.lbl_curr_name.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
-        self.lbl_curr_ms = QLabel("38.0 ms")
+        self.lbl_curr_ms = QLabel("—")
         self.lbl_curr_ms.setFont(tokens.get_mono_font(14, 500))
-        self.lbl_curr_ms.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+        self.lbl_curr_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         curr_top.addWidget(self.lbl_curr_name)
         curr_top.addStretch()
         curr_top.addWidget(self.lbl_curr_ms)
         curr_row.addLayout(curr_top)
 
-        self.bar_curr = HorizontalProgressBar(height=8, fill_color=tokens.STATUS_WARN)
-        self.bar_curr.set_fraction(0.75)
+        self.bar_curr = HorizontalProgressBar(height=8, fill_color=tokens.TEXT_MUTED)
+        self.bar_curr.set_fraction(0.0)
         curr_row.addWidget(self.bar_curr)
         bars_col.addLayout(curr_row)
 
@@ -150,19 +150,19 @@ class DNSView(QWidget):
         fast_row = QVBoxLayout()
         fast_row.setSpacing(4)
         fast_top = QHBoxLayout()
-        self.lbl_fast_name = QLabel("Cloudflare · 1.1.1.1 (الأسرع عالمياً ومحلياً)")
+        self.lbl_fast_name = QLabel("— (اضغط فحص خوادم DNS للقياس)")
         self.lbl_fast_name.setFont(tokens.get_sans_font(14, 500))
         self.lbl_fast_name.setStyleSheet(f"color: {tokens.TEXT};")
-        self.lbl_fast_ms = QLabel("11.0 ms")
+        self.lbl_fast_ms = QLabel("—")
         self.lbl_fast_ms.setFont(tokens.get_mono_font(14, 500))
-        self.lbl_fast_ms.setStyleSheet(f"color: {tokens.STATUS_OK};")
+        self.lbl_fast_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         fast_top.addWidget(self.lbl_fast_name)
         fast_top.addStretch()
         fast_top.addWidget(self.lbl_fast_ms)
         fast_row.addLayout(fast_top)
 
         self.bar_fast = HorizontalProgressBar(height=8, fill_color=tokens.STATUS_OK)
-        self.bar_fast.set_fraction(0.22)
+        self.bar_fast.set_fraction(0.0)
         fast_row.addWidget(self.bar_fast)
         bars_col.addLayout(fast_row)
 
@@ -209,40 +209,8 @@ class DNSView(QWidget):
         root_layout.addWidget(scroll)
 
     def _populate_default_table(self) -> None:
-        default_servers = [
-            ("01", "Cloudflare DNS", "1.1.1.1", 11.2, "1.0.0.1"),
-            ("02", "Google Public DNS", "8.8.8.8", 14.5, "8.8.4.4"),
-            ("03", "Quad9 Secure", "9.9.9.9", 22.0, "149.112.112.112"),
-            ("04", "OpenDNS Home", "208.67.222.222", 28.4, "208.67.220.220"),
-            ("05", "AdGuard DNS", "94.140.14.14", 34.0, "94.140.15.15"),
-        ]
-        self.table.setRowCount(len(default_servers))
-        for r, (rank, name, ip, ms, sec_ip) in enumerate(default_servers):
-            # Rank
-            r_item = QTableWidgetItem(rank)
-            r_item.setFont(tokens.get_mono_font(12, 500))
-            self.table.setItem(r, 0, r_item)
-
-            # Name
-            n_item = QTableWidgetItem(name)
-            n_item.setFont(tokens.get_sans_font(13, 500))
-            self.table.setItem(r, 1, n_item)
-
-            # IP
-            ip_item = QTableWidgetItem(ip)
-            ip_item.setFont(tokens.get_mono_font(13, 400))
-            self.table.setItem(r, 2, ip_item)
-
-            # Bar & Latency Widget
-            bar_w = RankedServerRow(ms, max_ms=50.0)
-            self.table.setCellWidget(r, 3, bar_w)
-
-            # Apply Button
-            btn_apply = SecondaryButton("طبّق")
-            btn_apply.setFixedHeight(30)
-            btn_apply.setFont(tokens.get_sans_font(12, 500))
-            btn_apply.clicked.connect(lambda checked=False, p_ip=ip, s_ip=sec_ip, n_str=name: self.apply_dns_requested.emit(p_ip, s_ip, n_str))
-            self.table.setCellWidget(r, 4, btn_apply)
+        """Initialize empty table awaiting user or autonomous benchmark."""
+        self.table.setRowCount(0)
 
     def update_rankings(
         self,
@@ -309,7 +277,7 @@ class DNSView(QWidget):
             if not active_name:
                 active_name = best.name.replace(" Primary", "").replace(" Secondary", "")
         else:
-            act_ms = max(best_ms + 18.0, 38.0)
+            act_ms = active_ms if (active_ms is not None and active_ms > 0) else best_ms
 
         # Health color determinations
         def _get_color(ms_val: float) -> str:

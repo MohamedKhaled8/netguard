@@ -508,27 +508,37 @@ class MainWindow(QMainWindow):
 
     def _async_inspect_network_environment(self) -> None:
         def _worker():
-            from app.platform.windows.network_info import (
-                get_wifi_details,
-                get_active_dns_servers,
-                get_isp_and_public_ip,
-            )
-            iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
-            gw = self.app_core.ctx.platform.get_default_gateway() or "192.168.1.1"
-            wifi = get_wifi_details()
-            dns_servers = get_active_dns_servers(iface)
-            isp = get_isp_and_public_ip()
+            try:
+                from app.platform.windows.network_info import (
+                    get_wifi_details,
+                    get_active_dns_servers,
+                    get_isp_and_public_ip,
+                )
+                iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
+                gw = self.app_core.ctx.platform.get_default_gateway() or "192.168.1.1"
+                wifi = get_wifi_details()
+                dns_servers = get_active_dns_servers(iface)
+                isp = get_isp_and_public_ip()
 
-            info = {
-                "iface": iface,
-                "gateway": gw,
-                "wifi": wifi,
-                "dns": dns_servers,
-                "isp": isp,
-            }
-            self.bridge.network_info_ready.emit(info)
+                info = {
+                    "iface": iface,
+                    "gateway": gw,
+                    "wifi": wifi,
+                    "dns": dns_servers,
+                    "isp": isp,
+                }
+                QTimer.singleShot(0, lambda: self._safe_emit_network_info(info))
+            except Exception:
+                pass
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _safe_emit_network_info(self, info: Dict[str, Any]) -> None:
+        try:
+            if hasattr(self, "bridge") and self.bridge:
+                self.bridge.network_info_ready.emit(info)
+        except (RuntimeError, Exception):
+            pass
 
     def _on_network_info_ready(self, info: Dict[str, Any]) -> None:
         self._active_dns_servers = info.get("dns", [])

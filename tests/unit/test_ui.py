@@ -81,8 +81,9 @@ def test_traffic_view_and_session_cards(qapp):
     traffic_view = TrafficView()
     assert traffic_view is not None
 
-    # Check default completed session reports
-    assert traffic_view.reports_list_layout.count() >= 3
+    # Initial state starts honest and empty
+    assert len(traffic_view.report_cards) == 0
+    assert traffic_view.reports_list_layout.count() >= 1
 
     # Toggle simulated Zoom call
     traffic_view._on_sim_zoom_clicked()
@@ -92,10 +93,10 @@ def test_traffic_view_and_session_cards(qapp):
     # Close simulated Zoom call
     traffic_view._on_sim_zoom_clicked()
     assert traffic_view.active_session_layout.count() == 0
-    assert traffic_view.reports_list_layout.count() >= 4
+    assert len(traffic_view.report_cards) == 1
 
     # Test expanding report card
-    report_card = traffic_view.reports_list_layout.itemAt(0).widget()
+    report_card = traffic_view.report_cards[0]
     assert report_card.is_expanded is False
     assert report_card.detail_container.isHidden() is True
     report_card._toggle_expand()

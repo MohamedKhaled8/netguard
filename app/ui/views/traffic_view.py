@@ -106,9 +106,10 @@ class TrafficView(QWidget):
         btn_box = QHBoxLayout()
         btn_box.setSpacing(10)
 
+        # Simulation button hidden in production
         self.btn_sim_zoom = SecondaryButton("محاكاة مكالمة Zoom")
+        self.btn_sim_zoom.setVisible(False)
         self.btn_sim_zoom.clicked.connect(self._on_sim_zoom_clicked)
-        btn_box.addWidget(self.btn_sim_zoom)
 
         self.btn_refresh = PrimaryButton("فحص البرامج النشطة")
         btn_box.addWidget(self.btn_refresh)
@@ -123,7 +124,7 @@ class TrafficView(QWidget):
         # -------------------------------------------------------------
         self.guard_panel = Panel(
             title="درع مكالمات الفيديو والبث المباشر - Meeting Guard",
-            subtitle="تثبيت أولوية الحزم وكبح تحميلات الخلفية تلقائياً لمنع أي تجميد للصورة أو انقطاع للصوت",
+            subtitle="مراقبة جلسات مكالمات الفيديو وحماية استقرار الاتصال وتعليق الإجراءات التي تسبب انقطاعاً لحظياً",
             parent=self,
         )
 
@@ -149,7 +150,7 @@ class TrafficView(QWidget):
 
         text_col.addLayout(lbl_row)
 
-        lbl_guard_desc = QLabel("عند تفعيل هذا الخيار، سيتم خفض سرعة تحديثات ويندوز والتحميلات الكبيرة فور رصد اجتماع.")
+        lbl_guard_desc = QLabel("عند تفعيل هذا الخيار، يقوم درع الاجتماعات برصد مكالمات الفيديو وتعليق الإجراءات التي تسبب انقطاعاً لحظياً طوال مدة المكالمة.")
         lbl_guard_desc.setFont(tokens.get_sans_font(12, 400))
         lbl_guard_desc.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         lbl_guard_desc.setWordWrap(True)
@@ -257,7 +258,7 @@ class TrafficView(QWidget):
     def _close_session_by_name(self, proc_name: str) -> None:
         """Callback from ActiveSessionCard to end a session and produce a report."""
         self.session_tracker.close_session(proc_name)
-        if "zoom" in proc_name.lower():
+        if hasattr(self, "btn_sim_zoom") and "zoom" in proc_name.lower():
             self.btn_sim_zoom.setText("محاكاة مكالمة Zoom")
         self._refresh_sessions_ui()
 
@@ -298,47 +299,66 @@ class TrafficView(QWidget):
                 item.widget().deleteLater()
 
         completed = self.session_tracker.get_completed_sessions()
+        if not completed:
+            empty_lbl = QLabel("لا توجد جلسات مكالمات سابقة مسجلة — ستظهر التقارير تلقائياً بعد إنهاء أي اجتماع (Zoom, Teams, Meet).")
+            empty_lbl.setFont(tokens.get_sans_font(13, 400))
+            empty_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 0;")
+            empty_lbl.setAlignment(Qt.AlignCenter)
+            self.reports_list_layout.addWidget(empty_lbl)
+            return
+
         for session in completed:
             card = SessionReportCard(session=session, parent=self.reports_list_container)
             self.report_cards.append(card)
             self.reports_list_layout.addWidget(card)
 
     def _populate_default_processes(self) -> None:
-        default_procs = [
-            ("Windows Update (TiWorker.exe)", "4102", "محدود تلقائياً", "36.7 Mbps", 0.75, True, "12"),
-            ("Google Chrome", "8912", "طبيعي", "19.8 Mbps", 0.40, False, "48"),
-            ("Microsoft Teams", "12040", "أولوية عالية", "4.1 Mbps", 0.15, False, "8"),
-            ("OneDrive", "6140", "طبيعي", "1.6 Mbps", 0.08, False, "4"),
-            ("Steam Client", "9820", "طبيعي", "0.3 Mbps", 0.03, False, "6"),
-        ]
-        self.table.setRowCount(len(default_procs))
-        for r, (name, pid, tag, speed, frac, is_thr, sockets) in enumerate(default_procs):
-            # Name
-            item_name = QTableWidgetItem(name)
-            item_name.setFont(tokens.get_sans_font(13, 500))
-            self.table.setItem(r, 0, item_name)
-
-            # PID
-            item_pid = QTableWidgetItem(pid)
-            item_pid.setFont(tokens.get_mono_font(12, 400))
-            self.table.setItem(r, 1, item_pid)
-
-            # Tag Chip
-            chip = Chip(tag, variant="tag-warn" if is_thr else ("tag-ok" if "أولوية" in tag else "ok-soft"))
-            self.table.setCellWidget(r, 2, chip)
-
-            # Bar & Speed Widget
-            cell_w = ProcessTableCell(speed, frac, is_throttled=is_thr)
-            self.table.setCellWidget(r, 3, cell_w)
-
-            # Sockets
-            item_sock = QTableWidgetItem(sockets)
-            item_sock.setFont(tokens.get_mono_font(12, 400))
-            self.table.setItem(r, 4, item_sock)
+        """Initialize empty process table awaiting user scan."""
+        self.table.setRowCount(0)
 
     def update_profiles(self, profiles: List[Any], conferencing_active: bool = False) -> None:
         """Update live processes from traffic controller."""
         self._refresh_sessions_ui()
+        if not profiles:
+            self.table.setRowCount(0)
+            return
+
+        sorted_p = sorted(profiles, key=lambda p: getattr(p, "active_socket_count", 0), reverse=True)[:25]
+        self.table.setRowCount(len(sorted_p))
+        max_sockets = max((getattr(p, "active_socket_count", 1) for p in sorted_p), default=1)
+
+        for r, p in enumerate(sorted_p):
+            pname = getattr(p, "name", "مجهول")
+            pid_str = str(getattr(p, "pid", 0))
+            sockets_cnt = getattr(p, "active_socket_count", 0)
+            cat = str(getattr(p, "category", ""))
+            is_conf = "conferencing" in cat.lower() or "critical" in cat.lower()
+            tag_text = "أولوية مكالمات" if is_conf else ("نظام أساسي" if getattr(p, "is_protected_system_process", False) else "طبيعي")
+
+            # Name
+            item_name = QTableWidgetItem(pname)
+            item_name.setFont(tokens.get_sans_font(13, 500))
+            self.table.setItem(r, 0, item_name)
+
+            # PID
+            item_pid = QTableWidgetItem(pid_str)
+            item_pid.setFont(tokens.get_mono_font(12, 400))
+            self.table.setItem(r, 1, item_pid)
+
+            # Tag Chip
+            chip = Chip(tag_text, variant="tag-ok" if is_conf else "ok-soft")
+            self.table.setCellWidget(r, 2, chip)
+
+            # Bar & Sockets Cell
+            frac = min(1.0, max(0.08, sockets_cnt / max(1, max_sockets)))
+            speed_txt = f"{sockets_cnt} اتصالات"
+            cell_w = ProcessTableCell(speed_txt, frac, is_throttled=False)
+            self.table.setCellWidget(r, 3, cell_w)
+
+            # Sockets
+            item_sock = QTableWidgetItem(str(sockets_cnt))
+            item_sock.setFont(tokens.get_mono_font(12, 400))
+            self.table.setItem(r, 4, item_sock)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

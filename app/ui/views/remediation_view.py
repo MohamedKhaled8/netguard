@@ -307,10 +307,12 @@ class RemediationView(QWidget):
         self.events_layout = QVBoxLayout()
         self.events_layout.setSpacing(0)
 
-        # Default sample events
-        self.events_layout.addWidget(AuditEventRow("15:32:45", "تكدس حزم عند الراوتر (Bufferbloat)", "تحديد سرعة Windows Update بـ 40% من الخط", is_success=True))
-        self.events_layout.addWidget(AuditEventRow("14:15:10", "بطء استجابة خادم DNS المحلي", "تفريغ كاش DNS والتبديل إلى Cloudflare 1.1.1.1", is_success=True))
-        self.events_layout.addWidget(AuditEventRow("11:04:22", "انقطاع عابر في إشارة الواي فاي", "تجديد اتصال بطاقة الشبكة مع الراوتر المنزلي", is_success=True))
+        # Empty initial ledger state awaiting real actions
+        self._empty_ledger_lbl = QLabel("لا توجد إجراءات مسجلة بعد — يعمل النظام في وضع المراقبة التلقائية.")
+        self._empty_ledger_lbl.setFont(tokens.get_sans_font(13, 400))
+        self._empty_ledger_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 8px;")
+        self._empty_ledger_lbl.setAlignment(Qt.AlignCenter)
+        self.events_layout.addWidget(self._empty_ledger_lbl)
 
         self.ledger_panel.main_layout.addLayout(self.events_layout)
         layout.addWidget(self.ledger_panel)
@@ -339,13 +341,19 @@ class RemediationView(QWidget):
 
     def update_audit_log(self, audit_records: List[Any]) -> None:
         """Update audit ledger from real database records with authentic timestamps."""
-        if not audit_records:
-            return
         # Clear previous rows
         while self.events_layout.count():
             item = self.events_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+        if not audit_records:
+            empty_lbl = QLabel("لا توجد إجراءات مسجلة بعد — يعمل النظام في وضع المراقبة التلقائية.")
+            empty_lbl.setFont(tokens.get_sans_font(13, 400))
+            empty_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 8px;")
+            empty_lbl.setAlignment(Qt.AlignCenter)
+            self.events_layout.addWidget(empty_lbl)
+            return
 
         for rec in audit_records[:10]:
             ts = getattr(rec, "timestamp", None)
