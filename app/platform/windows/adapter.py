@@ -200,6 +200,30 @@ class WindowsPlatformAdapter(IPlatformAdapter):
     def get_interface_dns_servers(self, interface_name: str) -> List[str]:
         """Query configured DNS servers for the specified interface."""
         try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"(Get-DnsClientServerAddress -InterfaceAlias '{interface_name}' -AddressFamily IPv4).ServerAddresses",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=4.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                ips = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                valid = [ip for ip in ips if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip)]
+                if valid:
+                    return valid
+        except Exception:
+            pass
+
+        try:
             proc = subprocess.run(
                 ["netsh", "interface", "ip", "show", "dns", f"name={interface_name}"],
                 capture_output=True,
@@ -219,50 +243,95 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return []
 
     def set_interface_dns_servers(self, interface_name: str, servers: List[str]) -> Tuple[bool, str]:
-        """Configure primary and secondary static DNS or DHCP."""
+        """Configure primary and secondary static DNS or DHCP, and verify via Get-DnsClientServerAddress."""
+        if not self.is_elevated():
+            return False, "Requires Administrator privileges to modify network adapter DNS."
+
         if not servers:
             # Set to DHCP
             try:
-                proc = subprocess.run(
-                    ["netsh", "interface", "ip", "set", "dns", f"name={interface_name}", "source=dhcp"],
+                cmd_ps = [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    f"Set-DnsClientServerAddress -InterfaceAlias '{interface_name}' -ResetServerAddresses",
+                ]
+                proc_ps = subprocess.run(
+                    cmd_ps,
                     capture_output=True,
                     text=True,
                     timeout=8.0,
                     check=False,
                     creationflags=_NO_WINDOW,
                 )
-                return proc.returncode == 0, proc.stdout or proc.stderr
+                if proc_ps.returncode != 0:
+                    proc = subprocess.run(
+                        ["netsh", "interface", "ip", "set", "dns", f"name={interface_name}", "source=dhcp"],
+                        capture_output=True,
+                        text=True,
+                        timeout=8.0,
+                        check=False,
+                        creationflags=_NO_WINDOW,
+                    )
+                    if proc.returncode != 0:
+                        return False, proc.stderr or proc.stdout
+
+                self.flush_dns_cache()
+                return True, f"Configured DNS on {interface_name} to DHCP."
             except Exception as exc:
                 return False, str(exc)
 
-        # Set primary static DNS
-        primary = servers[0]
+        # Set static DNS
         try:
-            proc = subprocess.run(
-                ["netsh", "interface", "ip", "set", "dns", f"name={interface_name}", "static", primary, "primary"],
+            ps_servers_arg = "@(" + ", ".join(f"'{s}'" for s in servers) + ")"
+            cmd_ps = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"Set-DnsClientServerAddress -InterfaceAlias '{interface_name}' -ServerAddresses {ps_servers_arg}",
+            ]
+            proc_ps = subprocess.run(
+                cmd_ps,
                 capture_output=True,
                 text=True,
                 timeout=8.0,
                 check=False,
                 creationflags=_NO_WINDOW,
             )
-            if proc.returncode != 0:
-                out = (proc.stderr or "") + (proc.stdout or "")
-                if "elevation" in out.lower() or "administrator" in out.lower() or "access is denied" in out.lower():
-                    return False, "Requires Administrator privileges to modify network adapter DNS."
-                return False, proc.stderr or proc.stdout
 
-            # Add subsequent servers as index=2, 3...
-            for idx, secondary in enumerate(servers[1:], start=2):
-                subprocess.run(
-                    ["netsh", "interface", "ip", "add", "dns", f"name={interface_name}", secondary, f"index={idx}"],
+            if proc_ps.returncode != 0:
+                primary = servers[0]
+                proc = subprocess.run(
+                    ["netsh", "interface", "ip", "set", "dns", f"name={interface_name}", "static", primary, "primary"],
                     capture_output=True,
                     text=True,
-                    timeout=5.0,
+                    timeout=8.0,
                     check=False,
                     creationflags=_NO_WINDOW,
                 )
-            return True, f"Configured DNS to {', '.join(servers)}"
+                if proc.returncode != 0:
+                    out = (proc.stderr or "") + (proc.stdout or "")
+                    return False, out
+
+                for idx, secondary in enumerate(servers[1:], start=2):
+                    proc_sec = subprocess.run(
+                        ["netsh", "interface", "ip", "add", "dns", f"name={interface_name}", secondary, f"index={idx}"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5.0,
+                        check=False,
+                        creationflags=_NO_WINDOW,
+                    )
+                    if proc_sec.returncode != 0:
+                        return False, f"Failed to add secondary DNS {secondary}: {proc_sec.stderr or proc_sec.stdout}"
+
+            self.flush_dns_cache()
+            actual_servers = self.get_interface_dns_servers(interface_name)
+            if any(s in actual_servers for s in servers):
+                return True, f"Configured and verified DNS on {interface_name} to {', '.join(servers)}."
+            return True, f"Configured DNS on {interface_name} to {', '.join(servers)}."
         except Exception as exc:
             return False, str(exc)
 

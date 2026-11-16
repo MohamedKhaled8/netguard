@@ -43,7 +43,8 @@ class SwitchDNSResolverAction(RemediationAction):
         original_servers = await loop.run_in_executor(None, platform.get_interface_dns_servers, iface)
         pre_state = {
             "interface_name": iface,
-            "original_servers": original_servers,
+            "original_servers": list(original_servers),
+            "is_dhcp": len(original_servers) == 0,
             "target_servers": target_servers,
             "timestamp": time.time(),
         }
@@ -86,19 +87,22 @@ class SwitchDNSResolverAction(RemediationAction):
             return False, f"DNS resolution failed after switch: {exc}", {"error": str(exc)}
 
     async def rollback(self, platform: IPlatformAdapter, context: Dict[str, Any], pre_state: Any) -> Tuple[bool, str]:
-        """Restore original DNS configuration from pre_state snapshot."""
+        """Restore exact original DNS configuration from pre_state snapshot."""
         if not pre_state or not isinstance(pre_state, dict):
             return False, "Invalid pre-state snapshot; cannot rollback"
 
-        iface = pre_state.get("interface_name")
+        iface = pre_state.get("interface_name") or platform.get_primary_interface()
         original_servers = pre_state.get("original_servers", [])
+        is_dhcp = pre_state.get("is_dhcp", False)
+        target = [] if (is_dhcp or not original_servers) else original_servers
         loop = asyncio.get_running_loop()
 
         ok, msg = await loop.run_in_executor(
-            None, platform.set_interface_dns_servers, iface, original_servers
+            None, platform.set_interface_dns_servers, iface, target
         )
         await loop.run_in_executor(None, platform.flush_dns_cache)
 
         if ok:
-            return True, f"Successfully restored original DNS ({', '.join(original_servers) if original_servers else 'DHCP'})"
+            mode_desc = "DHCP (تلقائي)" if not target else f"Static ({', '.join(target)})"
+            return True, f"Successfully restored exact original DNS ({mode_desc})"
         return False, f"Failed to restore original DNS on {iface}: {msg}"

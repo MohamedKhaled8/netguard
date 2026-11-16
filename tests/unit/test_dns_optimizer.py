@@ -85,3 +85,55 @@ async def test_dns_optimizer_selection(monkeypatch):
     best = await optimizer.auto_optimize_dns()
     assert best is not None
     assert best.ip == "1.1.1.1"
+
+
+@pytest.mark.asyncio
+async def test_dns_benchmark_multi_round_median(monkeypatch):
+    bench = DNSBenchmark(rounds=3)
+    assert bench.rounds == 3
+
+    score = ResolverScore(
+        ip="1.1.1.1",
+        name="Cloudflare",
+        median_latency_ms=14.0,
+        mean_latency_ms=14.5,
+        min_latency_ms=12.0,
+        max_latency_ms=18.0,
+        stdev_latency_ms=1.5,
+        success_rate=1.0,
+        failure_rate=0.0,
+        composite_score=94.5,
+    )
+    assert score.median_latency_ms == 14.0
+    assert score.success_rate == 1.0
+
+
+@pytest.mark.asyncio
+async def test_dns_optimizer_policy_suppression():
+    platform = MockDNSPlatform()
+    bus = EventBus()
+    from unittest.mock import MagicMock
+    mock_settings = MagicMock()
+    mock_settings.get_policy.return_value = False  # Suppress auto_switch_dns
+
+    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus, settings=mock_settings)
+    best = await optimizer.auto_optimize_dns()
+    # Must be suppressed by policy
+    assert best is None
+
+
+@pytest.mark.asyncio
+async def test_switch_dns_action_rollback_restores_dhcp():
+    from app.remediation.actions.switch_dns import SwitchDNSResolverAction
+    action = SwitchDNSResolverAction()
+    platform = MockDNSPlatform()
+    
+    # Pre-state with DHCP (empty original_servers)
+    pre_state = {
+        "interface_name": "Wi-Fi",
+        "original_servers": [],
+        "is_dhcp": True,
+    }
+    ok, msg = await action.rollback(platform, {}, pre_state)
+    assert ok is True
+    assert "DHCP" in msg

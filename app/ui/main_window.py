@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
         best = scores[0]
         secondary_ip = "1.0.0.1" if "1.1.1.1" in best.ip else ("8.8.4.4" if "8.8.8.8" in best.ip else "")
         best_name = best.name.replace(" Primary", "").replace(" Secondary", "")
-        best_ms = best.mean_latency_ms
+        best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
 
         self._last_best_dns = (best.ip, secondary_ip, best_name, best_ms)
 
@@ -639,7 +639,7 @@ class MainWindow(QMainWindow):
                 break
 
         if matched_score is not None:
-            active_ms = matched_score.mean_latency_ms
+            active_ms = getattr(matched_score, "median_latency_ms", 0.0) or matched_score.mean_latency_ms
             active_name = matched_score.name.replace(" Primary", "").replace(" Secondary", "")
         else:
             active_ms = max(best_ms + 18.0, 38.0)
@@ -656,15 +656,20 @@ class MainWindow(QMainWindow):
         is_healthy = (active_ms <= 60.0)
         is_auto_mode = (self.app_core.orchestrator.mode == OperatingMode.AUTONOMOUS_SAFE)
 
-        # Anti-flapping hysteresis:
-        # Minimum 15 minutes (900s) cooldown, at least 20ms faster, candidate must be healthy (<75ms)
+        # Policy & anti-flapping hysteresis check:
+        policy_enabled = True
+        us = getattr(self.app_core.ctx, "settings", getattr(self.app_core.ctx, "user_settings", None))
+        if us and hasattr(us, "get_policy"):
+            policy_enabled = us.get_policy("auto_switch_dns", True)
+
         now = time.time()
         time_since_switch = now - getattr(self, "_last_dns_switch_time", 0.0)
-        cooldown_ok = time_since_switch >= 900.0
+        cfg_cooldown = getattr(self.app_core.config.thresholds, "cooldowns", {}).get("switch_dns_resolver", 45.0)
+        cooldown_ok = time_since_switch >= cfg_cooldown
         significant_gain = (active_ms - best_ms) >= 20.0
         candidate_fast = (best_ms < 75.0)
 
-        if is_auto_mode and (not is_optimal) and (not is_healthy) and significant_gain and candidate_fast and cooldown_ok:
+        if policy_enabled and is_auto_mode and (not is_optimal) and (not is_healthy) and significant_gain and candidate_fast and cooldown_ok:
             self._last_dns_switch_time = now
             self._on_apply_dns_requested(best.ip, secondary_ip, best_name)
             active_name = best_name
@@ -732,14 +737,22 @@ class MainWindow(QMainWindow):
 
     def _on_dashboard_revert_dns(self) -> None:
         iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
-        self.app_core.ctx.platform.set_interface_dns_servers(iface, [])
+        pre = getattr(self, "_last_dns_pre_state", None)
+        if pre and not pre.get("is_dhcp") and pre.get("original_servers"):
+            restore_target = pre["original_servers"]
+            desc = f"تمت استعادة خوادم DNS السابقة: {', '.join(restore_target)}"
+        else:
+            restore_target = []
+            desc = "تمت استعادة إعدادات DNS التلقائية من الراوتر (DHCP)."
+
+        ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, restore_target)
         self.app_core.ctx.platform.flush_dns_cache()
         self._last_dns_switch_time = time.time()
-        self._active_dns_servers = []
+        self._active_dns_servers = restore_target
         self.view_dashboard.log_autonomous_action(
-            "استعادة DNS التلقائي",
-            "تمت العودة لاستلام خوادم DNS تلقائياً من الراوتر (DHCP).",
-            level="success",
+            "استعادة إعدادات DNS",
+            desc,
+            level="success" if ok else "error",
         )
         self._on_run_dns_benchmark()
 
@@ -751,32 +764,44 @@ class MainWindow(QMainWindow):
             servers = [primary_ip]
             if secondary_ip:
                 servers.append(secondary_ip)
+
+            prev_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface)
+            is_dhcp = len(prev_servers) == 0
+            self._last_dns_pre_state = {
+                "interface": iface,
+                "original_servers": list(prev_servers),
+                "is_dhcp": is_dhcp,
+            }
+
             ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, servers)
             self.app_core.ctx.platform.flush_dns_cache()
 
-            now_time = datetime.now().strftime("%I:%M:%S %p")
             import uuid
             from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
 
             if ok:
                 self.view_dashboard.log_autonomous_action(
                     f"اعتماد خادم {name}",
-                    f"تم تحديث إعدادات DNS إلى {primary_ip} بنجاح وتفريغ كاش العناوين لتسريع التصفح.",
+                    f"تم تحديث إعدادات DNS إلى {primary_ip} والتحقق عبر Get-DnsClientServerAddress.",
                     level="success",
                 )
                 st = ActionExecutionStatus.SUCCEEDED
                 err_msg = None
             else:
                 st = ActionExecutionStatus.FAILED
-                err_msg = "Requires Administrator privileges"
+                err_msg = msg
 
             record = ActionExecutionRecord(
                 id=str(uuid.uuid4()),
                 action_id="switch_dns_resolver",
-                action_name=f"تحويل تلقائي إلى {name} ({primary_ip})",
+                action_name=f"تحويل إلى {name} ({primary_ip})",
                 risk_level=RiskLevel.LEVEL_2_CONTROLLED,
                 trigger_diagnosis_id="autonomous_optimizer",
-                pre_remedy_metrics={"interface": iface},
+                pre_remedy_metrics={
+                    "interface": iface,
+                    "original_servers": list(prev_servers),
+                    "is_dhcp": is_dhcp,
+                },
                 post_remedy_metrics={"active_servers": servers, "status": msg},
                 status=st,
                 execution_duration_ms=45.0,

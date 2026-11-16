@@ -249,7 +249,10 @@ class DNSView(QWidget):
             ip_item.setFont(tokens.get_mono_font(13, 400))
             self.table.setItem(r, 2, ip_item)
 
-            bar_w = RankedServerRow(s.mean_latency_ms, max_ms=max_ms)
+            med_ms = getattr(s, "median_latency_ms", 0.0) or s.mean_latency_ms
+            succ_pct = getattr(s, "success_rate", 1.0) * 100.0
+            bar_w = RankedServerRow(med_ms, max_ms=max_ms)
+            bar_w.setToolTip(f"الوسيط: {med_ms:.1f} ms · المتوسط: {s.mean_latency_ms:.1f} ms · النجاح: {succ_pct:.0f}%")
             self.table.setCellWidget(r, 3, bar_w)
 
             btn_apply = SecondaryButton("معتمد حالياً ✓" if is_active_row else "طبّق")
@@ -264,12 +267,12 @@ class DNSView(QWidget):
             self.table.setCellWidget(r, 4, btn_apply)
 
         best = scores[0]
-        best_ms = best.mean_latency_ms
+        best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
 
         if active_ms is not None and active_ms > 0:
             act_ms = active_ms
         elif matched_score is not None:
-            act_ms = matched_score.mean_latency_ms
+            act_ms = getattr(matched_score, "median_latency_ms", 0.0) or matched_score.mean_latency_ms
             if not active_name:
                 active_name = matched_score.name.replace(" Primary", "").replace(" Secondary", "")
         elif is_optimal:
