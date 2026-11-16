@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QFrame,
     QApplication,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen
@@ -408,14 +409,15 @@ class MainWindow(QMainWindow):
         # Load initial day strip stability slots from measurement database
         self._refresh_day_strips()
 
+        # Load initial timeline narrative from stored incidents and audit records
+        self._refresh_timeline_from_records()
+
     def _switch_view(self, index: int, active_btn: QPushButton) -> None:
         self.stack.setCurrentIndex(index)
         for b in self.nav_buttons:
             b.setChecked(b == active_btn)
 
-        if index == 3 and self.view_dns.table.rowCount() == 0:
-            QTimer.singleShot(500, self._on_run_dns_benchmark)
-        elif index == 4:
+        if index == 4:
             self._on_scan_traffic()
 
     def _on_sidebar_mode_changed(self, mode_val: Any) -> None:
@@ -473,6 +475,14 @@ class MainWindow(QMainWindow):
         # Dashboard quick scan / speed test request
         self.view_dashboard.quick_scan_requested.connect(self._on_quick_scan_requested)
 
+        # Dashboard timeline requests
+        self.view_dashboard.timeline_panel.view_evidence_requested.connect(
+            lambda: self._switch_view(1, self.btn_diag)
+        )
+        self.view_dashboard.timeline_panel.rollback_requested.connect(
+            self._on_timeline_rollback_requested
+        )
+
     def _on_quick_scan_requested(self) -> None:
         """Trigger on-demand telemetry / speed test cycle and update timestamp."""
         def _worker():
@@ -509,6 +519,46 @@ class MainWindow(QMainWindow):
                 "تم تنفيذ الإجراء وتأكيد استقرار البنج وسرعة الاستجابة بنجاح.",
                 level="success",
             )
+            self._refresh_timeline_from_records()
+
+    def _refresh_timeline_from_records(self) -> None:
+        """Refresh timeline in dashboard view with most recent incident and audit records."""
+        try:
+            inc_repo = getattr(self.app_core.ctx, "incidents", None)
+            aud_repo = getattr(self.app_core.ctx, "audit", None)
+            incidents = inc_repo.get_recent(limit=1) if inc_repo and hasattr(inc_repo, "get_recent") else []
+            audits = aud_repo.get_recent(limit=1) if aud_repo and hasattr(aud_repo, "get_recent") else []
+            latest_inc = incidents[0] if incidents else None
+            latest_aud = audits[0] if audits else None
+            self.view_dashboard.update_timeline_from_records(latest_inc, latest_aud)
+        except Exception as e:
+            logger.warning("Failed to refresh timeline from records: %s", e)
+
+    def _on_timeline_rollback_requested(self) -> None:
+        """Handle user rollback request from timeline panel."""
+        aud_repo = getattr(self.app_core.ctx, "audit", None)
+        audits = aud_repo.get_recent(limit=1) if aud_repo and hasattr(aud_repo, "get_recent") else []
+        if not audits:
+            QMessageBox.information(self, "تراجع عن الإصلاح", "لا توجد إجراءات مسجلة يمكن التراجع عنها.")
+            return
+
+        rec = audits[0]
+        if rec.action_id == "switch_dns_resolver" or "dns" in rec.action_id:
+            self._on_dashboard_revert_dns()
+        elif hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
+            def _worker():
+                ok, msg = asyncio.run(self.app_core.orchestrator.rollback_action(rec.id))
+                QTimer.singleShot(0, lambda: self._on_timeline_rollback_done(ok, msg, rec))
+            threading.Thread(target=_worker, daemon=True).start()
+        else:
+            QMessageBox.information(self, "تراجع عن الإصلاح", f"الإجراء '{rec.action_name}' غير قابل للتراجع المباشر.")
+
+    def _on_timeline_rollback_done(self, success: bool, msg: str, record: Any) -> None:
+        if success:
+            QMessageBox.information(self, "تراجع عن الإصلاح", f"تم التراجع عن الإجراء بنجاح: {record.action_name}")
+            self._refresh_timeline_from_records()
+        else:
+            QMessageBox.warning(self, "فشل التراجع", f"تعذر التراجع عن الإجراء: {msg}")
 
     def _async_inspect_network_environment(self) -> None:
         def _worker():
@@ -754,6 +804,28 @@ class MainWindow(QMainWindow):
             desc,
             level="success" if ok else "error",
         )
+
+        import uuid
+        from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+        revert_record = ActionExecutionRecord(
+            id=str(uuid.uuid4()),
+            action_id="revert_dns_resolver",
+            action_name="استعادة إعدادات DNS",
+            risk_level=RiskLevel.LEVEL_2_CONTROLLED,
+            trigger_diagnosis_id="user_revert",
+            pre_remedy_metrics={"interface": iface},
+            post_remedy_metrics={"active_servers": restore_target, "status": msg},
+            status=ActionExecutionStatus.ROLLED_BACK if ok else ActionExecutionStatus.FAILED,
+            execution_duration_ms=30.0,
+            verification_duration_ms=10.0,
+            error_message=None if ok else msg,
+            rollback_performed=True,
+            rollback_success=ok,
+        )
+        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+        if ctx and hasattr(ctx, "audit"):
+            ctx.audit.save(revert_record)
+        self._refresh_timeline_from_records()
         self._on_run_dns_benchmark()
 
     def _on_apply_dns_requested(self, primary_ip: str, secondary_ip: str, name: str) -> None:
@@ -809,7 +881,10 @@ class MainWindow(QMainWindow):
                 error_message=err_msg,
                 rollback_performed=False,
             )
-            self.app_core.ctx.audit.save(record)
+            ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+            if ctx and hasattr(ctx, "audit"):
+                ctx.audit.save(record)
+            QTimer.singleShot(0, self._refresh_timeline_from_records)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -859,6 +934,29 @@ class MainWindow(QMainWindow):
             report.explanation_arabic,
             level="success" if report.overall_health else "warning",
         )
+        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+        if ctx and hasattr(ctx, "incidents"):
+            from app.core.models.metrics import Diagnosis, ProbableCause, DiagnosisSeverity, Evidence, MetricType
+            ev_list = []
+            if report.external_latency_ms:
+                ev_list.append(Evidence(metric_type=MetricType.EXTERNAL_LATENCY, target="external", observed_value=report.external_latency_ms, threshold_value=50.0, condition=">"))
+            if report.packet_loss_pct > 0:
+                ev_list.append(Evidence(metric_type=MetricType.EXTERNAL_PACKET_LOSS, target="external", observed_value=report.packet_loss_pct, threshold_value=2.0, condition=">"))
+            if report.bufferbloat_delta_ms and report.bufferbloat_delta_ms > 0:
+                ev_list.append(Evidence(metric_type=MetricType.BUFFERBLOAT_BLOAT_FACTOR, target="gateway", observed_value=report.bufferbloat_delta_ms, threshold_value=25.0, condition=">"))
+
+            cause = ProbableCause.BUFFERBLOAT_UPLOAD if (report.bufferbloat_delta_ms and report.bufferbloat_delta_ms > 30) else ProbableCause.UNKNOWN_ANOMALY
+            if not report.overall_health or ev_list:
+                diag = Diagnosis(
+                    probable_cause=cause,
+                    confidence=0.88,
+                    severity=DiagnosisSeverity.MEDIUM if not report.overall_health else DiagnosisSeverity.INFO,
+                    supporting_evidence=ev_list,
+                    explanation=report.explanation_arabic,
+                    recommended_actions=["تحسين مسار الاتصال"],
+                )
+                ctx.incidents.save(diag)
+        self._refresh_timeline_from_records()
 
     def _on_deep_diagnosis_failed(self, error_msg: str) -> None:
         self.view_diagnosis.btn_run_audit.setEnabled(True)
@@ -902,6 +1000,27 @@ class MainWindow(QMainWindow):
                 f"تعذر تفريغ كاش أسماء النطاقات: {msg}",
                 level="error",
             )
+
+        import uuid
+        from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+        flush_record = ActionExecutionRecord(
+            id=str(uuid.uuid4()),
+            action_id="flush_dns_cache",
+            action_name="تفريغ كاش DNS الفوري",
+            risk_level=RiskLevel.LEVEL_1_LOW,
+            trigger_diagnosis_id="manual_flush",
+            pre_remedy_metrics={},
+            post_remedy_metrics={"result": msg},
+            status=ActionExecutionStatus.SUCCEEDED if success else ActionExecutionStatus.FAILED,
+            execution_duration_ms=25.0,
+            verification_duration_ms=10.0,
+            error_message=None if success else msg,
+            rollback_performed=False,
+        )
+        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+        if ctx and hasattr(ctx, "audit"):
+            ctx.audit.save(flush_record)
+        self._refresh_timeline_from_records()
         QTimer.singleShot(2500, lambda: self.view_remediation.btn_flush_now.setText("تنظيف كاش DNS"))
 
     def _on_quick_renew_ip(self) -> None:
@@ -952,6 +1071,27 @@ class MainWindow(QMainWindow):
                 f"فشل تجديد إيجار DHCP على المحول {iface}: {msg}",
                 level="error",
             )
+
+        import uuid
+        from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+        renew_record = ActionExecutionRecord(
+            id=str(uuid.uuid4()),
+            action_id="renew_dhcp_lease",
+            action_name=f"تجديد عنوان IP ({iface})",
+            risk_level=RiskLevel.LEVEL_2_CONTROLLED,
+            trigger_diagnosis_id="manual_renew",
+            pre_remedy_metrics={"interface": iface, "gateway_before": gw},
+            post_remedy_metrics={"gateway_after": gw, "gateway_ping_ms": ping_ms, "result": msg},
+            status=ActionExecutionStatus.SUCCEEDED if success else ActionExecutionStatus.FAILED,
+            execution_duration_ms=1000.0,
+            verification_duration_ms=ping_ms,
+            error_message=None if success else msg,
+            rollback_performed=False,
+        )
+        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+        if ctx and hasattr(ctx, "audit"):
+            ctx.audit.save(renew_record)
+        self._refresh_timeline_from_records()
         QTimer.singleShot(3000, lambda: self.view_remediation.btn_renew_ip.setText("تجديد مسار الاتصال"))
 
     def _on_apply_settings(self) -> None:
