@@ -59,7 +59,7 @@ class DNSBenchmark:
         loop = asyncio.get_running_loop()
 
         def _sync_bench():
-            res = dns.resolver.Resolver()
+            res = dns.resolver.Resolver(configure=False)
             res.nameservers = [ip]
             res.lifetime = self.timeout_sec
             res.timeout = self.timeout_sec

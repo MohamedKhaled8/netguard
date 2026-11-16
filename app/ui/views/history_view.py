@@ -7,8 +7,8 @@ Follows the reference design system strictly:
 """
 
 from __future__ import annotations
-from typing import List, Any
-from datetime import datetime
+from typing import List, Optional, Any
+from datetime import date, datetime, timedelta
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -23,6 +23,25 @@ from app.ui.widgets.buttons import SecondaryButton
 from app.ui.widgets.chip import Chip
 from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.day_strip import DayStrip
+from app.core.models.metrics import Diagnosis, DiagnosisSeverity, ProbableCause
+
+CAUSE_TITLES_AR: dict[Any, str] = {
+    ProbableCause.HEALTHY: "الاتصال مستقر وسليم",
+    ProbableCause.LOCAL_INTERFACE_DOWN: "محول الشبكة متوقف",
+    ProbableCause.LOCAL_GATEWAY_UNREACHABLE: "تعذر الوصول إلى الراوتر المنزلي",
+    ProbableCause.LOCAL_GATEWAY_HIGH_LATENCY: "ارتفاع زمن استجابة الراوتر المنزلي",
+    ProbableCause.WI_FI_SIGNAL_DEGRADED: "ضعف إشارة الشبكة اللاسلكية (Wi-Fi)",
+    ProbableCause.CELLULAR_SIGNAL_DEGRADED: "ضعف إشارة اتصال الهاتف المحمول",
+    ProbableCause.ISP_UPSTREAM_OUTAGE: "انقطاع الاتصال عند مزود الخدمة (ISP)",
+    ProbableCause.ISP_UPSTREAM_HIGH_LATENCY: "ارتفاع زمن استجابة كابينة مزود الخدمة",
+    ProbableCause.DNS_RESOLVER_UNRESPONSIVE: "خادم DNS غير مستجيب",
+    ProbableCause.DNS_RESOLVER_HIGH_LATENCY: "تباطؤ خادم ترجمة العناوين (DNS)",
+    ProbableCause.DESTINATION_SPECIFIC_OUTAGE: "تعذر الوصول إلى وجهة محددة",
+    ProbableCause.BUFFERBLOAT_UPLOAD: "تكدس الحزم عند الرفع (Bufferbloat)",
+    ProbableCause.BUFFERBLOAT_DOWNLOAD: "تكدس الحزم عند التنزيل (Bufferbloat)",
+    ProbableCause.BACKGROUND_APP_SATURATION: "استهلاك مفرط للخط من تطبيق بالخلفية",
+    ProbableCause.UNKNOWN_ANOMALY: "رصد تذبذب غير معتاد في معايير الشبكة",
+}
 
 
 class HistoryEventItem(QFrame):
@@ -103,8 +122,16 @@ class HistoryEventItem(QFrame):
 class HistoryView(QWidget):
     """Historical stability and incident log view."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        measurement_repo: Optional[Any] = None,
+        incident_repo: Optional[Any] = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
+        self.measurement_repo = measurement_repo
+        self.incident_repo = incident_repo
+        self.current_date = date.today()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -133,7 +160,7 @@ class HistoryView(QWidget):
         # Day picker buttons
         picker_row = QHBoxLayout()
         self.btn_prev = SecondaryButton("← اليوم السابق")
-        self.lbl_day = QLabel("اليوم (الأحد 15 نوفمبر)")
+        self.lbl_day = QLabel("اليوم")
         self.lbl_day.setFont(tokens.get_sans_font(14, 500))
         self.lbl_day.setStyleSheet(f"color: {tokens.TEXT};")
         self.btn_next = SecondaryButton("اليوم التالي →")
@@ -145,6 +172,9 @@ class HistoryView(QWidget):
         picker_row.addStretch()
         picker_row.addWidget(self.btn_next)
         strip_panel.main_layout.addLayout(picker_row)
+
+        self.btn_prev.clicked.connect(self._on_prev_day)
+        self.btn_next.clicked.connect(self._on_next_day)
 
         self.day_strip = DayStrip(self)
         strip_panel.main_layout.addWidget(self.day_strip)
@@ -161,63 +191,118 @@ class HistoryView(QWidget):
 
         self.events_list_layout = QVBoxLayout()
         self.events_list_layout.setSpacing(12)
-
-        # Default sample incidents
-        self.events_list_layout.addWidget(
-            HistoryEventItem(
-                "15:32",
-                "ارتفاع زمن الاستجابة (Ping Spike)",
-                "تحديث Windows Update كان يستهلك كامل سرعة الرفع فتكدست الحزم عند الراوتر.",
-                "خفض أولوية التحديث وتحديد سرعته بـ 40% من الخط لحماية المكالمات.",
-                "41 ثانية",
-                is_resolved=True,
-            )
-        )
-        self.events_list_layout.addWidget(
-            HistoryEventItem(
-                "14:15",
-                "تباطؤ خادم DNS المحلي",
-                "خادم DNS مزود الخدمة تجاوز 85ms في ترجمة المواقع العالمية.",
-                "تفريغ كاش العناوين والتحويل إلى خادم Cloudflare 1.1.1.1.",
-                "18 ثانية",
-                is_resolved=True,
-            )
-        )
-        self.events_list_layout.addWidget(
-            HistoryEventItem(
-                "09:20",
-                "تعارض مؤقت في عنوان IP الداخلي",
-                "تذبذب في توزيع العناوين من الراوتر المنزلي بعد تشغيل جهاز جديد.",
-                "تجديد عنوان DHCP واستعادة الاتصال فورا.",
-                "8 ثوانٍ",
-                is_resolved=True,
-            )
-        )
-
         self.events_panel.main_layout.addLayout(self.events_list_layout)
         layout.addWidget(self.events_panel)
 
         scroll.setWidget(content_widget)
         root_layout.addWidget(scroll)
 
+        self._refresh_day()
+
+    def set_repositories(self, measurement_repo: Any, incident_repo: Any) -> None:
+        """Bind storage repositories and reload view for current date."""
+        self.measurement_repo = measurement_repo
+        self.incident_repo = incident_repo
+        self._refresh_day()
+
+    def _on_prev_day(self) -> None:
+        self.current_date -= timedelta(days=1)
+        self._refresh_day()
+
+    def _on_next_day(self) -> None:
+        if self.current_date < date.today():
+            self.current_date += timedelta(days=1)
+            self._refresh_day()
+
+    def _refresh_day(self) -> None:
+        """Update day label, navigation buttons, day strip, and incident list."""
+        days_ar = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+        months_ar = [
+            "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+            "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+        ]
+
+        d = self.current_date
+        today = date.today()
+        day_name = days_ar[d.weekday()]
+        month_name = months_ar[d.month - 1]
+
+        if d == today:
+            self.lbl_day.setText(f"اليوم ({day_name} {d.day} {month_name})")
+        elif d == today - timedelta(days=1):
+            self.lbl_day.setText(f"أمس ({day_name} {d.day} {month_name})")
+        else:
+            self.lbl_day.setText(f"{day_name} {d.day} {month_name} {d.year}")
+
+        self.btn_next.setEnabled(d < today)
+
+        # Refresh Day Strip
+        if self.measurement_repo:
+            slots = self.measurement_repo.get_day_slots(self.current_date)
+            self.day_strip.set_data(slots)
+
+        # Refresh Incidents
+        if self.incident_repo:
+            incidents = self.incident_repo.get_by_date(self.current_date)
+            self.update_incidents(incidents)
+        else:
+            self.update_incidents([])
+
     def update_incidents(self, incidents: List[Any]) -> None:
-        """Update incident list from real incident repository."""
-        if not incidents:
-            return
+        """Update incident list from real incident data."""
         while self.events_list_layout.count():
             item = self.events_list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        for inc in incidents[:15]:
-            time_str = datetime.now().strftime("%H:%M")
-            cause_str = getattr(inc, "explanation", "تذبذب عابر في الاتصال")
+        if not incidents:
+            empty_card = QFrame()
+            empty_card.setObjectName("EmptyIncidentCard")
+            empty_card.setStyleSheet(f"""
+                QFrame#EmptyIncidentCard {{
+                    background-color: {tokens.SURFACE_INSET};
+                    border: 1px dashed {tokens.LINE_STRONG};
+                    border-radius: {tokens.RADIUS_INNER}px;
+                    padding: 24px;
+                }}
+            """)
+            empty_col = QVBoxLayout(empty_card)
+            empty_col.setAlignment(Qt.AlignCenter)
+            lbl = QLabel("لا توجد أحداث أو انقطاعات مسجلة لهذا اليوم — كان الاتصال مستقراً")
+            lbl.setFont(tokens.get_sans_font(13, 400))
+            lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            lbl.setAlignment(Qt.AlignCenter)
+            empty_col.addWidget(lbl)
+            self.events_list_layout.addWidget(empty_card)
+            return
+
+        for inc in incidents[:30]:
+            if hasattr(inc, "timestamp"):
+                ts = inc.timestamp
+                time_str = ts.astimezone().strftime("%H:%M") if ts.tzinfo else ts.strftime("%H:%M")
+            else:
+                time_str = "—"
+
+            cause_enum = getattr(inc, "probable_cause", None)
+            title = CAUSE_TITLES_AR.get(cause_enum, "رصد عطل في الشبكة")
+            cause_str = getattr(inc, "explanation", "") or "تذبذب عابر في معايير الشبكة"
+            actions = getattr(inc, "recommended_actions", [])
+            if actions:
+                action_str = " · ".join(actions)
+            elif getattr(inc, "auto_remediation_permitted", False):
+                action_str = "تم تفعيل المعالجة التلقائية وحماية الاتصال"
+            else:
+                action_str = "مراقبة مستمرة لتذبذب الجودة"
+
+            sev = getattr(inc, "severity", None)
+            is_resolved = (sev != DiagnosisSeverity.CRITICAL) if sev else True
+
             item = HistoryEventItem(
                 time_str,
-                "رصد عطل في الشبكة",
+                title,
                 cause_str,
-                "تم التدخل التلقائي واستعادة الاتصال بنجاح",
-                "35 ثانية",
-                is_resolved=True,
+                action_str,
+                "لحظي",
+                is_resolved=is_resolved,
             )
             self.events_list_layout.addWidget(item)

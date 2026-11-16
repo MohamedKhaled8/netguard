@@ -17,7 +17,7 @@ import asyncio
 import threading
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("netguard.ui.main_window")
@@ -327,7 +327,9 @@ class MainWindow(QMainWindow):
         self.view_remediation = RemediationView()
         self.view_dns = DNSView()
         self.view_traffic = TrafficView(session_tracker=self.traffic_controller.session_tracker)
-        self.view_history = HistoryView()
+        meas_repo = getattr(self.app_core.ctx, "measurements", None) if hasattr(self.app_core, "ctx") else None
+        inc_repo = getattr(self.app_core.ctx, "incidents", None) if hasattr(self.app_core, "ctx") else None
+        self.view_history = HistoryView(measurement_repo=meas_repo, incident_repo=inc_repo)
         self.view_settings = SettingsView()
 
         # Index sequence matching tests:
@@ -398,6 +400,9 @@ class MainWindow(QMainWindow):
         self.dns_rank_timer.start(60000)
 
         self.ticker_counter = 0
+
+        # Load initial day strip stability slots from measurement database
+        self._refresh_day_strips()
 
     def _switch_view(self, index: int, active_btn: QPushButton) -> None:
         self.stack.setCurrentIndex(index)
@@ -533,6 +538,20 @@ class MainWindow(QMainWindow):
             self._initial_dns_bench_triggered = True
             QTimer.singleShot(1200, self._on_run_dns_benchmark)
 
+    def _refresh_day_strips(self) -> None:
+        """Fetch today's 48-slot status from measurements and populate day strips."""
+        try:
+            if hasattr(self.app_core, "ctx") and self.app_core.ctx and hasattr(self.app_core.ctx, "measurements") and self.app_core.ctx.measurements:
+                today = date.today()
+                slots = self.app_core.ctx.measurements.get_day_slots(today)
+                if hasattr(self.view_dashboard, "day_strip") and self.view_dashboard.day_strip:
+                    self.view_dashboard.day_strip.set_data(slots)
+                if hasattr(self.view_history, "day_strip") and self.view_history.day_strip:
+                    if getattr(self.view_history, "current_date", None) == today:
+                        self.view_history.day_strip.set_data(slots)
+        except Exception as e:
+            logger.warning("Failed to refresh day strips: %s", e)
+
     def _on_ui_tick(self) -> None:
         """Periodic UI update polling in-memory telemetry completely autonomously."""
         obs = self.app_core.observability
@@ -540,12 +559,18 @@ class MainWindow(QMainWindow):
 
         self.view_dashboard.update_telemetry(obs, last_diag)
 
+        # Refresh 48-slot day strip every 60 seconds
+        self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
+        if self.ticker_counter % 60 == 0:
+            self._refresh_day_strips()
+
         if self.stack.currentWidget() == self.view_diagnosis and last_diag:
             self.view_diagnosis.update_diagnosis(last_diag)
 
         if self.stack.currentWidget() == self.view_history:
-            incidents = self.app_core.ctx.incidents.get_recent(limit=30)
-            self.view_history.update_incidents(incidents)
+            if getattr(self.view_history, "current_date", None) == date.today():
+                incidents = self.app_core.ctx.incidents.get_by_date(date.today())
+                self.view_history.update_incidents(incidents)
 
         if self.stack.currentWidget() == self.view_remediation:
             audit_records = self.app_core.ctx.audit.get_recent(limit=30)
