@@ -26,3 +26,21 @@ async def test_bufferbloat_evaluation_report():
     assert report.grade == BufferbloatGrade.D
     assert report.queue_delay_delta_ms == 110.0
     assert report.is_congested is True
+
+
+@pytest.mark.asyncio
+async def test_bufferbloat_live_test(monkeypatch):
+    from unittest.mock import MagicMock
+    platform = MagicMock()
+    platform.ping.side_effect = [
+        (True, 15.0), (True, 15.0), (True, 16.0), (True, 14.0),
+        (True, 25.0), (True, 26.0), (True, 24.0), (True, 25.0),
+    ]
+    bus = EventBus()
+    evaluator = BufferbloatEvaluator(platform=platform, event_bus=bus)
+
+    report = await evaluator.run_live_test(target="1.1.1.1", load_duration_sec=0.2)
+    assert report.grade in (BufferbloatGrade.A, BufferbloatGrade.A_PLUS, BufferbloatGrade.B)
+    assert report.idle_latency_ms > 0
+    assert report.loaded_latency_ms > 0
+    assert report.queue_delay_delta_ms >= 0

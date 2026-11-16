@@ -42,6 +42,8 @@ class DeepScanReport:
     wifi_signal_pct: Optional[float]
     summary_arabic: str
     explanation_arabic: str
+    bufferbloat_grade: Optional[str] = None
+    bufferbloat_delta_ms: Optional[float] = None
 
 
 class DeepScanner:
@@ -248,21 +250,29 @@ class DeepScanner:
             mtu_loss = 100.0
 
         mtu_avg = (sum(mtu_latencies) / len(mtu_latencies)) if mtu_latencies else None
-        mtu_passed = mtu_loss < 40.0
+        base_ref = gw_avg if gw_avg is not None else 15.0
+        bb_delta = max(0.0, mtu_avg - base_ref) if mtu_avg is not None else None
+        bb_grade = None
+        if bb_delta is not None:
+            from app.traffic.bufferbloat import BufferbloatEvaluator
+            bb_grade = BufferbloatEvaluator.calculate_grade(bb_delta).value
+
+        mtu_passed = mtu_loss < 40.0 and (bb_delta is None or bb_delta < 60.0)
+        grade_str = f" · تأخير الطوابير +{bb_delta:.1f}ms (Grade {bb_grade})" if bb_grade else ""
         mtu_details = (
-            f"اختبار حمولة 1472-Byte: متوسط {mtu_avg:.1f} ms · فقدان {mtu_loss:.0f}%"
+            f"اختبار حمولة 1472-Byte: متوسط {mtu_avg:.1f} ms · فقدان {mtu_loss:.0f}%{grade_str}"
             if mtu_avg is not None
             else f"فشل اختبار حزم MTU الكبيرة · فقدان {mtu_loss:.0f}%"
         )
         steps.append(
             DeepScanStepResult(
                 step_id=5,
-                name="كفاءة الحزم والتحمل (MTU)",
+                name="كفاءة الحزم والتحمل (MTU & Bufferbloat)",
                 passed=mtu_passed,
                 latency_ms=mtu_avg,
                 loss_pct=mtu_loss,
                 details=mtu_details,
-                raw_data={"target": mtu_target, "loss": mtu_loss, "samples": mtu_latencies},
+                raw_data={"target": mtu_target, "loss": mtu_loss, "samples": mtu_latencies, "delta": bb_delta, "grade": bb_grade},
             )
         )
 
@@ -305,4 +315,6 @@ class DeepScanner:
             wifi_signal_pct=signal_pct if (is_wifi and signal_pct and signal_pct > 0) else None,
             summary_arabic=summary,
             explanation_arabic=explanation,
+            bufferbloat_grade=bb_grade,
+            bufferbloat_delta_ms=bb_delta,
         )

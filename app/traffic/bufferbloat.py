@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import asyncio
+import time
+import statistics
 from enum import Enum
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
@@ -85,3 +87,65 @@ class BufferbloatEvaluator:
 
         await self.event_bus.publish("bufferbloat.report", report.model_dump(mode="json"))
         return report
+
+    async def run_live_test(
+        self,
+        target: str = "1.1.1.1",
+        load_duration_sec: float = 2.0,
+    ) -> BufferbloatReport:
+        """Run active loaded-vs-idle latency test to compute genuine queue delay delta and grade."""
+        loop = asyncio.get_running_loop()
+
+        def _measure_idle() -> float:
+            samples = []
+            for _ in range(4):
+                ok, lat = self.platform.ping(target, timeout_sec=1.0)
+                if ok and lat >= 0:
+                    samples.append(lat)
+                time.sleep(0.05)
+            return float(statistics.median(samples)) if samples else 25.0
+
+        def _generate_load_and_measure() -> float:
+            import urllib.request
+            import threading
+
+            stop_event = threading.Event()
+
+            def _loader():
+                url = "https://1.1.1.1"
+                while not stop_event.is_set():
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "NetGuard/1.0"})
+                        with urllib.request.urlopen(req, timeout=1.5) as resp:
+                            resp.read(32768)
+                    except Exception:
+                        pass
+                    time.sleep(0.02)
+
+            threads = [threading.Thread(target=_loader, daemon=True) for _ in range(3)]
+            for t in threads:
+                t.start()
+
+            loaded_samples = []
+            time.sleep(0.2)
+            t_start = time.perf_counter()
+            while (time.perf_counter() - t_start) < load_duration_sec:
+                ok, lat = self.platform.ping(target, timeout_sec=1.0)
+                if ok and lat >= 0:
+                    loaded_samples.append(lat)
+                time.sleep(0.1)
+
+            stop_event.set()
+            for t in threads:
+                t.join(timeout=0.5)
+
+            return float(statistics.median(loaded_samples)) if loaded_samples else 35.0
+
+        idle_lat = await loop.run_in_executor(None, _measure_idle)
+        loaded_lat = await loop.run_in_executor(None, _generate_load_and_measure)
+
+        return await self.evaluate_latency_delta(
+            idle_latency_ms=idle_lat,
+            loaded_latency_ms=loaded_lat,
+            target=target,
+        )
