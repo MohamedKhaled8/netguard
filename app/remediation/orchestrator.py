@@ -399,3 +399,58 @@ class RemediationOrchestrator:
             {"action_id": action_id, "reason": "User rejected proposed action"},
         )
         return True, f"Action '{action_id}' rejected"
+
+    async def rollback_action(self, action_record_id: Optional[str] = None) -> Tuple[bool, str]:
+        """Roll back a previous remediation action, restoring prior system state."""
+        record: Optional[ActionExecutionRecord] = None
+        if action_record_id is not None:
+            if hasattr(self.audit, "get_by_id"):
+                record = self.audit.get_by_id(action_record_id)
+            if not record and hasattr(self.audit, "get_recent"):
+                for r in self.audit.get_recent(limit=50):
+                    if r.id == action_record_id:
+                        record = r
+                        break
+            if not record:
+                return False, f"Action record '{action_record_id}' not found in audit log"
+        else:
+            # Find latest reversible action that succeeded and has not been rolled back
+            if hasattr(self.audit, "get_recent"):
+                for r in self.audit.get_recent(limit=50):
+                    if r.status == ActionExecutionStatus.SUCCEEDED and not r.rollback_performed:
+                        record = r
+                        break
+            if not record:
+                return False, "No prior actions found to rollback"
+
+        action = self.registry.get(record.action_id)
+        if not action:
+            return False, f"Action '{record.action_id}' not found in registry"
+
+        pre_state = (record.pre_remedy_metrics or {}).get("pre_state") if isinstance(record.pre_remedy_metrics, dict) else None
+        context = {
+            "interface_name": self.platform.get_primary_interface(),
+            "action_record_id": record.id,
+        }
+
+        try:
+            rb_ok, rb_msg = await action.rollback(self.platform, context, pre_state)
+            if hasattr(self.audit, "update_rollback"):
+                self.audit.update_rollback(record.id, rb_ok, None if rb_ok else rb_msg)
+
+            await self.event_bus.publish(
+                EventTopics.REMEDIATION_ROLLBACK_COMPLETED,
+                {
+                    "action_record_id": record.id,
+                    "action_id": record.action_id,
+                    "success": rb_ok,
+                    "message": rb_msg,
+                },
+            )
+            return rb_ok, rb_msg
+        except Exception as exc:
+            err = f"Rollback failed with exception: {exc}"
+            logger.error(err, exc_info=True)
+            if hasattr(self.audit, "update_rollback"):
+                self.audit.update_rollback(record.id, False, err)
+            return False, err

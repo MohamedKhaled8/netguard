@@ -81,3 +81,55 @@ class AuditRepository:
                     )
                 )
         return results
+
+    def get_by_id(self, record_id: str) -> Optional[ActionExecutionRecord]:
+        query = """
+        SELECT id, action_id, action_name, timestamp, risk_level, trigger_diagnosis_id,
+               pre_remedy_metrics, post_remedy_metrics, status, execution_duration_ms,
+               verification_duration_ms, error_message, rollback_performed, rollback_success
+        FROM actions_audit
+        WHERE id = ?;
+        """
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (record_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return ActionExecutionRecord(
+                id=row["id"],
+                action_id=row["action_id"],
+                action_name=row["action_name"],
+                timestamp=datetime.fromisoformat(row["timestamp"]),
+                risk_level=RiskLevel(row["risk_level"]),
+                trigger_diagnosis_id=row["trigger_diagnosis_id"],
+                pre_remedy_metrics=json.loads(row["pre_remedy_metrics"] or "{}"),
+                post_remedy_metrics=json.loads(row["post_remedy_metrics"] or "{}"),
+                status=ActionExecutionStatus(row["status"]),
+                execution_duration_ms=row["execution_duration_ms"],
+                verification_duration_ms=row["verification_duration_ms"],
+                error_message=row["error_message"],
+                rollback_performed=bool(row["rollback_performed"]),
+                rollback_success=bool(row["rollback_success"]) if row["rollback_success"] is not None else None,
+            )
+
+    def update_rollback(
+        self,
+        record_id: str,
+        rollback_success: bool,
+        error_message: Optional[str] = None,
+    ) -> bool:
+        query = """
+        UPDATE actions_audit
+        SET rollback_performed = 1,
+            rollback_success = ?,
+            status = ?,
+            error_message = COALESCE(?, error_message)
+        WHERE id = ?;
+        """
+        status = ActionExecutionStatus.ROLLED_BACK if rollback_success else ActionExecutionStatus.FAILED
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (1 if rollback_success else 0, status.value, error_message, record_id))
+            conn.commit()
+            return cur.rowcount > 0
