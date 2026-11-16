@@ -410,7 +410,7 @@ class MainWindow(QMainWindow):
             b.setChecked(b == active_btn)
 
         if index == 3 and self.view_dns.table.rowCount() == 0:
-            self._on_run_dns_benchmark()
+            QTimer.singleShot(500, self._on_run_dns_benchmark)
         elif index == 4:
             self._on_scan_traffic()
 
@@ -594,13 +594,15 @@ class MainWindow(QMainWindow):
         self.view_dns.benchmark_btn.setText("جاري الفحص التلقائي...")
 
         def _worker():
+            scores = []
             try:
                 from app.dns.benchmark import DNSBenchmark
                 bench = DNSBenchmark()
                 scores = asyncio.run(bench.rank_all())
-                self.bridge.dns_benchmark_done.emit(scores)
-            except Exception:
-                self._is_benchmarking_dns = False
+            except Exception as exc:
+                logger.warning("DNS benchmark failed: %s", exc)
+            finally:
+                QTimer.singleShot(0, lambda: self._on_dns_benchmark_done(scores))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -963,3 +965,10 @@ class MainWindow(QMainWindow):
                 self.root_layout.addWidget(self.sidebar)
                 self.root_layout.addWidget(self.stack, stretch=1)
                 self.sidebar.set_mode("dock")
+
+    def closeEvent(self, event) -> None:
+        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
+        if hasattr(self, "dns_rank_timer") and self.dns_rank_timer.isActive():
+            self.dns_rank_timer.stop()
+        super().closeEvent(event)

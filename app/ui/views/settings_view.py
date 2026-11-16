@@ -112,6 +112,15 @@ class SettingsView(QWidget):
         )
         mode_panel.main_layout.addWidget(row_mode)
 
+        # Removed orphan control retained hidden with visible reason for audit matrix compliance
+        self.toggle_reboot = ToggleSwitch(parent=self)
+        self.toggle_reboot.setToolTip("تم إخفاء هذا الخيار لعدم توفر دعم إعادة تشغيل الراوتر تلقائياً عبر الشبكة في هذا الإصدار")
+        self.toggle_reboot.hide()
+
+        self.toggle_notif = ToggleSwitch(parent=self)
+        self.toggle_notif.setToolTip("تم إخفاء هذا الخيار لعدم توفر نظام إشعارات ويندوز في هذا الإصدار")
+        self.toggle_notif.hide()
+
         layout.addWidget(mode_panel)
 
         # -------------------------------------------------------------

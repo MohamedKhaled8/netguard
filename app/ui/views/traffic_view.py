@@ -106,8 +106,9 @@ class TrafficView(QWidget):
         btn_box = QHBoxLayout()
         btn_box.setSpacing(10)
 
-        # Simulation button hidden in production
+        # Simulation button hidden in production per non-negotiable principle
         self.btn_sim_zoom = SecondaryButton("محاكاة مكالمة Zoom")
+        self.btn_sim_zoom.setToolTip("تم إخفاء زر المحاكاة لضمان عدم إدراج بيانات وهمية في بيئة التشغيل الحقيقية")
         self.btn_sim_zoom.setVisible(False)
         self.btn_sim_zoom.clicked.connect(self._on_sim_zoom_clicked)
 

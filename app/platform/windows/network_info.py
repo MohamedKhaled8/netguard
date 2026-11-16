@@ -72,14 +72,19 @@ def get_wifi_details() -> Dict[str, Any]:
 def get_active_dns_servers(interface_name: str = "Wi-Fi") -> List[str]:
     """Inspects active IPv4 DNS servers for the primary interface."""
     try:
-        out = subprocess.check_output(
+        res = subprocess.run(
             ["netsh", "interface", "ipv4", "show", "dnsservers", interface_name],
+            capture_output=True,
             text=True,
-            stderr=subprocess.DEVNULL,
+            timeout=2.0,
+            stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
         )
-        ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", out)
-        return ips if ips else ["10.60.66.196"]
+        if res.returncode == 0 and res.stdout:
+            ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", res.stdout)
+            if ips:
+                return ips
+        return ["10.60.66.196"]
     except Exception:
         return ["10.60.66.196"]
 
