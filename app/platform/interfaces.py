@@ -58,6 +58,22 @@ class IPlatformAdapter(ABC):
         """Retrieve Wi-Fi signal strength (%), link speed, and BSSID if connected."""
         pass
 
+    def get_qos_policies(self) -> List[Dict[str, Any]]:
+        """Retrieve active Windows QoS policies matching NetGuard configurations."""
+        return []
+
+    def create_qos_dscp_policy(self, name: str, app_name: str, dscp_value: int = 46) -> Tuple[bool, str]:
+        """Create a Windows QoS policy assigning DSCP priority to outbound packets of an application."""
+        return False, "Not implemented on this platform"
+
+    def create_qos_throttle_policy(self, name: str, app_name: str, throttle_bps: int) -> Tuple[bool, str]:
+        """Create a Windows QoS policy throttling outbound upload bandwidth for an application."""
+        return False, "Not implemented on this platform"
+
+    def remove_qos_policy(self, name: str) -> Tuple[bool, str]:
+        """Remove a Windows NetQosPolicy by name."""
+        return False, "Not implemented on this platform"
+
     def restart_as_administrator(self) -> bool:
         """Relaunch the application elevated as Administrator/root."""
         return False

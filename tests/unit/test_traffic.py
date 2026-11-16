@@ -39,3 +39,26 @@ async def test_traffic_controller_scan():
     profiles = await controller.scan_active_applications()
     # On a live computer, profiles may be empty or contain processes
     assert isinstance(profiles, list)
+
+
+def test_platform_qos_policy_contracts():
+    from app.platform.windows.adapter import WindowsPlatformAdapter
+    adapter = WindowsPlatformAdapter()
+    
+    # get_qos_policies must return a list without raising
+    policies = adapter.get_qos_policies()
+    assert isinstance(policies, list)
+
+    # When not elevated, creating policy must return False and explicit explanation
+    if not adapter.is_elevated():
+        ok, msg = adapter.create_qos_dscp_policy("Test_DSCP", "zoom.exe", 46)
+        assert ok is False
+        assert "مسؤول" in msg or "Administrator" in msg
+
+        ok_th, msg_th = adapter.create_qos_throttle_policy("Test_Throttle", "onedrive.exe", 5_000_000)
+        assert ok_th is False
+        assert "مسؤول" in msg or "Administrator" in msg
+
+        ok_rm, msg_rm = adapter.remove_qos_policy("Test_NonExistent")
+        assert ok_rm is False
+        assert "مسؤول" in msg or "Administrator" in msg

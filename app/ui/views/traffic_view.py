@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
     QScrollArea,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from app.ui import tokens
@@ -31,6 +32,9 @@ from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.bar_row import HorizontalProgressBar
 from app.ui.widgets.session_card import ActiveSessionCard, SessionReportCard
 from app.traffic.session_tracker import AppSessionTracker, AppSessionRecord
+from app.traffic.applications import ApplicationCatalog
+from app.platform.interfaces import IPlatformAdapter
+from app.platform.windows.adapter import WindowsPlatformAdapter
 
 
 class ProcessTableCell(QWidget):
@@ -60,9 +64,18 @@ class TrafficView(QWidget):
     start_simulated_zoom_requested = Signal()
     close_simulated_zoom_requested = Signal()
 
-    def __init__(self, session_tracker: Optional[AppSessionTracker] = None, parent=None) -> None:
+    def __init__(
+        self,
+        session_tracker: Optional[AppSessionTracker] = None,
+        platform: Optional[IPlatformAdapter] = None,
+        user_settings: Optional[Any] = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.session_tracker = session_tracker or AppSessionTracker()
+        self.platform = platform or WindowsPlatformAdapter()
+        self.user_settings = user_settings
+        self._last_profiles_cache: List[Any] = []
         self.setStyleSheet(f"background-color: {tokens.BG};")
 
         root_layout = QVBoxLayout(self)
@@ -198,18 +211,26 @@ class TrafficView(QWidget):
         # -------------------------------------------------------------
         table_panel = Panel(
             title="قائمة البرامج المتصلة بالإنترنت حالياً",
-            subtitle="مرتبة حسب معدل استهلاك سرعة التنزيل والرفع",
+            subtitle="مرتبة حسب عدد الاتصالات النشطة، مع إمكانية تقييد سرعة الرفع الصادر (Outbound Throttle) عبر Windows NetQosPolicy",
             parent=self,
         )
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setMinimumHeight(320)
-        self.table.setHorizontalHeaderLabels(["البرنامج", "معرف PID", "الحالة / الأولوية", "معدل الاستهلاك", "المنافذ (Sockets)"])
+        self.table.setHorizontalHeaderLabels([
+            "البرنامج",
+            "معرف PID",
+            "الحالة / الفئة",
+            "الاتصالات النشطة (تقديري)",
+            "حالة سرعة الرفع (QoS)",
+            "إجراء QoS",
+        ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setSortingEnabled(True)
         self.table.setStyleSheet(f"""
@@ -319,10 +340,23 @@ class TrafficView(QWidget):
 
     def update_profiles(self, profiles: List[Any], conferencing_active: bool = False) -> None:
         """Update live processes from traffic controller."""
+        self._last_profiles_cache = list(profiles or [])
         self._refresh_sessions_ui()
         if not profiles:
             self.table.setRowCount(0)
             return
+
+        active_policies = self.platform.get_qos_policies() if self.platform else []
+        throttled_apps = {
+            (p.get("app_name") or "").lower(): p.get("throttle_bps")
+            for p in active_policies
+            if p.get("throttle_bps")
+        }
+        dscp_apps = {
+            (p.get("app_name") or "").lower(): p.get("dscp_action")
+            for p in active_policies
+            if p.get("dscp_action") == 46
+        }
 
         sorted_p = sorted(profiles, key=lambda p: getattr(p, "active_socket_count", 0), reverse=True)[:25]
         self.table.setRowCount(len(sorted_p))
@@ -330,36 +364,104 @@ class TrafficView(QWidget):
 
         for r, p in enumerate(sorted_p):
             pname = getattr(p, "name", "مجهول")
+            pname_lower = pname.lower()
             pid_str = str(getattr(p, "pid", 0))
             sockets_cnt = getattr(p, "active_socket_count", 0)
             cat = str(getattr(p, "category", ""))
             is_conf = "conferencing" in cat.lower() or "critical" in cat.lower()
-            tag_text = "أولوية مكالمات" if is_conf else ("نظام أساسي" if getattr(p, "is_protected_system_process", False) else "طبيعي")
+            is_sys = getattr(p, "is_protected_system_process", False) or pname_lower in ApplicationCatalog.PROTECTED_SYSTEM_NAMES
+            tag_text = "أولوية مكالمات" if is_conf else ("نظام أساسي" if is_sys else "طبيعي")
 
-            # Name
+            is_throttled = pname_lower in throttled_apps
+            is_dscp = pname_lower in dscp_apps
+
+            # 0. Name
             item_name = QTableWidgetItem(pname)
             item_name.setFont(tokens.get_sans_font(13, 500))
             self.table.setItem(r, 0, item_name)
 
-            # PID
+            # 1. PID
             item_pid = QTableWidgetItem(pid_str)
             item_pid.setFont(tokens.get_mono_font(12, 400))
             self.table.setItem(r, 1, item_pid)
 
-            # Tag Chip
+            # 2. Tag Chip
             chip = Chip(tag_text, variant="tag-ok" if is_conf else "ok-soft")
             self.table.setCellWidget(r, 2, chip)
 
-            # Bar & Sockets Cell
+            # 3. Bar & Sockets Cell
             frac = min(1.0, max(0.08, sockets_cnt / max(1, max_sockets)))
             speed_txt = f"{sockets_cnt} اتصالات"
-            cell_w = ProcessTableCell(speed_txt, frac, is_throttled=False)
+            cell_w = ProcessTableCell(speed_txt, frac, is_throttled=is_throttled)
             self.table.setCellWidget(r, 3, cell_w)
 
-            # Sockets
-            item_sock = QTableWidgetItem(str(sockets_cnt))
-            item_sock.setFont(tokens.get_mono_font(12, 400))
-            self.table.setItem(r, 4, item_sock)
+            # 4. Real QoS State Column
+            if is_throttled:
+                bps = throttled_apps[pname_lower]
+                mbps = (bps / 1_000_000.0) if bps else 5.0
+                qos_lbl = QLabel(f"مقيد: {mbps:.1f} Mbps (صادر)")
+                qos_lbl.setFont(tokens.get_sans_font(12, 500))
+                qos_lbl.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+            elif is_dscp:
+                qos_lbl = QLabel("أولوية DSCP 46 (صادر)")
+                qos_lbl.setFont(tokens.get_sans_font(12, 500))
+                qos_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            else:
+                qos_lbl = QLabel("غير مقيد (افتراضي)")
+                qos_lbl.setFont(tokens.get_sans_font(12, 400))
+                qos_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            qos_lbl.setAlignment(Qt.AlignCenter)
+            self.table.setCellWidget(r, 4, qos_lbl)
+
+            # 5. QoS Action Button
+            if is_sys:
+                lbl_prot = QLabel("محمي للنظام")
+                lbl_prot.setFont(tokens.get_sans_font(12, 400))
+                lbl_prot.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+                lbl_prot.setAlignment(Qt.AlignCenter)
+                self.table.setCellWidget(r, 5, lbl_prot)
+            elif is_conf:
+                btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else "أولوية DSCP")
+                btn_dscp.setFixedHeight(28)
+                btn_dscp.clicked.connect(lambda checked=False, pn=pname, en=not is_dscp: self._on_toggle_dscp(pn, en))
+                self.table.setCellWidget(r, 5, btn_dscp)
+            else:
+                cfg_bps = 5_000_000
+                if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
+                    cfg_bps = self.user_settings.get_qos_upload_throttle_bps()
+                cfg_mbps = cfg_bps / 1_000_000.0
+                btn_th = SecondaryButton("إلغاء التقييد" if is_throttled else f"تقييد ({cfg_mbps:.0f}M)")
+                btn_th.setFixedHeight(28)
+                btn_th.clicked.connect(lambda checked=False, pn=pname, en=not is_throttled: self._on_toggle_throttle(pn, en))
+                self.table.setCellWidget(r, 5, btn_th)
+
+    def _on_toggle_throttle(self, pname: str, enable: bool) -> None:
+        """Create or remove Windows NetQosPolicy upload throttle for executable."""
+        policy_name = f"NetGuard_Throttle_{pname}"
+        throttle_bps = 5_000_000
+        if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
+            throttle_bps = self.user_settings.get_qos_upload_throttle_bps()
+
+        if enable:
+            ok, msg = self.platform.create_qos_throttle_policy(policy_name, pname, throttle_bps)
+        else:
+            ok, msg = self.platform.remove_qos_policy(policy_name)
+
+        if not ok:
+            QMessageBox.warning(self, "سياسة QoS في ويندوز", msg)
+        self.update_profiles(self._last_profiles_cache)
+
+    def _on_toggle_dscp(self, pname: str, enable: bool) -> None:
+        """Create or remove Windows NetQosPolicy DSCP 46 tagging for executable."""
+        policy_name = f"NetGuard_DSCP_{pname}"
+        if enable:
+            ok, msg = self.platform.create_qos_dscp_policy(policy_name, pname, 46)
+        else:
+            ok, msg = self.platform.remove_qos_policy(policy_name)
+
+        if not ok:
+            QMessageBox.warning(self, "سياسة QoS في ويندوز", msg)
+        self.update_profiles(self._last_profiles_cache)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

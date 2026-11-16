@@ -332,3 +332,152 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         except Exception:
             pass
         return metrics
+
+    def get_qos_policies(self) -> List[Dict[str, Any]]:
+        """Query active Windows QoS policies via PowerShell Get-NetQosPolicy."""
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetQosPolicy | Select-Object Name, AppPathNameMatchCondition, ThrottleRateActionBitsPerSecond, DSCPAction | ConvertTo-Json -Compress",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode != 0 or not proc.stdout.strip():
+                return []
+            import json
+            data = json.loads(proc.stdout.strip())
+            if isinstance(data, dict):
+                data = [data]
+            policies = []
+            for item in data:
+                policies.append({
+                    "name": item.get("Name") or "",
+                    "app_name": item.get("AppPathNameMatchCondition") or "",
+                    "throttle_bps": item.get("ThrottleRateActionBitsPerSecond"),
+                    "dscp_action": item.get("DSCPAction"),
+                })
+            return policies
+        except Exception:
+            return []
+
+    def create_qos_dscp_policy(self, name: str, app_name: str, dscp_value: int = 46) -> Tuple[bool, str]:
+        """Create a Windows QoS policy assigning DSCP priority to outbound packets of an application."""
+        if not self.is_elevated():
+            return False, "تتطلب سياسة أولوية البث (DSCP) تشغيل البرنامج كمسؤول (Administrator)."
+
+        existing = [p for p in self.get_qos_policies() if p.get("name") == name]
+        if existing:
+            return True, f"سياسة أولوية البث '{name}' موجودة ونشطة بالفعل."
+
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"New-NetQosPolicy -Name '{name}' -AppPathNameMatchCondition '{app_name}' -DSCPAction {dscp_value}",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0:
+                verified = any(p.get("name") == name for p in self.get_qos_policies())
+                if verified:
+                    return True, f"تم تطبيق سياسة أولوية DSCP {dscp_value} لـ {app_name} بنجاح."
+                return True, f"تم إصدار أمر سياسة أولوية DSCP {dscp_value}."
+
+            err = (proc.stderr or proc.stdout or "").strip()
+            if "already exists" in err.lower():
+                return True, f"سياسة QoS '{name}' موجودة بالفعل."
+            if "permission" in err.lower() or "denied" in err.lower() or "cim" in err.lower():
+                return False, "تم رفض الوصول: يتطلب إنشاء سياسات QoS صلاحيات مسؤول النظام (Administrator)."
+            return False, err or f"فشل إنشاء سياسة QoS (كود {proc.returncode})"
+        except Exception as exc:
+            return False, str(exc)
+
+    def create_qos_throttle_policy(self, name: str, app_name: str, throttle_bps: int) -> Tuple[bool, str]:
+        """Create a Windows QoS policy throttling outbound upload bandwidth for an application."""
+        if not self.is_elevated():
+            return False, "يتطلب تقييد سرعة الرفع (QoS Outbound Throttle) تشغيل البرنامج كمسؤول (Administrator)."
+
+        existing = [p for p in self.get_qos_policies() if p.get("name") == name]
+        if existing:
+            return True, f"سياسة تقييد سرعة الرفع '{name}' مطبقة ونشطة بالفعل."
+
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"New-NetQosPolicy -Name '{name}' -AppPathNameMatchCondition '{app_name}' -ThrottleRateActionBitsPerSecond {throttle_bps}",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0:
+                mbps = throttle_bps / 1_000_000.0
+                verified = any(p.get("name") == name for p in self.get_qos_policies())
+                if verified:
+                    return True, f"تم تقييد سرعة الرفع الصادر لـ {app_name} بنجاح إلى {mbps:.1f} Mbps."
+                return True, f"تم إصدار أمر تقييد سرعة الرفع لـ {app_name}."
+
+            err = (proc.stderr or proc.stdout or "").strip()
+            if "already exists" in err.lower():
+                return True, f"سياسة تقييد الرفع '{name}' موجودة بالفعل."
+            if "permission" in err.lower() or "denied" in err.lower() or "cim" in err.lower():
+                return False, "تم رفض الوصول: يتطلب تطبيق خنق الرفع QoS صلاحيات مسؤول النظام (Administrator)."
+            return False, err or f"فشل تطبيق خنق سرعة الرفع (كود {proc.returncode})"
+        except Exception as exc:
+            return False, str(exc)
+
+    def remove_qos_policy(self, name: str) -> Tuple[bool, str]:
+        """Remove a Windows NetQosPolicy by name."""
+        if not self.is_elevated():
+            return False, "يتطلب حذف سياسات QoS تشغيل البرنامج كمسؤول (Administrator)."
+
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"Remove-NetQosPolicy -Name '{name}' -Confirm:$false",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0:
+                return True, f"تمت إزالة سياسة QoS '{name}' بنجاح."
+            err = (proc.stderr or proc.stdout or "").strip()
+            if "not found" in err.lower() or "no msft_netqospolicysettingdata" in err.lower():
+                return True, f"سياسة QoS '{name}' غير موجودة."
+            if "permission" in err.lower() or "denied" in err.lower() or "cim" in err.lower():
+                return False, "تم رفض الوصول: يتطلب حذف سياسات QoS صلاحيات مسؤول النظام."
+            return False, err or f"فشل حذف سياسة QoS (كود {proc.returncode})"
+        except Exception as exc:
+            return False, str(exc)

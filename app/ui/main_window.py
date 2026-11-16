@@ -293,7 +293,11 @@ class MainWindow(QMainWindow):
     def __init__(self, application: Any, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.app_core = application
-        self.traffic_controller = getattr(application, "traffic_controller", None) or TrafficController(event_bus=application.ctx.event_bus)
+        ctx = getattr(application, "ctx", None)
+        eb = getattr(ctx, "event_bus", None)
+        plat = getattr(ctx, "platform", None)
+        us = getattr(ctx, "settings", getattr(ctx, "user_settings", None))
+        self.traffic_controller = getattr(application, "traffic_controller", None) or TrafficController(event_bus=eb, platform=plat, user_settings=us)
         self.bridge = UIAsyncBridge()
 
         # Enforce Arabic RTL layout

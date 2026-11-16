@@ -39,6 +39,7 @@ class UserSettingsSchema(BaseModel):
         }
     )
     threshold_overrides: Dict[str, Any] = Field(default_factory=dict)
+    qos_upload_throttle_bps: int = Field(default=5_000_000, ge=100_000, le=10_000_000_000)
     custom: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("mode", mode="before")
@@ -231,3 +232,17 @@ class UserSettings(QObject):
         self.changed.emit(f"threshold.{key}", value)
         if self.event_bus:
             self.event_bus.publish_sync(EventTopics.SETTINGS_CHANGED, {"threshold": {key: value}})
+
+    def get_qos_upload_throttle_bps(self) -> int:
+        return getattr(self._data, "qos_upload_throttle_bps", 5_000_000)
+
+    def set_qos_upload_throttle_bps(self, bps: int) -> None:
+        val = int(bps)
+        if val < 100_000:
+            raise ValueError(f"Throttle bps must be >= 100000, got {val}")
+        if self._data.qos_upload_throttle_bps != val:
+            self._data.qos_upload_throttle_bps = val
+            self.save()
+            self.changed.emit("qos_upload_throttle_bps", val)
+            if self.event_bus:
+                self.event_bus.publish_sync(EventTopics.SETTINGS_CHANGED, {"qos_upload_throttle_bps": val})

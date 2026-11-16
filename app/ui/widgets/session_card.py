@@ -119,11 +119,23 @@ class ActiveSessionCard(QFrame):
         shields_layout.setHorizontalSpacing(16)
         shields_layout.setVerticalSpacing(8)
 
+        is_elevated = False
+        try:
+            import ctypes
+            is_elevated = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception:
+            pass
+
+        dscp_badge = (
+            ("✓ أولوية DSCP 46 للبث المباشر (NetQosPolicy)", tokens.STATUS_OK)
+            if is_elevated
+            else ("• أولوية DSCP 46 (تتطلب تشغيل كمسؤول)", tokens.TEXT_MUTED)
+        )
         badges = [
-            ("✓ أولوية DSCP 46 للبث المباشر", tokens.STATUS_OK),
-            ("✓ كبح تحديثات الخلفية إلى 40%", tokens.STATUS_WARN),
-            ("✓ حماية المقابس (Zero-Drop)", tokens.STATUS_OK),
-            ("✓ تثبيت زمن الطوابير < 5ms", tokens.STATUS_OK),
+            dscp_badge,
+            ("✓ تقييد سرعة الرفع الصادر للعمليات الخلفية (5.0 Mbps)", tokens.STATUS_WARN),
+            ("✓ حماية المقابس ومراقبة الاتصال (Meeting Guard)", tokens.STATUS_OK),
+            ("✓ تعليق الإجراءات التي تسبب انقطاعاً لحظياً", tokens.STATUS_OK),
         ]
         for idx, (text, color) in enumerate(badges):
             b_lbl = QLabel(text)

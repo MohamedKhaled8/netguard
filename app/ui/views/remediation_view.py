@@ -285,7 +285,7 @@ class RemediationView(QWidget):
         )
 
         self.pol1 = PolicyToggleRow("تفريغ كاش DNS التلقائي", "إفراغ العناوين المعلقة فوراً عند رصد أخطاء DNS_PROBE", checked=True)
-        self.pol2 = PolicyToggleRow("تأمين أولوية مكالمات الفيديو (Meeting Guard)", "خفض سرعة تحديثات الخلفية لحماية مكالمات Zoom / Teams", checked=True)
+        self.pol2 = PolicyToggleRow("تأمين أولوية مكالمات الفيديو (Meeting Guard)", "تقييد سرعة الرفع الصادر لتحديثات الخلفية (5.0 Mbps) وتفعيل DSCP 46 لحماية مكالمات Zoom / Teams", checked=True)
         self.pol3 = PolicyToggleRow("التحويل التلقائي لأسرع خادم DNS", "تطبيق أسرع خادم بنشمارك عالمي عند تباطؤ مزود الخدمة", checked=True)
         self.pol4 = PolicyToggleRow("تجديد IP تلقائياً عند انقطاع الراوتر", "طلب عنوان شبكة جديد تلقائياً عند تعليق بطاقة Wi-Fi", checked=True)
 

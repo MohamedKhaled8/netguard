@@ -45,7 +45,12 @@ class NetGuardApplication:
 
         # 3. Remediation Subsystem
         from app.traffic.controller import TrafficController
-        self.traffic_controller = TrafficController(event_bus=self.ctx.event_bus)
+        user_settings = getattr(self.ctx, "settings", getattr(self.ctx, "user_settings", None))
+        self.traffic_controller = TrafficController(
+            event_bus=self.ctx.event_bus,
+            platform=self.ctx.platform,
+            user_settings=user_settings,
+        )
 
         self.action_registry = ActionRegistry()
         self._register_default_actions()
