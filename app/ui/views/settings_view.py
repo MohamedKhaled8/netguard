@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 from PySide6.QtCore import Qt
+from app.core.models.metrics import OperatingMode
 from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton
 from app.ui.widgets.toggle import ToggleSwitch
@@ -99,9 +100,9 @@ class SettingsView(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.setFixedHeight(40)
         self.mode_combo.setFont(tokens.get_sans_font(13, 500))
-        self.mode_combo.addItem("تلقائي آمن (Autonomous Safe)", "safe")
-        self.mode_combo.addItem("بموافقة المستخدم (Assisted)", "assisted")
-        self.mode_combo.addItem("مراقبة فقط دون تدخل (Observation)", "observe")
+        self.mode_combo.addItem("تلقائي آمن (Autonomous Safe)", OperatingMode.AUTO.value)
+        self.mode_combo.addItem("بموافقة المستخدم (Assisted)", OperatingMode.ASK.value)
+        self.mode_combo.addItem("مراقبة فقط دون تدخل (Observation)", OperatingMode.WATCH.value)
 
         row_mode = SettingFormRow(
             "وضع المعالجة الافتراضي",
@@ -110,15 +111,6 @@ class SettingsView(QWidget):
             parent=self,
         )
         mode_panel.main_layout.addWidget(row_mode)
-
-        self.toggle_reboot = ToggleSwitch(checked=False, parent=self)
-        row_reboot = SettingFormRow(
-            "السماح بإعادة تشغيل الراوتر تلقائياً",
-            "غير مفعل افتراضياً لتجنب قطع الاتصال عن الأجهزة الأخرى في المنزل.",
-            self.toggle_reboot,
-            parent=self,
-        )
-        mode_panel.main_layout.addWidget(row_reboot)
 
         layout.addWidget(mode_panel)
 
@@ -134,9 +126,9 @@ class SettingsView(QWidget):
         self.combo_interval = QComboBox()
         self.combo_interval.setFixedHeight(40)
         self.combo_interval.setFont(tokens.get_sans_font(13, 500))
-        self.combo_interval.addItem("فحص سريع (كل ثانية واحدة)", 1)
-        self.combo_interval.addItem("فحص قياسي (كل 3 ثوانٍ)", 3)
-        self.combo_interval.addItem("فحص موفر للموارد (كل 5 ثوانٍ)", 5)
+        self.combo_interval.addItem("فحص سريع (كل ثانية واحدة)", 1.0)
+        self.combo_interval.addItem("فحص قياسي (كل 3 ثوانٍ)", 3.0)
+        self.combo_interval.addItem("فحص موفر للموارد (كل 5 ثوانٍ)", 5.0)
 
         row_int = SettingFormRow(
             "معدل فحص البنج والراوتر",
@@ -146,14 +138,21 @@ class SettingsView(QWidget):
         )
         intervals_panel.main_layout.addWidget(row_int)
 
-        self.toggle_notif = ToggleSwitch(checked=True, parent=self)
-        row_notif = SettingFormRow(
-            "إشعارات ويندوز عند حل مشكلة",
-            "إظهار إشعار فوري عند رصد عطل والانتهاء من إصلاحه بنجاح.",
-            self.toggle_notif,
+        self.combo_retention = QComboBox()
+        self.combo_retention.setFixedHeight(40)
+        self.combo_retention.setFont(tokens.get_sans_font(13, 500))
+        self.combo_retention.addItem("أسبوع واحد (7 أيام)", 7)
+        self.combo_retention.addItem("شهر واحد (30 يوماً - افتراضي)", 30)
+        self.combo_retention.addItem("شهران (60 يوماً)", 60)
+        self.combo_retention.addItem("3 أشهر (90 يوماً)", 90)
+
+        row_retention = SettingFormRow(
+            "الاحتفاظ بسجلات القياسات والأعطال",
+            "حذف سجلات الفحص والقياسات القديمة تلقائياً لتوفير مساحة التخزين.",
+            self.combo_retention,
             parent=self,
         )
-        intervals_panel.main_layout.addWidget(row_notif)
+        intervals_panel.main_layout.addWidget(row_retention)
 
         layout.addWidget(intervals_panel)
 
@@ -169,3 +168,25 @@ class SettingsView(QWidget):
 
         scroll.setWidget(content_widget)
         root_layout.addWidget(scroll)
+
+    def set_operating_mode(self, mode: OperatingMode | str) -> None:
+        m = OperatingMode(mode)
+        idx = self.mode_combo.findData(m.value)
+        if idx >= 0 and self.mode_combo.currentIndex() != idx:
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentIndex(idx)
+            self.mode_combo.blockSignals(False)
+
+    def set_probing_interval(self, sec: float) -> None:
+        idx = self.combo_interval.findData(float(sec))
+        if idx >= 0 and self.combo_interval.currentIndex() != idx:
+            self.combo_interval.blockSignals(True)
+            self.combo_interval.setCurrentIndex(idx)
+            self.combo_interval.blockSignals(False)
+
+    def set_retention_days(self, days: int) -> None:
+        idx = self.combo_retention.findData(int(days))
+        if idx >= 0 and self.combo_retention.currentIndex() != idx:
+            self.combo_retention.blockSignals(True)
+            self.combo_retention.setCurrentIndex(idx)
+            self.combo_retention.blockSignals(False)

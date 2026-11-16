@@ -5,7 +5,7 @@ import asyncio
 import time
 import uuid
 import logging
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, Optional, Callable, Tuple
 from datetime import datetime, timezone
 
 from app.core.config.models import RemediationConfig
@@ -48,11 +48,29 @@ class RemediationOrchestrator:
         self.event_bus = event_bus
         self.meeting_guard_check = meeting_guard_check
         self.mode = OperatingMode(config.mode)
+        self._pending_approvals: Dict[str, Dict[str, Any]] = {}
+        if self.event_bus:
+            self.event_bus.subscribe_sync(EventTopics.MODE_CHANGED, self._on_mode_changed_event)
 
-    def set_operating_mode(self, mode: OperatingMode) -> None:
+    DRASTIC_ACTION_IDS = {
+        "renew_ip_lease",
+        "reset_winsock",
+        "reset_tcpip",
+        "restart_adapter",
+        "reset_winsock_catalog",
+    }
+
+    async def _on_mode_changed_event(self, topic: str, data: Any) -> None:
+        mode_val = data.get("mode") if isinstance(data, dict) else str(data)
+        self.set_operating_mode(OperatingMode(mode_val))
+
+    def set_operating_mode(self, mode: OperatingMode | str) -> None:
         """Switch operating mode (Observation, Assisted, Autonomous Safe)."""
-        logger.info("Switching operating mode from %s to %s", self.mode.value, mode.value)
-        self.mode = mode
+        new_mode = OperatingMode(mode)
+        if getattr(self, "mode", None) == new_mode:
+            return
+        logger.info("Switching operating mode from %s to %s", getattr(self.mode, "value", self.mode), new_mode.value)
+        self.mode = new_mode
 
     async def handle_diagnosis(self, diagnosis: Diagnosis) -> Optional[ActionExecutionRecord]:
         """Entry point for the 11-step remediation lifecycle."""
@@ -78,28 +96,9 @@ class RemediationOrchestrator:
             return None
 
         # 6: Check Safety & Policy Authorization
-        if self.mode == OperatingMode.OBSERVATION:
-            logger.info("Observation Mode: action '%s' recommended but execution suppressed", selected_action.action_id)
-            return None
-
-        if self.mode == OperatingMode.ASSISTED:
-            logger.info("Assisted Mode: action '%s' awaiting user approval", selected_action.action_id)
-            await self.event_bus.publish(EventTopics.REMEDIATION_APPROVAL_REQUIRED, {
-                "diagnosis": diagnosis.model_dump(mode="json"),
-                "action_id": selected_action.action_id,
-                "action_name": selected_action.name,
-                "risk_level": selected_action.risk_level.value,
-            })
-            return None
-
-        # Autonomous Safe Mode: Verify Risk Policy
-        if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE and not self.config.allow_level_3_disruptive:
-            logger.warning("Disruptive action '%s' blocked by safety policy (allow_level_3_disruptive=False)", selected_action.action_id)
-            return None
-
         # Meeting Guard Safety Gate: Never drop active streaming/conferencing sockets
         if self.meeting_guard_check and self.meeting_guard_check():
-            if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE:
+            if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE or selected_action.action_id in self.DRASTIC_ACTION_IDS:
                 logger.warning(
                     "Meeting Guard Safety: Disruptive action '%s' blocked to protect active Zoom/Meet call",
                     selected_action.action_id,
@@ -109,6 +108,60 @@ class RemediationOrchestrator:
                     "reason": "حماية مكالمة الفيديو النشطة: تم تأجيل الإجراء المربك لضمان عدم انقطاع البث والصوت.",
                 })
                 return None
+
+        is_drastic = (
+            selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE
+            or selected_action.action_id in self.DRASTIC_ACTION_IDS
+        )
+        if is_drastic:
+            logger.warning("Drastic action '%s' intercepted; requires explicit user approval in all modes", selected_action.action_id)
+            self._pending_approvals[selected_action.action_id] = {
+                "action": selected_action,
+                "diagnosis": diagnosis,
+                "context": {"diagnosis": diagnosis, "interface_name": self.platform.get_primary_interface()},
+                "timestamp": time.time(),
+            }
+            await self.event_bus.publish(
+                EventTopics.REMEDIATION_APPROVAL_REQUIRED,
+                {
+                    "diagnosis": diagnosis.model_dump(mode="json"),
+                    "action_id": selected_action.action_id,
+                    "action_name": selected_action.name,
+                    "risk_level": selected_action.risk_level.value,
+                    "reason": "Drastic network action requires explicit user authorization",
+                },
+            )
+            return None
+
+        if self.mode == OperatingMode.WATCH:
+            logger.info("Watch Mode: action '%s' suppressed (zero system modifications)", selected_action.action_id)
+            await self.event_bus.publish(
+                EventTopics.REMEDIATION_ACTION_SUPPRESSED,
+                {"action_id": selected_action.action_id, "reason": "Watch mode active (read-only)"},
+            )
+            return None
+
+        if self.mode == OperatingMode.ASK:
+            logger.info("Assisted Mode: action '%s' awaiting user approval", selected_action.action_id)
+            self._pending_approvals[selected_action.action_id] = {
+                "action": selected_action,
+                "diagnosis": diagnosis,
+                "context": {"diagnosis": diagnosis, "interface_name": self.platform.get_primary_interface()},
+                "timestamp": time.time(),
+            }
+            await self.event_bus.publish(EventTopics.REMEDIATION_APPROVAL_REQUIRED, {
+                "diagnosis": diagnosis.model_dump(mode="json"),
+                "action_id": selected_action.action_id,
+                "action_name": selected_action.name,
+                "risk_level": selected_action.risk_level.value,
+                "reason": "Ask mode requires user authorization before modification",
+            })
+            return None
+
+        # Autonomous Safe Mode: Verify Risk Policy
+        if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE and not self.config.allow_level_3_disruptive:
+            logger.warning("Disruptive action '%s' blocked by safety policy (allow_level_3_disruptive=False)", selected_action.action_id)
+            return None
 
         # Check OS support
         if not selected_action.is_os_supported():
@@ -263,3 +316,48 @@ class RemediationOrchestrator:
         payload = record.model_dump(mode="json")
         payload["name"] = record.action_name
         await self.event_bus.publish(EventTopics.REMEDIATION_COMPLETED, payload)
+
+    async def approve_action(self, action_id: str, context: Optional[dict] = None) -> Tuple[bool, str]:
+        """Execute held or proposed action upon explicit user authorization."""
+        action = self.registry.get(action_id)
+        if not action:
+            return False, f"Action '{action_id}' not found in registry"
+
+        pending = self._pending_approvals.pop(action_id, {})
+        diag = (context or {}).get("diagnosis") or pending.get("diagnosis") or Diagnosis(
+            probable_cause=ProbableCause.UNKNOWN_ANOMALY,
+            confidence=1.0,
+            severity=DiagnosisSeverity.HIGH,
+            explanation="Manual user approval execution",
+        )
+        exec_context = context or pending.get("context") or {
+            "diagnosis": diag,
+            "interface_name": self.platform.get_primary_interface(),
+        }
+
+        if not action.is_os_supported():
+            return False, f"Action '{action_id}' not supported on this OS"
+
+        precond_ok, precond_msg = action.check_preconditions(self.platform, exec_context)
+        if not precond_ok:
+            return False, f"Precondition failed: {precond_msg}"
+
+        async with self.safety.lock:
+            can_run, safety_msg = self.safety.can_execute(action.action_id, action.cooldown_sec)
+            if not can_run:
+                return False, f"Safety gate blocked execution: {safety_msg}"
+
+            record = await self._execute_and_verify(action, exec_context, diag)
+
+        if record.status == ActionExecutionStatus.SUCCEEDED:
+            return True, f"Action '{action.name}' completed successfully"
+        return False, record.error_message or f"Action failed with status: {record.status.value}"
+
+    async def reject_action(self, action_id: str) -> Tuple[bool, str]:
+        """Reject and dismiss a held action."""
+        self._pending_approvals.pop(action_id, None)
+        await self.event_bus.publish(
+            EventTopics.REMEDIATION_ACTION_SUPPRESSED,
+            {"action_id": action_id, "reason": "User rejected proposed action"},
+        )
+        return True, f"Action '{action_id}' rejected"

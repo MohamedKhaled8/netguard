@@ -235,7 +235,23 @@ class SidebarWidget(QFrame):
         self.sidebar_layout.addWidget(self.mode_container)
 
         self.set_mode("dock")
-        self._on_mode_clicked(0)
+        self.set_operating_mode(OperatingMode.AUTO)
+
+    def set_operating_mode(self, mode: OperatingMode | str) -> None:
+        target = OperatingMode(mode)
+        mode_to_idx = {OperatingMode.AUTO: 0, OperatingMode.ASK: 1, OperatingMode.WATCH: 2}
+        idx = mode_to_idx.get(target, 0)
+        if getattr(self, "_current_mode_idx", None) == idx:
+            return
+        self._current_mode_idx = idx
+        for i, opt in enumerate(self.mode_options):
+            opt.set_selected(i == idx)
+        descs = {
+            0: "يكتشف المشكلة ويصلحها فوراً ثم يسجل ما فعله بالتفصيل.",
+            1: "يقترح الإصلاح وينتظر موافقتك قبل أي تغيير.",
+            2: "يراقب ويسجل دون تغيير أي إعداد على جهازك.",
+        }
+        self.lbl_mode_desc.setText(descs.get(idx, ""))
 
     def set_mode(self, mode: str) -> None:
         self._current_mode = mode
@@ -265,15 +281,9 @@ class SidebarWidget(QFrame):
                 self.nav_grid.addWidget(btn, i, 0)
 
     def _on_mode_clicked(self, idx: int) -> None:
-        for i, opt in enumerate(self.mode_options):
-            opt.set_selected(i == idx)
-
-        descs = {
-            0: "يكتشف المشكلة ويصلحها فوراً ثم يسجل ما فعله بالتفصيل.",
-            1: "يقترح الإصلاح وينتظر موافقتك قبل أي تغيير.",
-            2: "يراقب ويسجل دون تغيير أي إعداد على جهازك.",
-        }
-        self.lbl_mode_desc.setText(descs.get(idx, ""))
+        idx_to_mode = {0: OperatingMode.AUTO, 1: OperatingMode.ASK, 2: OperatingMode.WATCH}
+        mode = idx_to_mode.get(idx, OperatingMode.AUTO)
+        self.set_operating_mode(mode)
         self.mode_changed.emit(idx)
 
 
@@ -346,9 +356,20 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda checked=False, i=idx, b=btn: self._switch_view(i, b))
 
         self.sidebar.mode_changed.connect(self._on_sidebar_mode_changed)
+        self.view_remediation.mode_changed.connect(self._on_sidebar_mode_changed)
 
         # Set initial active tab
         self.btn_dash.setChecked(True)
+
+        # Sync initial operating mode across all views
+        initial_mode = OperatingMode.AUTO
+        if hasattr(self.app_core, "settings") and self.app_core.settings:
+            initial_mode = self.app_core.settings.get_mode()
+            self.view_settings.set_probing_interval(self.app_core.settings.get_probing_interval())
+            self.view_settings.set_retention_days(self.app_core.settings.get_retention_days())
+        elif hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
+            initial_mode = getattr(self.app_core.orchestrator, "mode", OperatingMode.AUTO)
+        self.set_operating_mode(initial_mode)
 
         # -------------------------------------------------------------
         # 3. Connect Bridge Signals & Wire Handlers
@@ -388,14 +409,28 @@ class MainWindow(QMainWindow):
         elif index == 4:
             self._on_scan_traffic()
 
-    def _on_sidebar_mode_changed(self, idx: int) -> None:
-        mode_map = {
-            0: OperatingMode.AUTONOMOUS_SAFE,
-            1: OperatingMode.ASSISTED,
-            2: OperatingMode.OBSERVATION,
-        }
-        mode = mode_map.get(idx, OperatingMode.AUTONOMOUS_SAFE)
-        self.app_core.orchestrator.set_operating_mode(mode)
+    def _on_sidebar_mode_changed(self, mode_val: Any) -> None:
+        if isinstance(mode_val, int):
+            idx_to_mode = {0: OperatingMode.AUTO, 1: OperatingMode.ASK, 2: OperatingMode.WATCH}
+            mode = idx_to_mode.get(mode_val, OperatingMode.AUTO)
+        else:
+            mode = OperatingMode(mode_val)
+        self.set_operating_mode(mode)
+
+    def set_operating_mode(self, mode: OperatingMode | str) -> None:
+        target_mode = OperatingMode(mode)
+        if getattr(self, "_current_operating_mode", None) == target_mode:
+            return
+        self._current_operating_mode = target_mode
+        self.sidebar.set_operating_mode(target_mode)
+        self.view_remediation.set_operating_mode(target_mode)
+        self.view_settings.set_operating_mode(target_mode)
+        if hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
+            self.app_core.orchestrator.set_operating_mode(target_mode)
+        if hasattr(self.app_core, "settings") and self.app_core.settings:
+            self.app_core.settings.set_mode(target_mode)
+        if hasattr(self.app_core, "ctx") and hasattr(self.app_core.ctx, "event_bus") and self.app_core.ctx.event_bus:
+            self.app_core.ctx.event_bus.publish_sync(EventTopics.MODE_CHANGED, {"mode": target_mode.value})
 
     def _wire_background_event_listeners(self) -> None:
         event_bus = self.app_core.ctx.event_bus
@@ -797,14 +832,19 @@ class MainWindow(QMainWindow):
 
     def _on_apply_settings(self) -> None:
         mode_data = self.view_settings.mode_combo.currentData() or self.view_settings.mode_combo.currentText()
-        if "safe" in mode_data:
-            mode_val = OperatingMode.AUTONOMOUS_SAFE
-        elif "assisted" in mode_data:
-            mode_val = OperatingMode.ASSISTED
-        else:
-            mode_val = OperatingMode.OBSERVATION
+        mode_val = OperatingMode(mode_data)
+        self.set_operating_mode(mode_val)
 
-        self.app_core.orchestrator.set_operating_mode(mode_val)
+        if hasattr(self.app_core, "settings") and self.app_core.settings:
+            settings = self.app_core.settings
+            interval = self.view_settings.combo_interval.currentData()
+            if interval:
+                settings.set_probing_interval(float(interval))
+            retention = self.view_settings.combo_retention.currentData()
+            if retention:
+                settings.set_retention_days(int(retention))
+            settings.save()
+
         self.view_settings.apply_btn.setText("تم حفظ الإعدادات وتطبيقها بنجاح! ✓")
         QTimer.singleShot(2500, lambda: self.view_settings.apply_btn.setText("حفظ الإعدادات وتطبيقها الآن"))
 

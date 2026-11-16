@@ -125,9 +125,35 @@ class RiskLevel(str, Enum):
 
 
 class OperatingMode(str, Enum):
-    OBSERVATION = "observation"
-    ASSISTED = "assisted"
-    AUTONOMOUS_SAFE = "autonomous_safe"
+    """Network remediation operational authority levels."""
+    AUTO = "auto"
+    ASK = "ask"
+    WATCH = "watch"
+
+    # Backward compatibility aliases
+    AUTONOMOUS_SAFE = "auto"
+    ASSISTED = "ask"
+    OBSERVATION = "watch"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Optional[OperatingMode]:
+        """Resolve legacy string values and case-insensitive aliases."""
+        if isinstance(value, str):
+            norm = value.lower().strip()
+            aliases = {
+                "autonomous_safe": cls.AUTO,
+                "autonomous": cls.AUTO,
+                "safe": cls.AUTO,
+                "auto": cls.AUTO,
+                "assisted": cls.ASK,
+                "ask": cls.ASK,
+                "observation": cls.WATCH,
+                "observe": cls.WATCH,
+                "watch": cls.WATCH,
+            }
+            if norm in aliases:
+                return aliases[norm]
+        return super()._missing_(value)
 
 
 class ActionExecutionStatus(str, Enum):

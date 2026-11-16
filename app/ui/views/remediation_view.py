@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 from PySide6.QtCore import Qt, Signal
+from app.core.models.metrics import OperatingMode
 from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.chip import Chip
@@ -193,7 +194,7 @@ class AuditEventRow(QFrame):
 class RemediationView(QWidget):
     """Autonomous Remediation View matching reference requirements."""
 
-    mode_changed = Signal(int)
+    mode_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -317,10 +318,24 @@ class RemediationView(QWidget):
         scroll.setWidget(content_widget)
         root_layout.addWidget(scroll)
 
-    def _select_mode(self, idx: int) -> None:
+    def set_operating_mode(self, mode: OperatingMode | str | int) -> None:
+        if isinstance(mode, int):
+            idx = mode
+        else:
+            target = OperatingMode(mode)
+            mode_to_idx = {OperatingMode.AUTO: 0, OperatingMode.ASK: 1, OperatingMode.WATCH: 2}
+            idx = mode_to_idx.get(target, 0)
+        if getattr(self, "_current_mode_idx", None) == idx:
+            return
+        self._current_mode_idx = idx
         for i, card in enumerate(self.mode_cards):
             card.set_selected(i == idx)
-        self.mode_changed.emit(idx)
+
+    def _select_mode(self, idx: int) -> None:
+        idx_to_mode = {0: OperatingMode.AUTO, 1: OperatingMode.ASK, 2: OperatingMode.WATCH}
+        mode = idx_to_mode.get(idx, OperatingMode.AUTO)
+        self.set_operating_mode(mode)
+        self.mode_changed.emit(mode)
 
     def update_audit_log(self, audit_records: List[Any]) -> None:
         """Update audit ledger from real database records with authentic timestamps."""
