@@ -44,9 +44,41 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return False
 
     def get_default_gateway(self) -> Optional[str]:
-        """Parse default IPv4 gateway via route print or ipconfig."""
+        """Detect default IPv4 gateway via PowerShell Get-NetRoute with ConvertTo-Json or route print fallback."""
         try:
-            # First attempt: route print 0.0.0.0
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object NextHop, InterfaceAlias | ConvertTo-Json",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=4.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                if isinstance(data, list) and data:
+                    data = data[0]
+                if isinstance(data, dict):
+                    hop = data.get("NextHop")
+                    if hop:
+                        ipaddress.IPv4Address(hop)
+                        self._cached_gateway = hop
+                        alias = data.get("InterfaceAlias")
+                        if alias:
+                            self._cached_interface = alias
+                        return hop
+        except Exception:
+            pass
+
+        # Secondary fallback: route print 0.0.0.0
+        try:
             proc = subprocess.run(
                 ["route", "print", "0.0.0.0"],
                 capture_output=True,
@@ -68,16 +100,37 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         except Exception:
             pass
 
-        # Fallback: scan active interfaces in psutil
-        try:
-            gateways = psutil.net_if_stats()
-            # If still nothing, return cached
-            return self._cached_gateway
-        except Exception:
-            return self._cached_gateway
+        return self._cached_gateway
 
     def get_primary_interface(self) -> Optional[str]:
         """Detect the primary network adapter name currently routing default traffic."""
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object InterfaceAlias | ConvertTo-Json",
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=4.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                if isinstance(data, list) and data:
+                    data = data[0]
+                if isinstance(data, dict) and data.get("InterfaceAlias"):
+                    self._cached_interface = data["InterfaceAlias"]
+                    return data["InterfaceAlias"]
+        except Exception:
+            pass
+
+        # Fallback to route print and psutil matching
         try:
             proc = subprocess.run(
                 ["route", "print", "0.0.0.0"],
@@ -95,7 +148,6 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                     break
 
             if interface_ip:
-                # Match interface_ip to an adapter name in psutil.net_if_addrs
                 for iface_name, addrs in psutil.net_if_addrs().items():
                     for addr in addrs:
                         if addr.family == socket.AF_INET and addr.address == interface_ip:
@@ -112,8 +164,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         return self._cached_interface
 
     def ping(self, target: str, timeout_sec: float = 1.5) -> Tuple[bool, float]:
-        """Execute Windows ping command with single echo and millisecond timeout."""
-        # Sanitize target to ensure valid IP or hostname
+        """Execute Windows ping with single echo and parse latency in a locale-independent manner."""
         if not re.match(r"^[a-zA-Z0-9\.\-_:]+$", target):
             return False, 0.0
 
@@ -131,12 +182,25 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             duration_ms = (time.perf_counter() - start_time) * 1000.0
 
             if proc.returncode == 0:
-                # Search for time=XXms or time<1ms
-                match = re.search(r"time[=<]([0-9]+)ms", proc.stdout, re.IGNORECASE)
+                stdout_text = proc.stdout
+                # 1. Locale-independent per-packet reply line:
+                match = re.search(
+                    r"([=<])\s*(\d+(?:\.\d+)?)\s*(?:ms|مللي ثانية|مللي|мс|msec)\b",
+                    stdout_text,
+                    re.IGNORECASE,
+                )
                 if match:
-                    reported_ms = float(match.group(1))
-                    return True, reported_ms
+                    op, val = match.group(1), float(match.group(2))
+                    return True, (0.5 if op == "<" and val <= 1.0 else val)
+
+                # 2. Locale-independent summary statistics line:
+                match_avg = re.search(r"=\s*(\d+(?:\.\d+)?)\s*(?:ms|مللي ثانية|مللي|мс|msec)?\s*$", stdout_text.strip(), re.MULTILINE)
+                if match_avg:
+                    return True, float(match_avg.group(1))
+
                 return True, max(duration_ms, 0.1)
+            return False, 0.0
+        except (subprocess.TimeoutExpired, Exception):
             return False, 0.0
         except (subprocess.TimeoutExpired, Exception):
             return False, 0.0
@@ -357,7 +421,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return False, str(exc)
 
     def get_wifi_metrics(self, interface_name: Optional[str] = None) -> Dict[str, Any]:
-        """Parse netsh wlan show interfaces for signal percentage, SSID, and rate."""
+        """Parse WLAN interfaces for signal percentage, SSID, and rates in a locale-independent manner."""
         metrics: Dict[str, Any] = {
             "is_wifi": False,
             "signal_percent": 0.0,
@@ -377,27 +441,40 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             )
             if proc.returncode == 0:
                 metrics["is_wifi"] = True
+                rates = []
                 for line in proc.stdout.splitlines():
                     line = line.strip()
                     if ":" not in line:
                         continue
                     key, val = [p.strip() for p in line.split(":", 1)]
-                    if "Signal" in key:
-                        val_num = val.replace("%", "").strip()
-                        if val_num.isdigit():
-                            metrics["signal_percent"] = float(val_num)
-                    elif "SSID" in key and "BSSID" not in key:
-                        metrics["ssid"] = val
-                    elif "BSSID" in key:
+
+                    # BSSID (MAC address format in any locale)
+                    if re.match(r"^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$", val):
                         metrics["bssid"] = val
-                    elif "Receive rate" in key:
-                        m = re.search(r"([0-9\.]+)", val)
-                        if m:
-                            metrics["rx_rate_mbps"] = float(m.group(1))
-                    elif "Transmit rate" in key:
-                        m = re.search(r"([0-9\.]+)", val)
-                        if m:
-                            metrics["tx_rate_mbps"] = float(m.group(1))
+
+                    # Signal percentage (% in any locale)
+                    m_sig = re.search(r"(\d+)\s*%", val)
+                    if m_sig:
+                        metrics["signal_percent"] = float(m_sig.group(1))
+
+                    # Throughput rates (MB/s, Mbps, MBit/s, م.ب/ث)
+                    m_rate = re.search(r"([0-9\.]+)\s*(?:mbps|mbit/s|mbits/s|م\.ب/ث)?", val, re.I)
+                    if m_rate and any(u in key.lower() or u in val.lower() for u in ("rate", "mbps", "mbit", "vitesse", "معدل", "استلام", "إرسال")):
+                        try:
+                            rates.append(float(m_rate.group(1)))
+                        except ValueError:
+                            pass
+
+                    # SSID line (contains SSID in key, but not BSSID)
+                    if "ssid" in key.lower() and "bssid" not in key.lower():
+                        metrics["ssid"] = val
+
+                if len(rates) >= 2:
+                    metrics["rx_rate_mbps"] = rates[0]
+                    metrics["tx_rate_mbps"] = rates[1]
+                elif len(rates) == 1:
+                    metrics["rx_rate_mbps"] = rates[0]
+                    metrics["tx_rate_mbps"] = rates[0]
         except Exception:
             pass
         return metrics

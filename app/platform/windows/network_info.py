@@ -25,7 +25,39 @@ _RE_PROFILE = re.compile(r"All User Profile\s*:\s*(.+)")
 
 
 def get_wifi_details() -> Dict[str, Any]:
-    """Inspects native Windows WLAN interfaces via netsh and detects hotspot/upstream router."""
+    """Inspects native Windows WLAN interfaces and connection profile in a locale-independent manner."""
+    ssid = None
+    signal = None
+    adapter = None
+    band = "—"
+
+    # 1. Try PowerShell Get-NetConnectionProfile for network name
+    try:
+        cmd_profile = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-NetConnectionProfile | Select-Object Name, InterfaceAlias, IPv4Connectivity | ConvertTo-Json",
+        ]
+        proc = subprocess.run(
+            cmd_profile,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            data = json.loads(proc.stdout)
+            if isinstance(data, list) and data:
+                data = data[0]
+            if isinstance(data, dict):
+                ssid = data.get("Name")
+    except Exception:
+        pass
+
+    # 2. Inspect netsh wlan show interfaces with locale-independent parsing
     try:
         out = subprocess.check_output(
             ["netsh", "wlan", "show", "interfaces"],
@@ -34,43 +66,77 @@ def get_wifi_details() -> Dict[str, Any]:
             close_fds=True,
             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
         )
-        ssid_match = _RE_SSID.search(out)
-        band_match = _RE_BAND.search(out)
-        signal_match = _RE_SIGNAL.search(out)
-        adapter_match = _RE_DESC.search(out)
-
-        ssid = ssid_match.group(1).strip() if ssid_match else "غير متصل (أو سلكي)"
-        band = band_match.group(1).strip() if band_match else "—"
-        signal = signal_match.group(1).strip() if signal_match else "—"
-        adapter = adapter_match.group(1).strip() if adapter_match else "محول الشبكة"
-
-        # Primary home router candidate from connected SSID
-        home_router_name = f"راوتر {ssid}" if ssid_match else "الراوتر المنزلي"
-
-        return {
-            "ssid": ssid,
-            "band": band,
-            "signal": signal,
-            "adapter": adapter,
-            "is_hotspot": is_hotspot,
-            "hotspot_name": ssid,
-            "upstream_router": home_router_name if is_hotspot else f"راوتر {ssid} المباشر",
-            "upstream_summary": f"متصل بـ {home_router_name} / شبكة WE 5G" if is_hotspot else "اتصال مباشر بالراوتر المنزلي",
-        }
+        for line in out.splitlines():
+            line = line.strip()
+            if ":" not in line:
+                continue
+            k, v = [x.strip() for x in line.split(":", 1)]
+            if not ssid and "ssid" in k.lower() and "bssid" not in k.lower():
+                ssid = v
+            m_sig = re.search(r"(\d+)\s*%", v)
+            if m_sig:
+                signal = f"{m_sig.group(1)}%"
+            if any(term in k.lower() for term in ("desc", "وصف", "beschreibung", "nom")):
+                adapter = v
+            if any(term in k.lower() for term in ("band", "نطاق", "funktyp", "radio")):
+                band = v
     except Exception:
+        pass
+
+    if not ssid:
         return {
-            "ssid": "Wi-Fi المنزلية",
-            "band": "5 GHz",
-            "signal": "85%",
-            "adapter": "محول شبكة لاسلكي",
+            "ssid": "غير متصل (أو سلكي)",
+            "band": "—",
+            "signal": "—",
+            "adapter": adapter or "محول الشبكة",
             "is_hotspot": False,
-            "upstream_router": "راوتر WEA3994B المنزلي",
-            "upstream_summary": "اتصال مباشر بالراوتر المنزلي",
+            "hotspot_name": "—",
+            "upstream_router": "الراوتر المنزلي",
+            "upstream_summary": "اتصال سلكي أو محول متوقف",
         }
+
+    is_hotspot = any(kw in ssid.lower() for kw in ("hotspot", "iphone", "galaxy", "pixel", "phone", "redmi", "huawei"))
+    home_router_name = f"راوتر {ssid}"
+
+    return {
+        "ssid": ssid,
+        "band": band if band != "—" else ("5 GHz" if signal and int(signal.replace('%', '')) > 70 else "2.4 GHz"),
+        "signal": signal or "—",
+        "adapter": adapter or "محول شبكة لاسلكي",
+        "is_hotspot": is_hotspot,
+        "hotspot_name": ssid if is_hotspot else "—",
+        "upstream_router": home_router_name if is_hotspot else f"راوتر {ssid} المباشر",
+        "upstream_summary": f"نقطة اتصال هاتف: {ssid}" if is_hotspot else "اتصال مباشر بالراوتر المنزلي",
+    }
 
 
 def get_active_dns_servers(interface_name: str = "Wi-Fi") -> List[str]:
-    """Inspects active IPv4 DNS servers for the primary interface."""
+    """Inspects active IPv4 DNS servers for the specified interface via PowerShell ConvertTo-Json."""
+    try:
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            f"Get-DnsClientServerAddress -InterfaceAlias '{interface_name}' -AddressFamily IPv4 | Select-Object -ExpandProperty ServerAddresses | ConvertTo-Json",
+        ]
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            if isinstance(data, str) and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", data):
+                return [data]
+            elif isinstance(data, list):
+                return [s for s in data if isinstance(s, str) and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", s)]
+    except Exception:
+        pass
+
     try:
         res = subprocess.run(
             ["netsh", "interface", "ipv4", "show", "dnsservers", interface_name],
@@ -84,9 +150,10 @@ def get_active_dns_servers(interface_name: str = "Wi-Fi") -> List[str]:
             ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", res.stdout)
             if ips:
                 return ips
-        return ["10.60.66.196"]
     except Exception:
-        return ["10.60.66.196"]
+        pass
+
+    return []
 
 
 def resolve_dns_provider_label(dns_servers: List[str], gateway_ip: str = "") -> Dict[str, Any]:
