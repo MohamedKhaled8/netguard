@@ -493,6 +493,19 @@ class MainWindow(QMainWindow):
         self.view_remediation.btn_flush_now.clicked.connect(self._on_quick_flush_dns)
         self.view_remediation.btn_renew_ip.clicked.connect(self._on_quick_renew_ip)
 
+        # Remediation policy toggles
+        if hasattr(self.app_core, "settings") and self.app_core.settings:
+            us = self.app_core.settings
+            self.view_remediation.pol1.toggle.setChecked(us.get_policy("allow_flush_dns"))
+            self.view_remediation.pol2.toggle.setChecked(us.get_policy("meeting_guard"))
+            self.view_remediation.pol3.toggle.setChecked(us.get_policy("allow_switch_dns"))
+            self.view_remediation.pol4.toggle.setChecked(us.get_policy("allow_renew_ip"))
+
+            self.view_remediation.pol1.toggle.toggled.connect(lambda chk: us.set_policy("allow_flush_dns", chk))
+            self.view_remediation.pol2.toggle.toggled.connect(lambda chk: us.set_policy("meeting_guard", chk))
+            self.view_remediation.pol3.toggle.toggled.connect(lambda chk: us.set_policy("allow_switch_dns", chk))
+            self.view_remediation.pol4.toggle.toggled.connect(lambda chk: us.set_policy("allow_renew_ip", chk))
+
         # DNS Apply request
         self.view_dns.apply_dns_requested.connect(self._on_apply_dns_requested)
         self.view_dashboard.dns_panel.apply_clicked.connect(self._on_dashboard_apply_dns)

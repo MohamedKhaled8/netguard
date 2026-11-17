@@ -85,6 +85,20 @@ class RemediationOrchestrator:
         if self.user_settings:
             self.user_settings.set_policy(name, enabled)
 
+    @property
+    def operating_mode(self) -> OperatingMode:
+        return self.mode
+
+    def is_policy_allowed(self, policy_name: str) -> bool:
+        """Check if policy is enabled via user settings or internal policy map."""
+        if self.user_settings:
+            return bool(self.user_settings.get_policy(policy_name))
+        return bool(self._policies.get(policy_name, True))
+
+    def get_pending_approvals(self) -> Dict[str, Dict[str, Any]]:
+        """Return shallow copy of currently held approvals."""
+        return dict(self._pending_approvals)
+
     def set_operating_mode(self, mode: OperatingMode | str) -> None:
         """Switch operating mode (Observation, Assisted, Autonomous Safe)."""
         new_mode = OperatingMode(mode)

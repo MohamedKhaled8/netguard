@@ -68,6 +68,7 @@ class NetGuardApplication:
             audit_repo=self.ctx.audit,
             event_bus=self.ctx.event_bus,
             meeting_guard_check=self.traffic_controller.is_critical_meeting_active,
+            user_settings=user_settings,
         )
 
         # 4. Intelligent Autonomous DNS Optimizer
