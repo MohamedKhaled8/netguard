@@ -459,6 +459,10 @@ class MainWindow(QMainWindow):
 
         # Wire view actions
         self.view_settings.apply_btn.clicked.connect(self._on_apply_settings)
+        if hasattr(self.view_settings, "btn_clear_history"):
+            self.view_settings.btn_clear_history.clicked.connect(self._on_clear_history_requested)
+        if hasattr(self.view_history, "btn_clear_history"):
+            self.view_history.btn_clear_history.clicked.connect(self._on_clear_history_requested)
         self.view_dns.benchmark_btn.clicked.connect(self._on_run_dns_benchmark)
         self.view_traffic.btn_refresh.clicked.connect(self._on_scan_traffic)
         self.view_diagnosis.btn_run_audit.clicked.connect(self._on_run_deep_diagnosis)
@@ -1111,6 +1115,67 @@ class MainWindow(QMainWindow):
 
         self.view_settings.apply_btn.setText("تم حفظ الإعدادات وتطبيقها بنجاح! ✓")
         QTimer.singleShot(2500, lambda: self.view_settings.apply_btn.setText("حفظ الإعدادات وتطبيقها الآن"))
+
+    def _on_clear_history_requested(self) -> None:
+        """Prompt user and execute database history clearance and VACUUM in worker thread."""
+        reply = QMessageBox.question(
+            self,
+            "تأكيد مسح السجل",
+            "هل أنت متأكد من رغبتك في حذف كافة السجلات والقياسات السابقة وتفريغ قاعدة البيانات بالكامل؟\n\nسيتم تفريغ مساحة التخزين على القرص الصلب (VACUUM)، ولا يمكن التراجع عن هذا الإجراء.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+        meas_repo = getattr(ctx, "measurements", None) if ctx else getattr(self.view_history, "measurement_repo", None)
+        inc_repo = getattr(ctx, "incidents", None) if ctx else getattr(self.view_history, "incident_repo", None)
+        audit_repo = getattr(ctx, "audit", None) if ctx else None
+
+        if not meas_repo or not hasattr(meas_repo, "clear_all_history"):
+            QMessageBox.warning(self, "تنبيه", "مستودع البيانات غير متصل حالياً.")
+            return
+
+        if hasattr(self.view_settings, "btn_clear_history"):
+            self.view_settings.btn_clear_history.setEnabled(False)
+            self.view_settings.btn_clear_history.setText("جاري مسح السجلات وتفريغ المساحة...")
+        if hasattr(self.view_history, "btn_clear_history"):
+            self.view_history.btn_clear_history.setEnabled(False)
+            self.view_history.btn_clear_history.setText("جاري التنظيف...")
+
+        def _worker():
+            try:
+                res = meas_repo.clear_all_history(incident_repo=inc_repo, audit_repo=audit_repo)
+                QTimer.singleShot(0, lambda r=res: self._on_clear_history_done(True, r))
+            except Exception as exc:
+                logger.error("Failed to clear database history: %s", exc, exc_info=True)
+                QTimer.singleShot(0, lambda e=str(exc): self._on_clear_history_done(False, e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_clear_history_done(self, success: bool, payload: Any) -> None:
+        if hasattr(self.view_settings, "btn_clear_history"):
+            self.view_settings.btn_clear_history.setEnabled(True)
+            self.view_settings.btn_clear_history.setText("🗑️ مسح السجل وتفريغ المساحة (VACUUM)")
+        if hasattr(self.view_history, "btn_clear_history"):
+            self.view_history.btn_clear_history.setEnabled(True)
+            self.view_history.btn_clear_history.setText("🗑️ تنظيف السجل")
+
+        if success:
+            if hasattr(self.view_history, "_refresh_day"):
+                self.view_history._refresh_day()
+            if hasattr(self, "_refresh_timeline_from_records"):
+                self._refresh_timeline_from_records()
+
+            total_pruned = sum(payload.values()) if isinstance(payload, dict) else 0
+            QMessageBox.information(
+                self,
+                "اكتمل التفريغ",
+                f"تم مسح كافة السجلات السابقة بنجاح وتفريغ قاعدة البيانات على القرص.\n(إجمالي السجلات المفرغة: {total_pruned})"
+            )
+        else:
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تفريغ قاعدة البيانات:\n{payload}")
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

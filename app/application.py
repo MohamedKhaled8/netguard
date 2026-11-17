@@ -87,6 +87,7 @@ class NetGuardApplication:
 
         self._running = False
         self._diagnostic_loop_task: Optional[asyncio.Task] = None
+        self._daily_prune_task: Optional[asyncio.Task] = None
 
     def _on_settings_changed(self, key: str, value: Any) -> None:
         if "interval" in key or key == "probing_interval":
@@ -95,12 +96,9 @@ class NetGuardApplication:
         elif key == "mode":
             if hasattr(self, "orchestrator") and self.orchestrator:
                 self.orchestrator.set_operating_mode(OperatingMode(value))
-        elif key == "retention_days":
+        elif key in ("retention_days", "raw_sample_retention_hours"):
             if hasattr(self.ctx, "measurements") and self.ctx.measurements:
-                try:
-                    self.ctx.measurements.prune_older_than(int(value))
-                except Exception as exc:
-                    logger.warning("Failed to prune measurements on retention change: %s", exc)
+                asyncio.create_task(self._run_retention_prune(), name="dynamic_retention_prune")
 
     def _register_default_actions(self) -> None:
         self.action_registry.register(RecheckGatewayAction())
@@ -124,6 +122,12 @@ class NetGuardApplication:
         self._diagnostic_loop_task = asyncio.create_task(
             self._continuous_evaluation_loop(), name="netguard_eval_loop"
         )
+
+        # Run startup retention pruning & schedule daily pruning loop
+        asyncio.create_task(self._run_retention_prune(), name="startup_retention_prune")
+        self._daily_prune_task = asyncio.create_task(
+            self._daily_pruning_loop(), name="daily_retention_prune"
+        )
         logger.info("NetGuard AI is now actively guarding the network.")
 
     async def stop(self) -> None:
@@ -137,6 +141,13 @@ class NetGuardApplication:
             self._diagnostic_loop_task.cancel()
             try:
                 await self._diagnostic_loop_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._daily_prune_task:
+            self._daily_prune_task.cancel()
+            try:
+                await self._daily_prune_task
             except asyncio.CancelledError:
                 pass
 
@@ -182,6 +193,40 @@ class NetGuardApplication:
                 break
             except Exception as exc:
                 logger.error("Error in continuous evaluation loop: %s", exc, exc_info=True)
+
+    async def _run_retention_prune(self) -> None:
+        """Execute non-blocking retention downsampling, pruning, and storage compaction."""
+        if not hasattr(self.ctx, "measurements") or not self.ctx.measurements:
+            return
+        loop = asyncio.get_running_loop()
+        retention_days = self.settings.get_retention_days() if hasattr(self, "settings") and self.settings else 30
+        raw_hours = getattr(self.settings, "get_raw_sample_retention_hours", lambda: 24)()
+
+        def _do_prune():
+            try:
+                res = self.ctx.measurements.prune_all(
+                    raw_hours=raw_hours,
+                    retention_days=retention_days,
+                    incident_repo=getattr(self.ctx, "incidents", None),
+                    audit_repo=getattr(self.ctx, "actions_audit", None),
+                    vacuum_after=True,
+                )
+                logger.info("Retention prune completed: %s", res)
+            except Exception as exc:
+                logger.warning("Retention pruning error: %s", exc)
+
+        await loop.run_in_executor(None, _do_prune)
+
+    async def _daily_pruning_loop(self) -> None:
+        """Runs daily database pruning and vacuum in background worker."""
+        while self._running:
+            try:
+                await asyncio.sleep(86400)  # 24 hours
+                await self._run_retention_prune()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("Error in daily pruning loop: %s", exc)
 
 
 def create_application(config_path: Optional[str] = None) -> NetGuardApplication:

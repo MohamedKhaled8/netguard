@@ -133,3 +133,23 @@ class AuditRepository:
             cur.execute(query, (1 if rollback_success else 0, status.value, error_message, record_id))
             conn.commit()
             return cur.rowcount > 0
+
+    def prune_older_than(self, days: int) -> int:
+        """Delete audit records older than specified retention days."""
+        if days < 1:
+            raise ValueError(f"Retention days must be >= 1, got {days}")
+        from datetime import timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM actions_audit WHERE timestamp < ?;", (cutoff,))
+            conn.commit()
+            return cur.rowcount
+
+    def clear_all(self) -> int:
+        """Clear all stored audit records."""
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM actions_audit;")
+            conn.commit()
+            return cur.rowcount

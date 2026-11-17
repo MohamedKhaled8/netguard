@@ -76,17 +76,154 @@ class MeasurementRepository:
                 results.append(self._row_to_measurement(row))
         return results
 
-    def prune_older_than(self, days: int) -> int:
-        """Deletes measurements older than specified days, returning count of deleted rows."""
-        if days < 1:
-            raise ValueError(f"Retention days must be >= 1, got {days}")
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    def downsample_to_aggregates(self, cutoff_timestamp: Optional[datetime] = None) -> int:
+        """Downsample 1-second raw measurements into 1-minute aggregates (min/avg/max/p95, loss_rate)."""
+        if cutoff_timestamp is None:
+            cutoff_timestamp = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        cutoff_str = cutoff_timestamp.isoformat()
+
+        query = """
+        WITH ranked AS (
+            SELECT 
+                strftime('%Y-%m-%dT%H:%M:00', timestamp) AS bucket_start,
+                metric_type, source, target_or_interface,
+                raw_value, status,
+                ROW_NUMBER() OVER (
+                    PARTITION BY strftime('%Y-%m-%dT%H:%M:00', timestamp), metric_type, source, target_or_interface 
+                    ORDER BY raw_value
+                ) as rn,
+                COUNT(*) OVER (
+                    PARTITION BY strftime('%Y-%m-%dT%H:%M:00', timestamp), metric_type, source, target_or_interface
+                ) as total_cnt
+            FROM measurements
+            WHERE timestamp < ?
+        )
+        INSERT OR REPLACE INTO measurement_aggregates_1m (
+            bucket_start, metric_type, source, target_or_interface,
+            sample_count, min_value, avg_value, max_value, p95_value, loss_rate
+        )
+        SELECT 
+            bucket_start, metric_type, source, target_or_interface,
+            total_cnt,
+            MIN(raw_value),
+            AVG(raw_value),
+            MAX(raw_value),
+            MAX(CASE WHEN rn = MAX(1, CAST(ROUND(total_cnt * 0.95) AS INT)) THEN raw_value END),
+            AVG(CASE WHEN lower(status) != 'success' THEN 1.0 ELSE 0.0 END)
+        FROM ranked
+        GROUP BY bucket_start, metric_type, source, target_or_interface;
+        """
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (cutoff_str,))
+            cur.execute("SELECT changes();")
+            row = cur.fetchone()
+            changes = int(row[0]) if row and row[0] is not None else 0
+            conn.commit()
+            return changes
+
+    def prune_raw_samples(self, keep_hours: int = 24) -> int:
+        """Downsample raw measurements older than keep_hours then deletes them."""
+        if keep_hours < 1:
+            raise ValueError(f"keep_hours must be >= 1, got {keep_hours}")
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=keep_hours)
+        cutoff_str = cutoff_dt.isoformat()
+
+        # Ensure raw samples are aggregated before deletion
+        self.downsample_to_aggregates(cutoff_timestamp=cutoff_dt)
+
         query = "DELETE FROM measurements WHERE timestamp < ?;"
         with self.db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(query, (cutoff,))
+            cur.execute(query, (cutoff_str,))
+            cur.execute("SELECT changes();")
+            row = cur.fetchone()
+            changes = int(row[0]) if row and row[0] is not None else 0
             conn.commit()
-            return cur.rowcount
+            return changes
+
+    def prune_aggregates(self, retention_days: int = 30) -> int:
+        """Deletes 1-minute aggregates older than retention_days."""
+        if retention_days < 1:
+            raise ValueError(f"retention_days must be >= 1, got {retention_days}")
+        cutoff_str = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        query = "DELETE FROM measurement_aggregates_1m WHERE bucket_start < ?;"
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, (cutoff_str,))
+            cur.execute("SELECT changes();")
+            row = cur.fetchone()
+            changes = int(row[0]) if row and row[0] is not None else 0
+            conn.commit()
+            return changes
+
+    def prune_older_than(self, days: int) -> int:
+        """Deletes measurements and aggregates older than specified days, returning count of deleted raw rows."""
+        if days < 1:
+            raise ValueError(f"Retention days must be >= 1, got {days}")
+        self.prune_aggregates(retention_days=days)
+        return self.prune_raw_samples(keep_hours=min(24, days * 24))
+
+    def prune_all(
+        self,
+        raw_hours: int = 24,
+        retention_days: int = 30,
+        incident_repo: Optional[Any] = None,
+        audit_repo: Optional[Any] = None,
+        vacuum_after: bool = False,
+    ) -> Dict[str, int]:
+        """Prunes raw measurements, downsampled aggregates, incidents, and audit logs according to retention settings."""
+        aggregates_created = self.downsample_to_aggregates()
+        raw_pruned = self.prune_raw_samples(keep_hours=raw_hours)
+        aggregates_pruned = self.prune_aggregates(retention_days=retention_days)
+
+        incidents_pruned = 0
+        if incident_repo and hasattr(incident_repo, "prune_older_than"):
+            incidents_pruned = incident_repo.prune_older_than(days=retention_days)
+
+        audit_pruned = 0
+        if audit_repo and hasattr(audit_repo, "prune_older_than"):
+            audit_pruned = audit_repo.prune_older_than(days=retention_days)
+
+        if vacuum_after and hasattr(self.db, "vacuum"):
+            self.db.vacuum()
+
+        return {
+            "aggregates_created": aggregates_created,
+            "raw_pruned": raw_pruned,
+            "aggregates_pruned": aggregates_pruned,
+            "incidents_pruned": incidents_pruned,
+            "audit_pruned": audit_pruned,
+        }
+
+    def clear_all_history(
+        self,
+        incident_repo: Optional[Any] = None,
+        audit_repo: Optional[Any] = None,
+    ) -> Dict[str, int]:
+        """Purge all measurements, aggregates, incidents, and audit records, reclaiming disk space with VACUUM."""
+        deleted_raw = 0
+        deleted_aggs = 0
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM measurements;")
+            deleted_raw = cur.rowcount
+            cur.execute("DELETE FROM measurement_aggregates_1m;")
+            deleted_aggs = cur.rowcount
+            conn.commit()
+
+        deleted_inc = incident_repo.clear_all() if incident_repo and hasattr(incident_repo, "clear_all") else 0
+        deleted_audit = audit_repo.clear_all() if audit_repo and hasattr(audit_repo, "clear_all") else 0
+
+        if hasattr(self.db, "vacuum"):
+            self.db.vacuum()
+
+        return {
+            "measurements": deleted_raw,
+            "aggregates": deleted_aggs,
+            "incidents": deleted_inc,
+            "audit": deleted_audit,
+        }
 
     def get_day_slots(
         self,
@@ -96,7 +233,8 @@ class MeasurementRepository:
     ) -> List[str]:
         """Aggregate 30-minute intervals for target_date across 48 slots.
 
-        Evaluates measurements and incidents against thresholds to return
+        Reads from 1-minute aggregates (downsampled history) and recent raw samples,
+        evaluating metrics and incidents against thresholds to return
         a list of 48 states ('healthy', 'slow', 'bad', 'no-data', 'future').
         """
         if thresholds is None:
@@ -128,6 +266,21 @@ class MeasurementRepository:
         slot_metrics: Dict[int, Dict[str, Dict[str, float]]] = {}
         slot_incidents: Dict[int, Dict[str, int]] = {}
 
+        agg_query = """
+        SELECT 
+            cast(strftime('%H', case when bucket_start like '%+%' or bucket_start like '%Z' then datetime(bucket_start, 'localtime') else datetime(bucket_start) end) as integer) * 2 
+            + (cast(strftime('%M', case when bucket_start like '%+%' or bucket_start like '%Z' then datetime(bucket_start, 'localtime') else datetime(bucket_start) end) as integer) / 30) AS slot,
+            metric_type,
+            avg(avg_value) as avg_val,
+            max(max_value) as max_val,
+            min(min_value) as min_val,
+            sum(sample_count) as sample_count
+        FROM measurement_aggregates_1m
+        WHERE bucket_start >= ? AND bucket_start <= ?
+          AND strftime('%Y-%m-%d', case when bucket_start like '%+%' or bucket_start like '%Z' then datetime(bucket_start, 'localtime') else datetime(bucket_start) end) = ?
+        GROUP BY slot, metric_type;
+        """
+
         meas_query = """
         SELECT 
             cast(strftime('%H', case when timestamp like '%+%' or timestamp like '%Z' then datetime(timestamp, 'localtime') else datetime(timestamp) end) as integer) * 2 
@@ -140,6 +293,10 @@ class MeasurementRepository:
         FROM measurements
         WHERE timestamp >= ? AND timestamp <= ?
           AND strftime('%Y-%m-%d', case when timestamp like '%+%' or timestamp like '%Z' then datetime(timestamp, 'localtime') else datetime(timestamp) end) = ?
+          AND substr(timestamp, 1, 16) || ':00' NOT IN (
+              SELECT bucket_start FROM measurement_aggregates_1m 
+              WHERE bucket_start >= ? AND bucket_start <= ?
+          )
         GROUP BY slot, metric_type;
         """
 
@@ -157,7 +314,8 @@ class MeasurementRepository:
 
         with self.db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(meas_query, (start_search, end_search, target_date_str))
+            # 1. Query 1-minute aggregates
+            cur.execute(agg_query, (start_search, end_search, target_date_str))
             for row in cur.fetchall():
                 slot = int(row["slot"])
                 if slot not in slot_metrics:
@@ -169,6 +327,33 @@ class MeasurementRepository:
                     "count": int(row["sample_count"]),
                 }
 
+            # 2. Query any unaggregated recent measurements
+            cur.execute(meas_query, (start_search, end_search, target_date_str, start_search, end_search))
+            for row in cur.fetchall():
+                slot = int(row["slot"])
+                if slot not in slot_metrics:
+                    slot_metrics[slot] = {}
+                mtype = row["metric_type"]
+                cnt = int(row["sample_count"])
+                avg_v = float(row["avg_val"]) if row["avg_val"] is not None else 0.0
+                max_v = float(row["max_val"]) if row["max_val"] is not None else 0.0
+                min_v = float(row["min_val"]) if row["min_val"] is not None else 0.0
+                if mtype in slot_metrics[slot]:
+                    curr = slot_metrics[slot][mtype]
+                    total_cnt = curr["count"] + cnt
+                    curr["avg"] = ((curr["avg"] * curr["count"]) + (avg_v * cnt)) / max(1, total_cnt)
+                    curr["max"] = max(curr["max"], max_v)
+                    curr["min"] = min(curr["min"], min_v)
+                    curr["count"] = total_cnt
+                else:
+                    slot_metrics[slot][mtype] = {
+                        "avg": avg_v,
+                        "max": max_v,
+                        "min": min_v,
+                        "count": cnt,
+                    }
+
+            # 3. Query Incidents
             cur.execute(inc_query, (start_search, end_search, target_date_str))
             for row in cur.fetchall():
                 slot = int(row["slot"])

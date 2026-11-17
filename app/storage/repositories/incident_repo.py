@@ -120,3 +120,22 @@ class IncidentRepository:
                     )
                 )
         return results
+
+    def prune_older_than(self, days: int) -> int:
+        """Delete incidents older than specified retention days."""
+        if days < 1:
+            raise ValueError(f"Retention days must be >= 1, got {days}")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM incidents WHERE timestamp < ?;", (cutoff,))
+            conn.commit()
+            return cur.rowcount
+
+    def clear_all(self) -> int:
+        """Clear all stored incidents."""
+        with self.db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM incidents;")
+            conn.commit()
+            return cur.rowcount

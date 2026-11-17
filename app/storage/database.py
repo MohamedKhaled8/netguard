@@ -69,6 +69,28 @@ CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions_audit(timestamp);
 CREATE INDEX IF NOT EXISTS idx_actions_id ON actions_audit(action_id);
 """
 
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS measurement_aggregates_1m (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_start TEXT NOT NULL,
+    metric_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target_or_interface TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    min_value REAL NOT NULL,
+    avg_value REAL NOT NULL,
+    max_value REAL NOT NULL,
+    p95_value REAL NOT NULL,
+    loss_rate REAL NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(bucket_start, metric_type, source, target_or_interface)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aggregates_bucket ON measurement_aggregates_1m(bucket_start);
+CREATE INDEX IF NOT EXISTS idx_aggregates_metric ON measurement_aggregates_1m(metric_type);
+CREATE INDEX IF NOT EXISTS idx_aggregates_target ON measurement_aggregates_1m(target_or_interface);
+"""
+
 
 class DatabaseManager:
     """Manages SQLite connection lifecycle, PRAGMAs, and transactions."""
@@ -91,11 +113,34 @@ class DatabaseManager:
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
         conn.executescript(SCHEMA_V1)
         cur = conn.cursor()
-        cur.execute("SELECT version FROM schema_version WHERE version = 1;")
-        if not cur.fetchone():
-            cur.execute("INSERT INTO schema_version (version) VALUES (1);")
+        cur.execute("SELECT MAX(version) FROM schema_version;")
+        row = cur.fetchone()
+        current_version = row[0] if row and row[0] is not None else 0
+
+        if current_version < 1:
+            conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (1);")
             conn.commit()
+            current_version = 1
             logger.info("Database schema initialized to version 1 at %s", self.db_path)
+
+        if current_version < 2:
+            conn.executescript(SCHEMA_V2)
+            conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (2);")
+            conn.commit()
+            logger.info("Database schema migrated to version 2 (aggregates) at %s", self.db_path)
+
+    def vacuum(self) -> None:
+        """Run VACUUM to reclaim free space from pruned rows in autocommit mode."""
+        if str(self.db_path) == ":memory:":
+            return
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, isolation_level=None)
+        try:
+            conn.execute("VACUUM;")
+            logger.info("Database VACUUM completed successfully on %s", self.db_path)
+        except Exception as exc:
+            logger.warning("Database VACUUM failed on %s: %s", self.db_path, exc)
+        finally:
+            conn.close()
 
     def get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(

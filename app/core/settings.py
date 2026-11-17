@@ -26,6 +26,7 @@ class UserSettingsSchema(BaseModel):
     mode: OperatingMode = Field(default=OperatingMode.AUTO)
     probing_interval: float = Field(default=1.0, ge=0.01, le=3600.0)
     retention_days: int = Field(default=30, ge=1, le=3650)
+    raw_sample_retention_hours: int = Field(default=24, ge=1, le=720)
     policies: Dict[str, bool] = Field(
         default_factory=lambda: {
             "allow_flush_dns": True,
@@ -222,6 +223,20 @@ class UserSettings(QObject):
             self.changed.emit("retention_days", val)
             if self.event_bus:
                 self.event_bus.publish_sync(EventTopics.SETTINGS_CHANGED, {"retention_days": val})
+
+    def get_raw_sample_retention_hours(self) -> int:
+        return getattr(self._data, "raw_sample_retention_hours", 24)
+
+    def set_raw_sample_retention_hours(self, hours: int) -> None:
+        val = int(hours)
+        if val < 1:
+            raise ValueError(f"Raw sample retention hours must be >= 1, got {val}")
+        if getattr(self._data, "raw_sample_retention_hours", 24) != val:
+            self._data.raw_sample_retention_hours = val
+            self.save()
+            self.changed.emit("raw_sample_retention_hours", val)
+            if self.event_bus:
+                self.event_bus.publish_sync(EventTopics.SETTINGS_CHANGED, {"raw_sample_retention_hours": val})
 
     def get_threshold_overrides(self) -> Dict[str, Any]:
         return dict(self._data.threshold_overrides)
