@@ -50,7 +50,7 @@ class ProcessTableCell(QWidget):
         lbl = QLabel(speed_str)
         lbl.setFont(tokens.get_mono_font(13, 500))
         lbl.setStyleSheet(f"color: {tokens.TEXT};")
-        lbl.setFixedWidth(75)
+        lbl.setMinimumWidth(160)
         layout.addWidget(lbl)
 
         fill_color = tokens.STATUS_WARN if is_throttled else tokens.ACCENT
@@ -231,9 +231,12 @@ class TrafficView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.table.setColumnWidth(4, 185)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.table.setColumnWidth(5, 140)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(54)
         self.table.setSortingEnabled(True)
         self.table.setStyleSheet(f"""
             QTableWidget {{
@@ -330,6 +333,7 @@ class TrafficView(QWidget):
             empty_lbl.setFont(tokens.get_sans_font(14, 400))
             empty_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 0;")
             empty_lbl.setAlignment(Qt.AlignCenter)
+            empty_lbl.setWordWrap(True)
             self.reports_list_layout.addWidget(empty_lbl)
             return
 
@@ -435,18 +439,30 @@ class TrafficView(QWidget):
                 self.table.setCellWidget(r, 5, lbl_prot)
             elif is_conf:
                 btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else "أولوية DSCP")
-                btn_dscp.setFixedHeight(28)
+                btn_dscp.setFixedHeight(36)
+                btn_dscp.setFixedWidth(120)
                 btn_dscp.clicked.connect(lambda checked=False, pn=pname, en=not is_dscp: self._on_toggle_dscp(pn, en))
-                self.table.setCellWidget(r, 5, btn_dscp)
+                btn_box = QWidget()
+                btn_layout = QHBoxLayout(btn_box)
+                btn_layout.setContentsMargins(4, 4, 4, 4)
+                btn_layout.setAlignment(Qt.AlignCenter)
+                btn_layout.addWidget(btn_dscp)
+                self.table.setCellWidget(r, 5, btn_box)
             else:
                 cfg_bps = 5_000_000
                 if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
                     cfg_bps = self.user_settings.get_qos_upload_throttle_bps()
                 cfg_mbps = cfg_bps / 1_000_000.0
                 btn_th = SecondaryButton("إلغاء التقييد" if is_throttled else f"تقييد ({cfg_mbps:.0f}M)")
-                btn_th.setFixedHeight(28)
+                btn_th.setFixedHeight(36)
+                btn_th.setFixedWidth(120)
                 btn_th.clicked.connect(lambda checked=False, pn=pname, en=not is_throttled: self._on_toggle_throttle(pn, en))
-                self.table.setCellWidget(r, 5, btn_th)
+                btn_box = QWidget()
+                btn_layout = QHBoxLayout(btn_box)
+                btn_layout.setContentsMargins(4, 4, 4, 4)
+                btn_layout.setAlignment(Qt.AlignCenter)
+                btn_layout.addWidget(btn_th)
+                self.table.setCellWidget(r, 5, btn_box)
 
         fit_table_to_content(self.table)
 

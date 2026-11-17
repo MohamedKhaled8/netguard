@@ -209,9 +209,9 @@ class SidebarWidget(QFrame):
         # -------------------------------------------------------------
         # 2b. Admin Elevation Indicator / Restart Button
         # -------------------------------------------------------------
-        self.btn_restart_admin = SecondaryButton("🛡️ تشغيل كمسؤول")
-        self.btn_restart_admin.setFixedHeight(30)
-        self.btn_restart_admin.setFont(tokens.get_sans_font(12, 500))
+        self.btn_restart_admin = SecondaryButton("تشغيل كمسؤول")
+        self.btn_restart_admin.setFixedHeight(36)
+        self.btn_restart_admin.setFont(tokens.get_sans_font(13, 500))
         self.btn_restart_admin.setToolTip("تشغيل NetGuard AI بصلاحيات مسؤول Windows (Run as Administrator)")
         self.sidebar_layout.addWidget(self.btn_restart_admin)
 

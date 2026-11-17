@@ -68,7 +68,7 @@ class ActiveSessionCard(QFrame):
         top_row.addStretch()
 
         self.btn_end = SecondaryButton("إنهاء الجلسة")
-        self.btn_end.setFixedHeight(30)
+        self.btn_end.setFixedHeight(36)
         if on_close_callback:
             self.btn_end.clicked.connect(lambda: on_close_callback(session.process_name))
         top_row.addWidget(self.btn_end)
@@ -208,7 +208,7 @@ class SessionReportCard(QFrame):
         top_row.addStretch()
 
         self.btn_toggle = SecondaryButton("عرض التفاصيل ▼")
-        self.btn_toggle.setFixedHeight(30)
+        self.btn_toggle.setFixedHeight(36)
         self.btn_toggle.clicked.connect(self._toggle_expand)
         top_row.addWidget(self.btn_toggle)
         self.main_layout.addLayout(top_row)

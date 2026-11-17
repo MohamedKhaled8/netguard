@@ -207,6 +207,7 @@ class DiagnosisView(QWidget):
         self.table.setHorizontalHeaderLabels(["المؤشر الفني", "القيمة المقاسة", "الحد الآمن", "الحالة", "التقييم"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: transparent;

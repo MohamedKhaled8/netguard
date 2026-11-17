@@ -30,17 +30,17 @@ class SegmentedControl(QFrame):
                 border-radius: 10px;
             }}
         """)
-        self.setFixedHeight(34)
+        self.setFixedHeight(46)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
         for i, opt in enumerate(options):
             btn = QPushButton(opt)
-            btn.setFont(tokens.get_sans_font(12, 500))
+            btn.setFont(tokens.get_sans_font(13, 500))
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(26)
+            btn.setFixedHeight(36)
             btn.clicked.connect(lambda checked=False, idx=i: self._on_button_clicked(idx))
             layout.addWidget(btn)
             self.buttons.append(btn)

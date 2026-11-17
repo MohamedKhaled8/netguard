@@ -365,7 +365,9 @@ class FlowPathPanel(QFrame):
         col_now, self.lbl_now = make_metric_col("الآن")
         col_typ, self.lbl_typ = make_metric_col("المعتاد")
         col_st, self.lbl_st = make_metric_col("الحالة")
-        self.lbl_st.setFont(tokens.get_sans_font(13, 500))
+        col_st.setMinimumWidth(125)
+        self.lbl_st.setMinimumWidth(120)
+        self.lbl_st.setFont(tokens.get_sans_font(14, 500))
 
         stats_layout.addWidget(col_now)
         stats_layout.addWidget(col_typ)

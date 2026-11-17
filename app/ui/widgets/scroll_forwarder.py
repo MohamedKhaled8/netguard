@@ -38,7 +38,10 @@ def fit_table_to_content(table: QTableWidget, max_rows_before_scroll: int = 15) 
     header_h = table.horizontalHeader().height()
     if header_h <= 0:
         header_h = 42
+    def_h = table.verticalHeader().defaultSectionSize()
+    if def_h <= 0:
+        def_h = 52
     total_rows = table.rowCount()
-    rows_h = sum(table.rowHeight(r) if table.rowHeight(r) > 0 else 48 for r in range(total_rows))
+    rows_h = sum(table.rowHeight(r) if table.rowHeight(r) > 0 else def_h for r in range(total_rows))
     total_h = header_h + rows_h + 8
     table.setFixedHeight(max(total_h, 60))

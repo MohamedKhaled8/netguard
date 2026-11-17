@@ -187,8 +187,10 @@ class DNSView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.table.setColumnWidth(4, 150)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(54)
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: transparent;
@@ -260,7 +262,8 @@ class DNSView(QWidget):
             self.table.setCellWidget(r, 3, bar_w)
 
             btn_apply = SecondaryButton("معتمد حالياً ✓" if is_active_row else "طبّق")
-            btn_apply.setFixedHeight(30)
+            btn_apply.setFixedHeight(36)
+            btn_apply.setFixedWidth(130)
             if is_active_row:
                 btn_apply.setEnabled(False)
                 btn_apply.setStyleSheet(f"color: {tokens.STATUS_OK}; border: 1px solid {tokens.LINE}; background: {tokens.SURFACE_INSET};")
@@ -268,7 +271,13 @@ class DNSView(QWidget):
                 btn_apply.setEnabled(True)
                 sec_ip = "8.8.4.4" if "8.8.8.8" in s.ip else ("1.0.0.1" if "1.1.1.1" in s.ip else "")
                 btn_apply.clicked.connect(lambda checked=False, p_ip=s.ip, s_ip=sec_ip, n_str=s.name: self.apply_dns_requested.emit(p_ip, s_ip, n_str))
-            self.table.setCellWidget(r, 4, btn_apply)
+
+            btn_box = QWidget()
+            btn_layout = QHBoxLayout(btn_box)
+            btn_layout.setContentsMargins(4, 4, 4, 4)
+            btn_layout.setAlignment(Qt.AlignCenter)
+            btn_layout.addWidget(btn_apply)
+            self.table.setCellWidget(r, 4, btn_box)
 
         best = scores[0]
         best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
