@@ -33,7 +33,7 @@ def require_admin(
         return True, ""
 
     reason = (
-        f"يتطلب إجراء '{action_name}' صلاحيات مسؤول لنظام Windows (Administrator). "
+        f"يتطلب إجراء '{action_name}' صلاحيات مسؤول لنظام Windows (Administrator privileges required). "
         "يُرجى تشغيل البرنامج كمسؤول لتطبيق هذا الإجراء."
     )
     return False, reason
@@ -48,8 +48,12 @@ def prompt_restart_as_admin(
 
     If accepted, relaunches elevated via Windows UAC and exits current process.
     """
+    import os
     from PySide6.QtWidgets import QMessageBox
     from PySide6.QtCore import QCoreApplication
+
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("ALLOW_TEST_QMESSAGEBOX"):
+        return False
 
     if platform is None:
         from app.platform.factory import get_platform_adapter
@@ -61,13 +65,22 @@ def prompt_restart_as_admin(
         "هل ترغب في إعادة تشغيل NetGuard AI الآن بصلاحيات مسؤول (Run as Administrator) لتفعيل كافة الميزات؟"
     )
 
-    reply = QMessageBox.question(
-        parent_widget,
-        title,
-        msg,
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.Yes,
-    )
+    try:
+        reply = QMessageBox.question(
+            parent_widget,
+            title,
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+    except RuntimeError:
+        reply = QMessageBox.question(
+            None,
+            title,
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
 
     if reply == QMessageBox.Yes:
         logger.info("User requested elevation restart for action: %s", action_name)

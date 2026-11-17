@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from app.core.models.metrics import OperatingMode
 from app.ui import tokens
-from app.ui.widgets.buttons import PrimaryButton
+from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.toggle import ToggleSwitch
 from app.ui.widgets.base_panel import Panel
 

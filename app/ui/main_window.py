@@ -41,6 +41,7 @@ from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 from app.ui import tokens
 from app.ui.styles import DARK_THEME_QSS
 from app.ui.widgets.nav_item import NavItem
+from app.ui.widgets.buttons import SecondaryButton
 from app.ui.views.dashboard_view import DashboardView
 from app.ui.views.diagnosis_view import DiagnosisView
 from app.ui.views.remediation_view import RemediationView

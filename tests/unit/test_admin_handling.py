@@ -36,7 +36,8 @@ def test_remediation_actions_use_require_admin():
     assert "صلاحيات مسؤول" in reason_dns
 
 
-def test_prompt_restart_as_admin_accepted():
+def test_prompt_restart_as_admin_accepted(monkeypatch):
+    monkeypatch.setenv("ALLOW_TEST_QMESSAGEBOX", "1")
     mock_platform = MagicMock()
     mock_platform.restart_as_administrator.return_value = True
 
