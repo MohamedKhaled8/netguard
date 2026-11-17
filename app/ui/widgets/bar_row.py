@@ -341,7 +341,7 @@ class DNSRecommendationPanel(QFrame):
             ms_color = tokens.STATUS_BAD
             tag_text = "استجابة بطيئة"
             tag_color = tokens.STATUS_BAD
-            note_text = "الخادم يعاني من بطء في الاستجابة (أكثر من 85ms). جاري المتابعة."
+            note_text = f"الخادم يعاني من بطء في الاستجابة ({best_ms:.0f} ms). جاري المتابعة."
 
         if is_optimal:
             self.lbl_tag.setText(tag_text)

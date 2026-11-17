@@ -28,6 +28,7 @@ from app.ui.widgets.chip import Chip
 from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.timeline import TimelinePanel
 from app.core.models.metrics import Diagnosis, ProbableCause
+from app.core.thresholds import NetworkThresholds
 
 
 class LayerChecklistRow(QFrame):
@@ -224,13 +225,14 @@ class DiagnosisView(QWidget):
         root_layout.addWidget(scroll)
 
     def _populate_evidence_table(self) -> None:
+        t = NetworkThresholds()
         rows = [
-            ("Gateway Ping (الراوتر)", "—", "< 25.0 ms", "—", "في انتظار الفحص"),
-            ("WAN Ping (الإنترنت)", "—", "< 80.0 ms", "—", "في انتظار الفحص"),
-            ("DNS Latency (استعلام)", "—", "< 100.0 ms", "—", "في انتظار الفحص"),
-            ("Bufferbloat & MTU (تحمل الحزم والضغط)", "—", "Grade A / < 30ms", "—", "في انتظار الفحص"),
-            ("Packet Loss (فقدان الحزم)", "—", "< 1.0 %", "—", "في انتظار الفحص"),
-            ("Wi-Fi Signal / Link (جودة الربط)", "—", "> 35%", "—", "في انتظار الفحص"),
+            ("Gateway Ping (الراوتر)", "—", f"< {t.latency.gateway_warning_ms:.1f} ms", "—", "في انتظار الفحص"),
+            ("WAN Ping (الإنترنت)", "—", f"< {t.latency.external_warning_ms:.1f} ms", "—", "في انتظار الفحص"),
+            ("DNS Latency (استعلام)", "—", f"< {t.latency.dns_warning_ms:.1f} ms", "—", "في انتظار الفحص"),
+            ("Bufferbloat & MTU (تحمل الحزم والضغط)", "—", f"< {t.jitter.warning_ms:.1f} ms", "—", "في انتظار الفحص"),
+            ("Packet Loss (فقدان الحزم)", "—", f"< {t.loss.dashboard_warning_pct:.1f} %", "—", "في انتظار الفحص"),
+            ("Wi-Fi Signal / Link (جودة الربط)", "—", f"> {t.wifi.signal_critical_pct:.0f} %", "—", "في انتظار الفحص"),
         ]
         self.table.setRowCount(len(rows))
         for r_idx, r_data in enumerate(rows):

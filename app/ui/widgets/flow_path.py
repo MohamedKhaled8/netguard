@@ -458,7 +458,7 @@ class FlowPathPanel(QFrame):
                 if is_optimal
                 else f"خادم DNS الحالي أبطأ من المعدل المعتاد ({latency_ms:.0f} ms). قد تتأخر المواقع 1-2 ثانية قبل التحميل."
             )
-            typical = f"{int(round(latency_ms))} ms" if is_optimal else "12 ms"
+            typical = f"{int(round(latency_ms))} ms" if is_optimal else "—"
         if len(self.node_info) > 3:
             self.node_info[3]["latency"] = latency_ms
             self.node_info[3]["status"] = status

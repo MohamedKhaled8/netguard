@@ -2,7 +2,7 @@
 
 Precision custom QPainter chart:
 - Left Y mono labels (0, 50, 100, 200)
-- 50ms dashed threshold with label 'حد الجودة 50ms'
+- Reference dashed threshold with label 'حد الاستقرار المرجعي'
 - 5 bottom mono time labels
 - Accent line (1.8px) with 6% flat fill
 - Incident spike redrawn in #FF6B5E (2.6px) with vertical line and clamped badge
@@ -44,8 +44,8 @@ class LatencyPlotCanvas(QWidget):
         self.setFixedHeight(240)
         self.samples: List[float] = []
         self.timestamps: List[str] = []
-        self.incident_index: Optional[int] = 38
-        self.incident_time_str: str = "15:32"
+        self.incident_index: Optional[int] = None
+        self.incident_time_str: str = "—"
         self._reveal_progress = 1.0
         self._pulse_phase = 0.0
 
@@ -70,36 +70,10 @@ class LatencyPlotCanvas(QWidget):
         self.update()
 
     def _init_default_data(self) -> None:
-        data = []
-        n = 60
-        now = datetime.now()
-        times = []
-        spike_idx = 38
-        self.incident_index = spike_idx
-
-        for i in range(n):
-            dt = now - timedelta(minutes=(n - 1 - i))
-            times.append(dt.strftime("%H:%M"))
-
-            if i < spike_idx - 3:
-                val = 22.0 + 3.0 * math.sin(i * 0.4)
-            elif i == spike_idx - 2:
-                val = 45.0
-            elif i == spike_idx - 1:
-                val = 110.0
-            elif i == spike_idx:
-                val = 182.0  # Peak
-                self.incident_time_str = "15:32"
-            elif i == spike_idx + 1:
-                val = 90.0
-            elif i == spike_idx + 2:
-                val = 40.0
-            else:
-                val = 24.0 + 2.5 * math.cos(i * 0.3)
-            data.append(val)
-
-        self.samples = data
-        self.timestamps = times
+        self.samples = []
+        self.timestamps = []
+        self.incident_index = None
+        self.incident_time_str = "—"
 
     def set_data(self, samples: List[float], incident_idx: Optional[int] = None) -> None:
         if samples and len(samples) >= 15:
@@ -121,6 +95,9 @@ class LatencyPlotCanvas(QWidget):
         w = float(self.width())
         h = float(self.height())
         if w < 100 or not self.samples:
+            painter.setFont(tokens.get_sans_font(13, 400))
+            painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
+            painter.drawText(self.rect(), Qt.AlignCenter, "في انتظار تسجيل قياسات حقيقية…")
             return
 
         pad_left = 38.0
@@ -159,13 +136,13 @@ class LatencyPlotCanvas(QWidget):
         painter.setPen(dash_pen)
         painter.drawLine(QPointF(pad_left, y_thresh), QPointF(pad_left + plot_w, y_thresh))
 
-        # Label for 50ms threshold
+        # Label for threshold
         painter.setFont(tokens.get_sans_font(11, 400))
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
         painter.drawText(
-            QRectF(pad_left + plot_w - 110, y_thresh - 16, 110, 14),
+            QRectF(pad_left + plot_w - 140, y_thresh - 16, 140, 14),
             Qt.AlignRight | Qt.AlignVCenter,
-            "حد الجودة 50ms",
+            "حد الاستقرار المرجعي",
         )
 
         # -------------------------------------------------------------

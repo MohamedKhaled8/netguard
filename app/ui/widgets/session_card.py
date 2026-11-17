@@ -98,7 +98,7 @@ class ActiveSessionCard(QFrame):
         self.lbl_duration.setStyleSheet(f"color: {tokens.TEXT};")
         telemetry_row.addWidget(self.lbl_duration)
 
-        lbl_telemetry = QLabel(f"· {session.avg_bitrate_mbps:.1f} Mbps · {session.avg_latency_ms:.0f} ms · 0% فقدان")
+        lbl_telemetry = QLabel(f"· {session.avg_bitrate_mbps:.1f} Mbps · {session.avg_latency_ms:.0f} ms · {session.packet_loss_pct:.1f}% فقدان")
         lbl_telemetry.setFont(tokens.get_mono_font(12, 400))
         lbl_telemetry.setStyleSheet(f"color: {tokens.STATUS_OK};")
         telemetry_row.addWidget(lbl_telemetry)
@@ -133,7 +133,7 @@ class ActiveSessionCard(QFrame):
         )
         badges = [
             dscp_badge,
-            ("✓ تقييد سرعة الرفع الصادر للعمليات الخلفية (5.0 Mbps)", tokens.STATUS_WARN),
+            ("✓ تقييد سرعة الرفع الصادر للعمليات الخلفية", tokens.STATUS_WARN),
             ("✓ حماية المقابس ومراقبة الاتصال (Meeting Guard)", tokens.STATUS_OK),
             ("✓ تعليق الإجراءات التي تسبب انقطاعاً لحظياً", tokens.STATUS_OK),
         ]

@@ -386,7 +386,6 @@ class DashboardView(QWidget):
         self.btn_scan.setEnabled(False)
         self._last_scan_seconds = 0
         self.quick_scan_requested.emit()
-        QTimer.singleShot(10000, self._on_scan_completed)
 
     def _on_scan_completed(self) -> None:
         self.btn_scan.setText("افحص الآن")
