@@ -36,6 +36,7 @@ from app.ui.widgets.latency_chart import LatencyChart
 from app.ui.widgets.timeline import TimelinePanel
 from app.ui.widgets.flow_path import FlowPathPanel
 from app.ui.widgets.bar_row import TrafficConsumersPanel, DNSRecommendationPanel
+from app.ui.widgets.scroll_forwarder import make_scroll_transparent
 from app.core.models.metrics import MetricType, Diagnosis, ProbableCause, ProbeStatus
 
 
@@ -241,12 +242,15 @@ class DashboardView(QWidget):
         self.latency_chart = LatencyChart(self)
         self.timeline_panel = TimelinePanel(self)
 
+        make_scroll_transparent(self.latency_chart, self.scroll)
+
         self.content_layout.addWidget(self.row_a_container)
 
         # -------------------------------------------------------------
         # 3.5 مسار اتصالك (Full Width Panel)
         # -------------------------------------------------------------
         self.flow_path = FlowPathPanel(self)
+        make_scroll_transparent(self.flow_path, self.scroll)
         self.content_layout.addWidget(self.flow_path)
 
         # -------------------------------------------------------------

@@ -28,6 +28,7 @@ from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.bar_row import HorizontalProgressBar
 from app.core.thresholds import DEFAULT_THRESHOLDS
+from app.ui.widgets.scroll_forwarder import make_scroll_transparent, fit_table_to_content
 
 
 class RankedServerRow(QWidget):
@@ -204,6 +205,8 @@ class DNSView(QWidget):
         table_panel.main_layout.addWidget(self.table)
         layout.addWidget(table_panel)
 
+        make_scroll_transparent(self.table, scroll)
+
         self._populate_default_table()
 
         scroll.setWidget(content_widget)
@@ -311,6 +314,8 @@ class DNSView(QWidget):
             name_label = active_name or "مزود الخدمة"
             self.lbl_curr_name.setText(f"الخادم النشط بجهازك ({name_label}) — يتوفر خادم أسرع")
             self.lbl_fast_name.setText(f"{best.name} · {best.ip} (الأسرع عالمياً ومحلياً)")
+
+        fit_table_to_content(self.table)
 
     def set_active_dns_info(self, dns_list: List[str]) -> None:
         self._active_dns_ips = dns_list

@@ -30,6 +30,7 @@ from app.ui.widgets.base_panel import Panel
 from app.ui.widgets.timeline import TimelinePanel
 from app.core.models.metrics import Diagnosis, ProbableCause
 from app.core.thresholds import NetworkThresholds
+from app.ui.widgets.scroll_forwarder import make_scroll_transparent, fit_table_to_content
 
 
 class LayerChecklistRow(QFrame):
@@ -222,6 +223,9 @@ class DiagnosisView(QWidget):
         self._populate_evidence_table()
         table_panel.main_layout.addWidget(self.table)
         layout.addWidget(table_panel)
+
+        make_scroll_transparent(self.table, scroll)
+        fit_table_to_content(self.table)
 
         scroll.setWidget(content_widget)
         root_layout.addWidget(scroll)

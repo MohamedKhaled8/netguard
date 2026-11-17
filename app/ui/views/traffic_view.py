@@ -35,6 +35,7 @@ from app.traffic.session_tracker import AppSessionTracker, AppSessionRecord
 from app.traffic.applications import ApplicationCatalog
 from app.platform.interfaces import IPlatformAdapter
 from app.platform.windows.adapter import WindowsPlatformAdapter
+from app.ui.widgets.scroll_forwarder import make_scroll_transparent, fit_table_to_content
 
 
 class ProcessTableCell(QWidget):
@@ -250,6 +251,8 @@ class TrafficView(QWidget):
         table_panel.main_layout.addWidget(self.table)
         layout.addWidget(table_panel)
 
+        make_scroll_transparent(self.table, scroll)
+
         self._populate_default_processes()
 
         scroll.setWidget(self.content_widget)
@@ -439,6 +442,8 @@ class TrafficView(QWidget):
                 btn_th.setFixedHeight(28)
                 btn_th.clicked.connect(lambda checked=False, pn=pname, en=not is_throttled: self._on_toggle_throttle(pn, en))
                 self.table.setCellWidget(r, 5, btn_th)
+
+        fit_table_to_content(self.table)
 
     def _on_toggle_throttle(self, pname: str, enable: bool) -> None:
         """Create or remove Windows NetQosPolicy upload throttle for executable asynchronously."""
