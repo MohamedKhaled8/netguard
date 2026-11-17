@@ -114,7 +114,7 @@ class LatencyPlotCanvas(QWidget):
         y_max = 200.0
         y_ticks = [0.0, 50.0, 100.0, 200.0]
 
-        painter.setFont(tokens.get_mono_font(11, 400))
+        painter.setFont(tokens.get_mono_font(12, 400))
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
 
         for val in y_ticks:
@@ -137,7 +137,7 @@ class LatencyPlotCanvas(QWidget):
         painter.drawLine(QPointF(pad_left, y_thresh), QPointF(pad_left + plot_w, y_thresh))
 
         # Label for threshold
-        painter.setFont(tokens.get_sans_font(11, 400))
+        painter.setFont(tokens.get_sans_font(12, 400))
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
         painter.drawText(
             QRectF(pad_left + plot_w - 140, y_thresh - 16, 140, 14),
@@ -148,7 +148,7 @@ class LatencyPlotCanvas(QWidget):
         # -------------------------------------------------------------
         # 2. X Axis (5 Mono Time Labels)
         # -------------------------------------------------------------
-        painter.setFont(tokens.get_mono_font(11, 400))
+        painter.setFont(tokens.get_mono_font(12, 400))
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
         num_ticks = 5
         n_pts = len(self.samples)

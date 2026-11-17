@@ -29,7 +29,8 @@ class Chip(QLabel):
         self.variant = variant
         self.radius = radius
         self.font_size = font_size
-        self.setFont(tokens.get_sans_font(font_size, 500))
+        self.setFont(tokens.get_sans_font(font_size, 700))
+        self.setMinimumHeight(24)
         self._apply_style()
 
     def set_variant(self, variant: str, text: str = "") -> None:
@@ -48,11 +49,11 @@ class Chip(QLabel):
             border = tokens.BAD_SOFT_BORDER
             color = tokens.BAD_SOFT_TEXT
         elif self.variant == "tag-warn":
-            bg = "transparent"
+            bg = tokens.SURFACE_INSET
             border = tokens.WARN_BORDER
             color = tokens.STATUS_WARN
         elif self.variant == "tag-ok":
-            bg = "transparent"
+            bg = tokens.SURFACE_INSET
             border = tokens.OK_SOFT_BORDER
             color = tokens.STATUS_OK
         else:
@@ -60,15 +61,15 @@ class Chip(QLabel):
             border = tokens.LINE
             color = tokens.TEXT_MUTED
 
-        rad = self.radius if self.radius != 999 else 14
+        rad = self.radius if self.radius != 999 else 12
         self.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg};
                 border: 1px solid {border};
                 border-radius: {rad}px;
                 color: {color};
-                padding: 4px 10px;
+                padding: 3px 12px;
                 font-size: {self.font_size}px;
-                font-weight: 500;
+                font-weight: 700;
             }}
         """)

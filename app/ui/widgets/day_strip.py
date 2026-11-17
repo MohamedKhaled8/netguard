@@ -96,7 +96,7 @@ class DayStripCanvas(QWidget):
             painter.drawRoundedRect(rect, 2.0, 2.0)
 
         # 2. Draw Bottom Mono Time Axis (strictly LTR: 00:00 -> 24:00)
-        painter.setFont(tokens.get_mono_font(11, 400))
+        painter.setFont(tokens.get_mono_font(12, 400))
         painter.setPen(QColor(tokens.TEXT_MUTED))
 
         axis_points = [

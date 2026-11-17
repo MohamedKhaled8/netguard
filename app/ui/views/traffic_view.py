@@ -159,7 +159,7 @@ class TrafficView(QWidget):
         lbl_row.addWidget(self.meeting_dot)
 
         self.meeting_lbl = QLabel("وضع مكالمات الفيديو: مؤمن (لا توجد مكالمات Zoom / Teams جارية حالياً)")
-        self.meeting_lbl.setFont(tokens.get_sans_font(13, 500))
+        self.meeting_lbl.setFont(tokens.get_sans_font(14, 500))
         self.meeting_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         self.meeting_lbl.setWordWrap(True)
         lbl_row.addWidget(self.meeting_lbl, stretch=1)
@@ -327,7 +327,7 @@ class TrafficView(QWidget):
         completed = self.session_tracker.get_completed_sessions()
         if not completed:
             empty_lbl = QLabel("لا توجد جلسات مكالمات سابقة مسجلة — ستظهر التقارير تلقائياً بعد إنهاء أي اجتماع (Zoom, Teams, Meet).")
-            empty_lbl.setFont(tokens.get_sans_font(13, 400))
+            empty_lbl.setFont(tokens.get_sans_font(14, 400))
             empty_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 0;")
             empty_lbl.setAlignment(Qt.AlignCenter)
             self.reports_list_layout.addWidget(empty_lbl)
@@ -381,17 +381,22 @@ class TrafficView(QWidget):
 
             # 0. Name
             item_name = QTableWidgetItem(pname)
-            item_name.setFont(tokens.get_sans_font(13, 500))
+            item_name.setFont(tokens.get_sans_font(14, 500))
             self.table.setItem(r, 0, item_name)
 
             # 1. PID
             item_pid = QTableWidgetItem(pid_str)
-            item_pid.setFont(tokens.get_mono_font(12, 400))
+            item_pid.setFont(tokens.get_mono_font(14, 400))
             self.table.setItem(r, 1, item_pid)
 
-            # 2. Tag Chip
+            # 2. Tag Chip (Centered pill container)
             chip = Chip(tag_text, variant="tag-ok" if is_conf else "ok-soft")
-            self.table.setCellWidget(r, 2, chip)
+            chip_box = QWidget()
+            chip_layout = QHBoxLayout(chip_box)
+            chip_layout.setContentsMargins(4, 2, 4, 2)
+            chip_layout.setAlignment(Qt.AlignCenter)
+            chip_layout.addWidget(chip)
+            self.table.setCellWidget(r, 2, chip_box)
 
             # 3. Bar & Sockets Cell
             frac = min(1.0, max(0.08, sockets_cnt / max(1, max_sockets)))
@@ -408,15 +413,15 @@ class TrafficView(QWidget):
                 bps = throttled_apps[pname_lower]
                 mbps = (bps / 1_000_000.0) if bps else 5.0
                 qos_lbl = QLabel(f"مقيد: {mbps:.1f} Mbps (صادر)")
-                qos_lbl.setFont(tokens.get_sans_font(12, 500))
+                qos_lbl.setFont(tokens.get_sans_font(14, 500))
                 qos_lbl.setStyleSheet(f"color: {tokens.STATUS_WARN};")
             elif is_dscp:
                 qos_lbl = QLabel("أولوية DSCP 46 (صادر)")
-                qos_lbl.setFont(tokens.get_sans_font(12, 500))
+                qos_lbl.setFont(tokens.get_sans_font(14, 500))
                 qos_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
             else:
                 qos_lbl = QLabel("غير مقيد (افتراضي)")
-                qos_lbl.setFont(tokens.get_sans_font(12, 400))
+                qos_lbl.setFont(tokens.get_sans_font(14, 400))
                 qos_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
             qos_lbl.setAlignment(Qt.AlignCenter)
             self.table.setCellWidget(r, 4, qos_lbl)
@@ -424,7 +429,7 @@ class TrafficView(QWidget):
             # 5. QoS Action Button
             if is_sys:
                 lbl_prot = QLabel("محمي للنظام")
-                lbl_prot.setFont(tokens.get_sans_font(12, 400))
+                lbl_prot.setFont(tokens.get_sans_font(14, 400))
                 lbl_prot.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
                 lbl_prot.setAlignment(Qt.AlignCenter)
                 self.table.setCellWidget(r, 5, lbl_prot)

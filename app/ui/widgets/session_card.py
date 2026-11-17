@@ -288,7 +288,7 @@ class SessionReportCard(QFrame):
             col.addWidget(v_lbl)
 
             s_lbl = QLabel(sub)
-            s_lbl.setFont(tokens.get_sans_font(11, 400))
+            s_lbl.setFont(tokens.get_sans_font(12, 400))
             s_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
             s_lbl.setWordWrap(True)
             col.addWidget(s_lbl)

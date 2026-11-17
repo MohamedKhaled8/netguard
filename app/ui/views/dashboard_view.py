@@ -178,7 +178,7 @@ class DashboardView(QWidget):
         alert_layout.addStretch()
 
         self.lbl_probe_alert_tag = QLabel("تنبيه جودة المراقبة", self.probe_alert_bar)
-        self.lbl_probe_alert_tag.setFont(tokens.get_sans_font(11, 400))
+        self.lbl_probe_alert_tag.setFont(tokens.get_sans_font(12, 400))
         self.lbl_probe_alert_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         alert_layout.addWidget(self.lbl_probe_alert_tag)
 

@@ -483,15 +483,18 @@ class LayoutChecker:
 
             # Determine text color from palette or stylesheet
             fg_col = lbl.palette().color(lbl.foregroundRole())
-            # If foreground is default black or pure white due to lack of palette sync, check stylesheet
             ss = lbl.styleSheet()
-            if "color:" in ss:
+            bg_col = surface_col
+            if ss:
                 import re
-                m = re.search(r"color:\s*([#a-zA-Z0-9]+)", ss)
-                if m:
-                    fg_col = QColor(m.group(1))
+                m_fg = re.search(r"(?<![\w\-])color:\s*([#a-zA-Z0-9]+)", ss)
+                if m_fg:
+                    fg_col = QColor(m_fg.group(1))
+                m_bg = re.search(r"background(?:-color)?:\s*([#a-zA-Z0-9]+)", ss)
+                if m_bg and m_bg.group(1).lower() != "transparent":
+                    bg_col = QColor(m_bg.group(1))
 
-            contrast = calculate_contrast(fg_col, surface_col)
+            contrast = calculate_contrast(fg_col, bg_col)
             # WCAG AA requires 4.5:1 for normal text
             if contrast < 4.5:
                 self.violations.append(
@@ -502,7 +505,7 @@ class LayoutChecker:
                         widget_name=lbl.objectName() or text[:25],
                         widget_type="QLabel",
                         rule="Contrast Ratio",
-                        details=f"Contrast ratio {contrast:.2f}:1 is below 4.5:1 (fg: {fg_col.name()}, bg: {surface_col.name()}) for '{text[:25]}'",
+                        details=f"Contrast ratio {contrast:.2f}:1 is below 4.5:1 (fg: {fg_col.name()}, bg: {bg_col.name()}) for '{text[:25]}'",
                     )
                 )
 

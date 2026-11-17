@@ -106,14 +106,14 @@ class HistoryEventItem(QFrame):
 
         # Cause line
         lbl_cause = QLabel(f"السبب: {cause}")
-        lbl_cause.setFont(tokens.get_sans_font(13, 400))
+        lbl_cause.setFont(tokens.get_sans_font(14, 400))
         lbl_cause.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         lbl_cause.setWordWrap(True)
         layout.addWidget(lbl_cause)
 
         # Action line
         lbl_action = QLabel(f"الإجراء المتخذ: {action}")
-        lbl_action.setFont(tokens.get_sans_font(13, 400))
+        lbl_action.setFont(tokens.get_sans_font(14, 400))
         lbl_action.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         lbl_action.setWordWrap(True)
         layout.addWidget(lbl_action)
@@ -272,7 +272,7 @@ class HistoryView(QWidget):
             empty_col = QVBoxLayout(empty_card)
             empty_col.setAlignment(Qt.AlignCenter)
             lbl = QLabel("لا توجد أحداث أو انقطاعات مسجلة لهذا اليوم — كان الاتصال مستقراً")
-            lbl.setFont(tokens.get_sans_font(13, 400))
+            lbl.setFont(tokens.get_sans_font(14, 400))
             lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
             lbl.setAlignment(Qt.AlignCenter)
             empty_col.addWidget(lbl)

@@ -41,9 +41,9 @@ class RankedServerRow(QWidget):
         layout.setSpacing(10)
 
         lbl_ms = QLabel(f"{ms_val:.1f} ms")
-        lbl_ms.setFont(tokens.get_mono_font(13, 500))
+        lbl_ms.setFont(tokens.get_mono_font(14, 500))
         lbl_ms.setStyleSheet(f"color: {tokens.TEXT};")
-        lbl_ms.setFixedWidth(65)
+        lbl_ms.setFixedWidth(78)
         layout.addWidget(lbl_ms)
 
         frac = max(0.12, min(1.0, ms_val / max(1.0, max_ms)))
@@ -239,18 +239,18 @@ class DNSView(QWidget):
 
             rank_str = f"{r + 1:02d}"
             r_item = QTableWidgetItem(rank_str)
-            r_item.setFont(tokens.get_mono_font(12, 500))
+            r_item.setFont(tokens.get_mono_font(14, 500))
             self.table.setItem(r, 0, r_item)
 
             disp_name = f"{s.name} (النشط حالياً)" if is_active_row else s.name
             n_item = QTableWidgetItem(disp_name)
-            n_item.setFont(tokens.get_sans_font(13, 600 if is_active_row else 500))
+            n_item.setFont(tokens.get_sans_font(14, 600 if is_active_row else 500))
             if is_active_row:
                 n_item.setForeground(QColor(tokens.STATUS_OK))
             self.table.setItem(r, 1, n_item)
 
             ip_item = QTableWidgetItem(s.ip)
-            ip_item.setFont(tokens.get_mono_font(13, 400))
+            ip_item.setFont(tokens.get_mono_font(14, 400))
             self.table.setItem(r, 2, ip_item)
 
             med_ms = getattr(s, "median_latency_ms", 0.0) or s.mean_latency_ms

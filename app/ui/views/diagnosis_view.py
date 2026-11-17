@@ -92,7 +92,7 @@ class LayerChecklistRow(QFrame):
         layout.addLayout(top_row)
 
         self.lbl_desc = QLabel(desc)
-        self.lbl_desc.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_desc.setFont(tokens.get_sans_font(14, 400))
         self.lbl_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.lbl_desc.setWordWrap(True)
         layout.addWidget(self.lbl_desc)
@@ -245,9 +245,9 @@ class DiagnosisView(QWidget):
             for c_idx, val in enumerate(r_data):
                 item = QTableWidgetItem(val)
                 if c_idx in (1, 2):
-                    item.setFont(tokens.get_mono_font(13, 500))
+                    item.setFont(tokens.get_mono_font(14, 500))
                 else:
-                    item.setFont(tokens.get_sans_font(13, 400))
+                    item.setFont(tokens.get_sans_font(14, 400))
                 self.table.setItem(r_idx, c_idx, item)
 
     def update_from_deep_scan(self, report) -> None:

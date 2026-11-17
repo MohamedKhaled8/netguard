@@ -59,7 +59,7 @@ class PathNodeButton(QFrame):
         top_row.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_idx = QLabel(index_str)
-        self.lbl_idx.setFont(tokens.get_mono_font(11, 400))
+        self.lbl_idx.setFont(tokens.get_mono_font(12, 400))
         self.lbl_idx.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         top_row.addWidget(self.lbl_idx)
 

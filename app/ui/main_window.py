@@ -311,9 +311,16 @@ class MainWindow(QMainWindow):
         self.traffic_controller = getattr(application, "traffic_controller", None) or TrafficController(event_bus=eb, platform=plat, user_settings=us)
         self.bridge = UIAsyncBridge()
 
-        # Enforce Arabic RTL layout
+        # Enforce Arabic RTL layout & dark theme palette
         if QApplication.instance():
             QApplication.instance().setLayoutDirection(Qt.RightToLeft)
+            pal = QApplication.instance().palette()
+            pal.setColor(pal.ColorRole.WindowText, QColor(tokens.TEXT))
+            pal.setColor(pal.ColorRole.Text, QColor(tokens.TEXT))
+            pal.setColor(pal.ColorRole.Window, QColor(tokens.BG))
+            pal.setColor(pal.ColorRole.Base, QColor(tokens.SURFACE))
+            pal.setColor(pal.ColorRole.ButtonText, QColor(tokens.TEXT))
+            QApplication.instance().setPalette(pal)
 
         tokens.init_fonts()
         self.setWindowTitle("NetGuard AI")

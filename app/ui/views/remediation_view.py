@@ -310,7 +310,7 @@ class RemediationView(QWidget):
 
         # Empty initial ledger state awaiting real actions
         self._empty_ledger_lbl = QLabel("لا توجد إجراءات مسجلة بعد — يعمل النظام في وضع المراقبة التلقائية.")
-        self._empty_ledger_lbl.setFont(tokens.get_sans_font(13, 400))
+        self._empty_ledger_lbl.setFont(tokens.get_sans_font(14, 400))
         self._empty_ledger_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 8px;")
         self._empty_ledger_lbl.setAlignment(Qt.AlignCenter)
         self.events_layout.addWidget(self._empty_ledger_lbl)
@@ -350,7 +350,7 @@ class RemediationView(QWidget):
 
         if not audit_records:
             empty_lbl = QLabel("لا توجد إجراءات مسجلة بعد — يعمل النظام في وضع المراقبة التلقائية.")
-            empty_lbl.setFont(tokens.get_sans_font(13, 400))
+            empty_lbl.setFont(tokens.get_sans_font(14, 400))
             empty_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding: 16px 8px;")
             empty_lbl.setAlignment(Qt.AlignCenter)
             self.events_layout.addWidget(empty_lbl)
