@@ -102,6 +102,7 @@ class DashboardView(QWidget):
         # Scroll area for vertical content
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setStyleSheet("QScrollArea { background-color: transparent; border: none; }")
 

@@ -113,6 +113,10 @@ def list_actions(app) -> None:
 
 
 def run_gui(app) -> None:
+    import os
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+
     from PySide6.QtWidgets import QApplication
     from app.ui.main_window import MainWindow
 

@@ -139,6 +139,7 @@ class HistoryView(QWidget):
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
 
         content_widget = QWidget()

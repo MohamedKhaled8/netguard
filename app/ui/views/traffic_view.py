@@ -84,6 +84,7 @@ class TrafficView(QWidget):
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
 

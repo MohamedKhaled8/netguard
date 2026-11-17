@@ -7,6 +7,10 @@ BEFORE importing any application dependencies.
 import os
 import sys
 
+# Configure High-DPI pass-through scaling before any Qt module is imported
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+
 # 1. Locate local virtual environment Python
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _VENV_PYTHON = os.path.join(_DIR, ".venv", "Scripts", "python.exe")

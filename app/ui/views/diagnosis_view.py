@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt
 from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.chip import Chip
@@ -121,6 +122,7 @@ class DiagnosisView(QWidget):
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
 
         content_widget = QWidget()

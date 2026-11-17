@@ -1236,7 +1236,7 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         w = self.width()
 
-        if w < 700:
+        if w < 900:
             if getattr(self, "_shell_mode", "dock") != "top_bar":
                 self._shell_mode = "top_bar"
                 self.root_layout.removeWidget(self.sidebar)
@@ -1250,7 +1250,12 @@ class MainWindow(QMainWindow):
                 self._shell_mode = "dock"
                 self.root_layout.removeWidget(self.sidebar)
                 self.root_layout.removeWidget(self.stack)
-                self.root_layout.setDirection(QHBoxLayout.LeftToRight)
+                dir_mode = (
+                    QHBoxLayout.RightToLeft
+                    if self.layoutDirection() == Qt.RightToLeft
+                    else QHBoxLayout.LeftToRight
+                )
+                self.root_layout.setDirection(dir_mode)
                 self.root_layout.addWidget(self.sidebar)
                 self.root_layout.addWidget(self.stack, stretch=1)
                 self.sidebar.set_mode("dock")

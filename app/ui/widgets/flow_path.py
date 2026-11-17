@@ -44,8 +44,10 @@ class PathNodeButton(QFrame):
         self.status = status
         self.is_selected = False
 
-        self.setFixedWidth(148)
+        self.setMinimumWidth(85)
         self.setFixedHeight(94)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
 
         layout = QVBoxLayout(self)
@@ -160,8 +162,10 @@ class PathConnector(QWidget):
 
     def __init__(self, dest_status: str = "ok", parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(40)
+        self.setMinimumWidth(8)
         self.setFixedHeight(94)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.dest_status = dest_status
         self._phase = 0.0  # 0.0 to 1.0
 
@@ -239,18 +243,10 @@ class FlowPathPanel(QFrame):
         title_col.addWidget(self.lbl_sub)
         layout.addLayout(title_col)
 
-        # Horizontally scrollable path container (min-width 760px)
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFixedHeight(106)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-
         self.path_container = QWidget()
-        self.path_container.setMinimumWidth(760)
         path_layout = QHBoxLayout(self.path_container)
         path_layout.setContentsMargins(0, 0, 0, 0)
-        path_layout.setSpacing(0)
+        path_layout.setSpacing(4)
 
         # 5 Nodes in RTL: 01 جهازك -> 02 الراوتر -> 03 مزود الخدمة -> 04 خادم DNS -> 05 الإنترنت
         self.node_info = [
@@ -312,8 +308,7 @@ class FlowPathPanel(QFrame):
                 path_layout.addWidget(conn, stretch=1)
                 self.connectors.append(conn)
 
-        self.scroll.setWidget(self.path_container)
-        layout.addWidget(self.scroll)
+        layout.addWidget(self.path_container)
 
         # Inset Detail Box (bg #101315, 1px line, radius 12, padding 18x20)
         self.detail_box = QFrame()
