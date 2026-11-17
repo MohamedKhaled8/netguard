@@ -206,6 +206,15 @@ class SidebarWidget(QFrame):
         self.stretch_item = self.sidebar_layout.addStretch()
 
         # -------------------------------------------------------------
+        # 2b. Admin Elevation Indicator / Restart Button
+        # -------------------------------------------------------------
+        self.btn_restart_admin = SecondaryButton("🛡️ تشغيل كمسؤول")
+        self.btn_restart_admin.setFixedHeight(30)
+        self.btn_restart_admin.setFont(tokens.get_sans_font(12, 500))
+        self.btn_restart_admin.setToolTip("تشغيل NetGuard AI بصلاحيات مسؤول Windows (Run as Administrator)")
+        self.sidebar_layout.addWidget(self.btn_restart_admin)
+
+        # -------------------------------------------------------------
         # 3. Bottom: Mode Selector Group (وضع الإصلاح)
         # -------------------------------------------------------------
         self.mode_container = QWidget()
@@ -387,6 +396,18 @@ class MainWindow(QMainWindow):
         self.bridge.network_info_ready.connect(self._on_network_info_ready)
         self.bridge.remediation_event_received.connect(self._on_remediation_event_received)
         self.bridge.speed_test_done.connect(self._on_speed_test_done)
+
+        # Wire Admin Elevation restart button
+        from app.platform.admin import require_admin, prompt_restart_as_admin
+        platform = getattr(getattr(self, "app_core", None), "ctx", None)
+        plat = getattr(platform, "platform", None)
+        if plat and plat.is_elevated():
+            self.sidebar.btn_restart_admin.setText("صلاحيات مسؤول مفعّلة ✓")
+            self.sidebar.btn_restart_admin.setEnabled(False)
+        else:
+            self.sidebar.btn_restart_admin.clicked.connect(
+                lambda: prompt_restart_as_admin(self, "تشغيل كافة ميزات الحماية المتقدمة", plat)
+            )
 
         self._wire_background_event_listeners()
 
@@ -1046,15 +1067,18 @@ class MainWindow(QMainWindow):
 
     def _on_quick_renew_ip(self) -> None:
         platform = self.app_core.ctx.platform
-        if not platform.is_elevated():
+        from app.platform.admin import require_admin, prompt_restart_as_admin
+        ok_admin, reason = require_admin("تجديد مسار الاتصال وعنوان IP (DHCP Lease)", platform)
+        if not ok_admin:
             self.view_remediation.btn_renew_ip.setEnabled(True)
             self.view_remediation.btn_renew_ip.setText("تجديد IP (يتطلب صلاحيات مسؤول)")
             self.view_dashboard.log_autonomous_action(
                 "تعذر تجديد عنوان IP",
-                "يتطلب تجديد عنوان IP (DHCP Lease) صلاحيات مسؤول لنظام Windows. يُرجى تشغيل البرنامج كمسؤول.",
+                reason,
                 level="warning",
             )
             QTimer.singleShot(3500, lambda: self.view_remediation.btn_renew_ip.setText("تجديد مسار الاتصال"))
+            prompt_restart_as_admin(self, "تجديد عنوان IP ومسار الاتصال", platform)
             return
 
         self.view_remediation.btn_renew_ip.setEnabled(False)

@@ -441,6 +441,12 @@ class TrafficView(QWidget):
 
     def _on_toggle_throttle(self, pname: str, enable: bool) -> None:
         """Create or remove Windows NetQosPolicy upload throttle for executable asynchronously."""
+        from app.platform.admin import require_admin, prompt_restart_as_admin
+        ok_admin, reason = require_admin(f"تقييد سرعة الرفع لـ {pname}", self.platform)
+        if not ok_admin:
+            prompt_restart_as_admin(self, f"تقييد سرعة الرفع الصادر لـ {pname}", self.platform)
+            return
+
         policy_name = f"NetGuard_Throttle_{pname}"
         throttle_bps = 5_000_000
         if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
@@ -458,6 +464,12 @@ class TrafficView(QWidget):
 
     def _on_toggle_dscp(self, pname: str, enable: bool) -> None:
         """Create or remove Windows NetQosPolicy DSCP 46 tagging for executable asynchronously."""
+        from app.platform.admin import require_admin, prompt_restart_as_admin
+        ok_admin, reason = require_admin(f"تحديد أولوية DSCP 46 لـ {pname}", self.platform)
+        if not ok_admin:
+            prompt_restart_as_admin(self, f"تحديد أولوية DSCP 46 لـ {pname}", self.platform)
+            return
+
         policy_name = f"NetGuard_DSCP_{pname}"
 
         def _worker():

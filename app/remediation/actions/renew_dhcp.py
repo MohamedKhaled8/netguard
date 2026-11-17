@@ -25,8 +25,10 @@ class RenewIPLeaseAction(RemediationAction):
         )
 
     def check_preconditions(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Tuple[bool, str]:
-        if not platform.is_elevated():
-            return False, "Cannot renew DHCP lease: Requires Administrator privileges. NetGuard is running in unprivileged user mode."
+        from app.platform.admin import require_admin
+        ok, reason = require_admin("تجديد عنوان IP / DHCP", platform)
+        if not ok:
+            return False, f"Cannot renew DHCP lease: {reason}"
 
         iface = context.get("interface_name") or platform.get_primary_interface()
         if not iface:

@@ -26,8 +26,10 @@ class SwitchDNSResolverAction(RemediationAction):
         self.fallback_resolvers = fallback_resolvers or ["1.1.1.1", "8.8.8.8"]
 
     def check_preconditions(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Tuple[bool, str]:
-        if not platform.is_elevated():
-            return False, "Cannot modify interface DNS: Requires Administrator privileges. NetGuard is running in unprivileged user mode."
+        from app.platform.admin import require_admin
+        ok, reason = require_admin("تعديل خوادم DNS لمحول الشبكة", platform)
+        if not ok:
+            return False, f"Cannot modify interface DNS: {reason}"
 
         iface = context.get("interface_name") or platform.get_primary_interface()
         if not iface:
