@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from datetime import datetime
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from app.core.config.models import ProbingConfig
 from app.core.bus import EventBus, EventTopics
-from app.core.models.metrics import Measurement, MetricType
+from app.core.models.metrics import Measurement, MetricType, ProbeStatus
 from app.monitoring.models.probe_result import ProbeResult
 from app.monitoring.probes.base import BaseProbe
 from app.monitoring.probes.gateway_probe import GatewayProbe
@@ -46,6 +46,7 @@ class ObservabilityEngine:
         self._sliding_windows: Dict[MetricType, deque[Measurement]] = {
             m: deque(maxlen=window_size) for m in MetricType
         }
+        self._probe_health: Dict[str, Dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
         self._initialize_probes()
@@ -118,8 +119,11 @@ class ObservabilityEngine:
         tasks = [probe.run() for probe in self._probes]
         results_lists = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for results in results_lists:
-            if isinstance(results, list):
+        for probe, results in zip(self._probes, results_lists):
+            if isinstance(results, Exception):
+                self._update_probe_health(probe.name, [], error=results)
+            elif isinstance(results, list):
+                self._update_probe_health(probe.name, results)
                 for pr in results:
                     m = pr.to_measurement()
                     await self._record_measurement(m)
@@ -131,6 +135,7 @@ class ObservabilityEngine:
         while self._running:
             try:
                 results = await probe.run()
+                self._update_probe_health(probe.name, results)
                 for pr in results:
                     m = pr.to_measurement()
                     await self._record_measurement(m)
@@ -138,6 +143,7 @@ class ObservabilityEngine:
                 break
             except Exception as exc:
                 logger.error("Error in probe worker %s: %s", probe.name, exc, exc_info=True)
+                self._update_probe_health(probe.name, [], error=exc)
 
             try:
                 await asyncio.sleep(probe.interval_sec)
@@ -189,3 +195,155 @@ class ObservabilityEngine:
                 probe.interval_sec = val
             elif hasattr(probe, "interval_sec"):
                 probe.interval_sec = max(val, getattr(probe, "interval_sec", val))
+
+    def _update_probe_health(
+        self,
+        probe_name: str,
+        results: List[ProbeResult],
+        error: Optional[Exception] = None,
+    ) -> None:
+        """Tracks consecutive failures and categorizes network probe errors."""
+        if probe_name not in self._probe_health:
+            self._probe_health[probe_name] = {
+                "consecutive_failures": 0,
+                "error_code": None,
+                "error_message": None,
+                "severity": "info",
+                "last_success": None,
+                "last_failure": None,
+            }
+
+        rec = self._probe_health[probe_name]
+        now = datetime.now(timezone.utc)
+
+        if error is not None:
+            rec["consecutive_failures"] += 1
+            rec["error_code"] = "probe_exception"
+            rec["error_message"] = f"خطأ في مسبار {probe_name}: {error}"
+            rec["severity"] = "warning"
+            rec["last_failure"] = now
+            return
+
+        if probe_name == "gateway_probe":
+            reach_results = [r for r in results if r.metric_type == MetricType.GATEWAY_REACHABILITY]
+            gw_ok = any(r.status == ProbeStatus.SUCCESS and r.raw_value > 0.0 for r in reach_results)
+            if gw_ok:
+                rec["consecutive_failures"] = 0
+                rec["error_code"] = None
+                rec["error_message"] = None
+                rec["last_success"] = now
+            else:
+                rec["consecutive_failures"] += 1
+                rec["error_code"] = "cannot_reach_gateway"
+                rec["error_message"] = "تعذر الوصول إلى الراوتر (Cannot reach gateway)"
+                rec["severity"] = "critical"
+                rec["last_failure"] = now
+
+        elif probe_name == "external_probe":
+            icmp_results = [r for r in results if r.metric_type == MetricType.EXTERNAL_LATENCY and r.metadata.get("icmp")]
+            tcp_results = [r for r in results if r.metric_type == MetricType.EXTERNAL_TCP_CONNECT]
+            icmp_ok = any(r.status == ProbeStatus.SUCCESS for r in icmp_results)
+            tcp_ok = any(r.status == ProbeStatus.SUCCESS and r.raw_value > 0.0 for r in tcp_results)
+
+            if icmp_ok:
+                rec["consecutive_failures"] = 0
+                rec["error_code"] = None
+                rec["error_message"] = None
+                rec["last_success"] = now
+            elif tcp_ok:
+                # Ping blocked: TCP connects cleanly, but ICMP echo blocked by firewall/ISP
+                rec["consecutive_failures"] += 1
+                rec["error_code"] = "ping_blocked"
+                rec["error_message"] = "حظر بروتوكول البنج (Ping blocked by firewall/ISP)"
+                rec["severity"] = "warning"
+                rec["last_failure"] = now
+            else:
+                rec["consecutive_failures"] += 1
+                rec["error_code"] = "external_down"
+                rec["error_message"] = "تعذر الاتصال الخارجي بالإنترنت (External network unreachable)"
+                rec["severity"] = "critical"
+                rec["last_failure"] = now
+
+        elif probe_name == "dns_probe":
+            dns_results = [r for r in results if r.metric_type == MetricType.DNS_LATENCY]
+            dns_ok = any(r.status == ProbeStatus.SUCCESS for r in dns_results)
+            if dns_ok:
+                rec["consecutive_failures"] = 0
+                rec["error_code"] = None
+                rec["error_message"] = None
+                rec["last_success"] = now
+            else:
+                rec["consecutive_failures"] += 1
+                rec["error_code"] = "dns_failed"
+                rec["error_message"] = "تعذر استجابة خادم DNS (DNS resolution failed)"
+                rec["severity"] = "warning"
+                rec["last_failure"] = now
+
+        elif probe_name == "wifi_metrics_collector":
+            if not results:
+                # If Ethernet is primary, Wi-Fi probe returns [] legitimately
+                pass
+            else:
+                wifi_ok = any(r.status in (ProbeStatus.SUCCESS, ProbeStatus.DEGRADED) for r in results)
+                if wifi_ok:
+                    rec["consecutive_failures"] = 0
+                    rec["error_code"] = None
+                    rec["error_message"] = None
+                    rec["last_success"] = now
+                else:
+                    rec["consecutive_failures"] += 1
+                    rec["error_code"] = "wifi_error"
+                    rec["error_message"] = "تعذر قراءة بيانات محول Wi-Fi (Wi-Fi adapter unreachable)"
+                    rec["severity"] = "warning"
+                    rec["last_failure"] = now
+        else:
+            any_fail = any(r.status in (ProbeStatus.FAILED, ProbeStatus.TIMEOUT) for r in results)
+            if any_fail or not results:
+                rec["consecutive_failures"] += 1
+                rec["error_code"] = "probe_failure"
+                rec["error_message"] = f"فشل مسبار {probe_name}"
+                rec["severity"] = "warning"
+                rec["last_failure"] = now
+            else:
+                rec["consecutive_failures"] = 0
+                rec["error_code"] = None
+                rec["error_message"] = None
+                rec["last_success"] = now
+
+    def get_active_probe_errors(self, threshold: int = 3) -> List[Dict[str, Any]]:
+        """Returns list of active persistent probe errors whose consecutive failures >= threshold."""
+        errors: List[Dict[str, Any]] = []
+        for name, data in self._probe_health.items():
+            if data["consecutive_failures"] >= threshold and data.get("error_message"):
+                errors.append({
+                    "probe_name": name,
+                    "code": data["error_code"],
+                    "message": data["error_message"],
+                    "severity": data["severity"],
+                    "consecutive_failures": data["consecutive_failures"],
+                    "last_failure": data["last_failure"],
+                })
+        return errors
+
+    def get_primary_probe_error(self, threshold: int = 3) -> Optional[Dict[str, Any]]:
+        """Returns the highest priority active persistent probe error, or None if healthy."""
+        active = self.get_active_probe_errors(threshold=threshold)
+        if not active:
+            return None
+
+        priority_map = {
+            "cannot_reach_gateway": 1,
+            "external_down": 2,
+            "ping_blocked": 3,
+            "dns_failed": 4,
+            "wifi_error": 5,
+            "probe_exception": 6,
+            "probe_failure": 7,
+        }
+        active.sort(key=lambda x: priority_map.get(x["code"], 99))
+        return active[0]
+
+    def get_primary_probe_error_message(self, threshold: int = 3) -> Optional[str]:
+        """Returns the human-readable message of the primary active probe error, or None."""
+        err = self.get_primary_probe_error(threshold=threshold)
+        return err["message"] if err else None

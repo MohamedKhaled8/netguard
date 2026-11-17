@@ -12,7 +12,10 @@ import subprocess
 import re
 import urllib.request
 import json
+import logging
 from typing import Dict, List, Any
+
+logger = logging.getLogger("netguard.platform.network_info")
 
 _cached_isp_info: Dict[str, str] | None = None
 
@@ -134,8 +137,8 @@ def get_active_dns_servers(interface_name: str = "Wi-Fi") -> List[str]:
                 return [data]
             elif isinstance(data, list):
                 return [s for s in data if isinstance(s, str) and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", s)]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("PowerShell DNS server query failed for %s: %s", interface_name, exc)
 
     try:
         res = subprocess.run(
@@ -150,8 +153,8 @@ def get_active_dns_servers(interface_name: str = "Wi-Fi") -> List[str]:
             ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", res.stdout)
             if ips:
                 return ips
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("netsh DNS server query failed for %s: %s", interface_name, exc)
 
     return []
 

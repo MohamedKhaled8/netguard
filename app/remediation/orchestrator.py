@@ -298,6 +298,7 @@ class RemediationOrchestrator:
         except Exception as exc:
             verify_ok = False
             verify_msg = f"Verification error: {exc}"
+            logger.error("Action %s verification raised exception: %s", action.action_id, exc, exc_info=True)
 
         verify_duration_ms = (time.perf_counter() - verify_start) * 1000.0
 

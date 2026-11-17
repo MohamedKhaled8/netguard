@@ -241,7 +241,8 @@ class MeasurementRepository:
             try:
                 from app.core.thresholds import DEFAULT_THRESHOLDS
                 thresholds = DEFAULT_THRESHOLDS
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to load DEFAULT_THRESHOLDS in get_day_slots: %s", exc)
                 thresholds = None
 
         today = date.today()

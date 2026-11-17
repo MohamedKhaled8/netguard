@@ -40,16 +40,22 @@ from app.core.models.metrics import MetricType, Diagnosis, ProbableCause, ProbeS
 
 
 class StatusIndicatorDot(QWidget):
-    """8px green dot with continuous pulsing ring."""
+    """8px dot with continuous pulsing ring, reflecting active health/warning state."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setFixedSize(18, 18)
         self._pulse_phase = 0.0
+        self._status_color = tokens.STATUS_OK
         if tokens.ANIMATIONS_ENABLED:
             self._timer = QTimer(self)
             self._timer.timeout.connect(self._tick)
             self._timer.start(50)
+
+    def set_status(self, color: str = tokens.STATUS_OK) -> None:
+        if self._status_color != color:
+            self._status_color = color
+            self.update()
 
     def _tick(self) -> None:
         self._pulse_phase = (self._pulse_phase + 0.028) % 1.0
@@ -66,14 +72,14 @@ class StatusIndicatorDot(QWidget):
         if tokens.ANIMATIONS_ENABLED:
             ring_radius = 4.0 + self._pulse_phase * 4.5
             ring_alpha = int(255 * (0.6 * (1.0 - self._pulse_phase)))
-            ring_col = QColor(tokens.STATUS_OK)
+            ring_col = QColor(self._status_color)
             ring_col.setAlpha(max(0, min(255, ring_alpha)))
             painter.setPen(QPen(ring_col, 1.2))
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(center_x - ring_radius, center_y - ring_radius, ring_radius * 2, ring_radius * 2)
 
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(tokens.STATUS_OK)))
+        painter.setBrush(QBrush(QColor(self._status_color)))
         painter.drawEllipse(center_x - 4.0, center_y - 4.0, 8.0, 8.0)
 
 
@@ -140,6 +146,42 @@ class DashboardView(QWidget):
         self.header_row.addLayout(buttons_box)
 
         self.content_layout.addLayout(self.header_row)
+
+        # -------------------------------------------------------------
+        # 3.1.5 Non-intrusive Persistent Probe Status Alert Bar
+        # -------------------------------------------------------------
+        self.probe_alert_bar = QFrame(self)
+        self.probe_alert_bar.setObjectName("ProbeAlertBar")
+        self.probe_alert_bar.setFixedHeight(38)
+        self.probe_alert_bar.setStyleSheet(f"""
+            QFrame#ProbeAlertBar {{
+                background-color: {tokens.SURFACE_INSET};
+                border: 1px solid {tokens.WARN_BORDER};
+                border-radius: {tokens.RADIUS_INNER}px;
+            }}
+        """)
+        alert_layout = QHBoxLayout(self.probe_alert_bar)
+        alert_layout.setContentsMargins(14, 0, 14, 0)
+        alert_layout.setSpacing(10)
+
+        self.lbl_probe_alert_icon = QLabel("⚠️", self.probe_alert_bar)
+        self.lbl_probe_alert_icon.setFont(tokens.get_sans_font(12, 400))
+        alert_layout.addWidget(self.lbl_probe_alert_icon)
+
+        self.lbl_probe_alert_msg = QLabel("", self.probe_alert_bar)
+        self.lbl_probe_alert_msg.setFont(tokens.get_sans_font(12, 500))
+        self.lbl_probe_alert_msg.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+        alert_layout.addWidget(self.lbl_probe_alert_msg)
+
+        alert_layout.addStretch()
+
+        self.lbl_probe_alert_tag = QLabel("تنبيه جودة المراقبة", self.probe_alert_bar)
+        self.lbl_probe_alert_tag.setFont(tokens.get_sans_font(11, 400))
+        self.lbl_probe_alert_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        alert_layout.addWidget(self.lbl_probe_alert_tag)
+
+        self.probe_alert_bar.setVisible(False)
+        self.content_layout.addWidget(self.probe_alert_bar)
 
         # -------------------------------------------------------------
         # 3.2 Hero Section (Two columns that wrap via QGridLayout)
@@ -362,11 +404,22 @@ class DashboardView(QWidget):
         if desc:
             self.lbl_hero_desc.setText(desc)
 
+    def set_probe_status_alert(self, error_message: Optional[str]) -> None:
+        """Updates the non-intrusive persistent probe failure alert bar."""
+        if error_message and isinstance(error_message, str):
+            self.lbl_probe_alert_msg.setText(error_message)
+            self.probe_alert_bar.setVisible(True)
+            self.status_dot.set_status(tokens.STATUS_WARN)
+        else:
+            self.probe_alert_bar.setVisible(False)
+            self.status_dot.set_status(tokens.STATUS_OK)
+
     def update_network_identity(self, info: Dict[str, Any]) -> None:
         pass
 
     def update_telemetry(self, obs, last_diag: Optional[Diagnosis]) -> None:
         if obs is None:
+            self.set_probe_status_alert("محرك المراقبة غير متصل (Monitoring engine unavailable)")
             for cell in (self.metrics_strip.cell_latency, self.metrics_strip.cell_jitter, self.metrics_strip.cell_loss):
                 cell.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
             dl_footer = f"غير متصل · آخر فحص: {self._last_speed_test_time}" if self._last_speed_test_time else "غير متصل"
@@ -379,6 +432,13 @@ class DashboardView(QWidget):
                 self.flow_path.update_node_latency(3, None, status="none", desc="خادم DNS غير متوفر.")
                 self.flow_path.update_node_latency(4, None, status="bad", desc="الاتصال بالإنترنت منقطع.")
             return
+
+        # Check for persistent probe failures to display non-intrusively
+        if hasattr(obs, "get_primary_probe_error_message"):
+            probe_err = obs.get_primary_probe_error_message()
+            self.set_probe_status_alert(probe_err)
+        else:
+            self.set_probe_status_alert(None)
 
         gw = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
         ext = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)

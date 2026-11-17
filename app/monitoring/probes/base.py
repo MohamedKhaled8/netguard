@@ -59,8 +59,48 @@ class BaseProbe(ABC):
 
     def _handle_timeout(self) -> List[ProbeResult]:
         """Fallback results when probe times out."""
-        return []
+        from app.core.models.metrics import MetricType, ProbeStatus, MeasurementSource
+        metric_t = (
+            MetricType.GATEWAY_REACHABILITY if "gateway" in self.name
+            else (MetricType.EXTERNAL_PACKET_LOSS if "external" in self.name
+            else (MetricType.DNS_LATENCY if "dns" in self.name
+            else MetricType.WIFI_SIGNAL_PERCENT))
+        )
+        return [
+            ProbeResult(
+                timestamp=datetime.now(timezone.utc),
+                source=MeasurementSource.WINDOWS_IPHLP,
+                target=self.name,
+                metric_type=metric_t,
+                raw_value=0.0,
+                normalized_value=0.0,
+                unit="timeout",
+                status=ProbeStatus.TIMEOUT,
+                confidence=0.5,
+                error_message=f"Probe '{self.name}' timed out after {self.timeout_sec:.2f}s",
+            )
+        ]
 
     def _handle_error(self, exc: Exception) -> List[ProbeResult]:
         """Fallback results when probe raises unhandled exception."""
-        return []
+        from app.core.models.metrics import MetricType, ProbeStatus, MeasurementSource
+        metric_t = (
+            MetricType.GATEWAY_REACHABILITY if "gateway" in self.name
+            else (MetricType.EXTERNAL_PACKET_LOSS if "external" in self.name
+            else (MetricType.DNS_LATENCY if "dns" in self.name
+            else MetricType.WIFI_SIGNAL_PERCENT))
+        )
+        return [
+            ProbeResult(
+                timestamp=datetime.now(timezone.utc),
+                source=MeasurementSource.WINDOWS_IPHLP,
+                target=self.name,
+                metric_type=metric_t,
+                raw_value=0.0,
+                normalized_value=0.0,
+                unit="err",
+                status=ProbeStatus.FAILED,
+                confidence=0.5,
+                error_message=f"Probe '{self.name}' failed with error: {exc}",
+            )
+        ]
