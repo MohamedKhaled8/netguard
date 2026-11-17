@@ -166,7 +166,7 @@ class SettingsView(QWidget):
 
         clear_row = QHBoxLayout()
         clear_row.setContentsMargins(16, 8, 16, 8)
-        self.btn_clear_history = SecondaryButton("🗑️ مسح السجل وتفريغ المساحة (VACUUM)")
+        self.btn_clear_history = SecondaryButton("تنظيف وضغط قاعدة البيانات")
         clear_row.addWidget(self.btn_clear_history)
         clear_row.addStretch()
         intervals_panel.main_layout.addLayout(clear_row)

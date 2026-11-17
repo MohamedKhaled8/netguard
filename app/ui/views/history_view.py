@@ -172,7 +172,7 @@ class HistoryView(QWidget):
         picker_row.addWidget(self.lbl_day)
         picker_row.addStretch()
         picker_row.addWidget(self.btn_next)
-        self.btn_clear_history = SecondaryButton("🗑️ تنظيف السجل")
+        self.btn_clear_history = SecondaryButton("تنظيف السجل")
         picker_row.addWidget(self.btn_clear_history)
         strip_panel.main_layout.addLayout(picker_row)
 

@@ -718,7 +718,7 @@ class MainWindow(QMainWindow):
     def _on_dns_benchmark_done(self, scores) -> None:
         self._is_benchmarking_dns = False
         self.view_dns.benchmark_btn.setEnabled(True)
-        self.view_dns.benchmark_btn.setText("⚡ فحص وترتيب الخوادم الآن")
+        self.view_dns.benchmark_btn.setText("فحص وترتيب الخوادم الآن")
 
         if not scores:
             return
@@ -1219,10 +1219,10 @@ class MainWindow(QMainWindow):
     def _on_clear_history_done(self, success: bool, payload: Any) -> None:
         if hasattr(self.view_settings, "btn_clear_history"):
             self.view_settings.btn_clear_history.setEnabled(True)
-            self.view_settings.btn_clear_history.setText("🗑️ مسح السجل وتفريغ المساحة (VACUUM)")
+            self.view_settings.btn_clear_history.setText("تنظيف وضغط قاعدة البيانات")
         if hasattr(self.view_history, "btn_clear_history"):
             self.view_history.btn_clear_history.setEnabled(True)
-            self.view_history.btn_clear_history.setText("🗑️ تنظيف السجل")
+            self.view_history.btn_clear_history.setText("تنظيف السجل")
 
         if success:
             if hasattr(self.view_history, "_refresh_day"):

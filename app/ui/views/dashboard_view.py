@@ -166,8 +166,9 @@ class DashboardView(QWidget):
         alert_layout.setContentsMargins(14, 0, 14, 0)
         alert_layout.setSpacing(10)
 
-        self.lbl_probe_alert_icon = QLabel("⚠️", self.probe_alert_bar)
-        self.lbl_probe_alert_icon.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_probe_alert_icon = QLabel("تنبيه:", self.probe_alert_bar)
+        self.lbl_probe_alert_icon.setFont(tokens.get_sans_font(12, 600))
+        self.lbl_probe_alert_icon.setStyleSheet(f"color: {tokens.STATUS_WARN};")
         alert_layout.addWidget(self.lbl_probe_alert_icon)
 
         self.lbl_probe_alert_msg = QLabel("", self.probe_alert_bar)

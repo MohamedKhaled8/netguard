@@ -110,7 +110,7 @@ class DNSView(QWidget):
         info_col.addWidget(self.lbl_last_switch)
         top_h.addLayout(info_col, stretch=1)
 
-        self.benchmark_btn = PrimaryButton("⚡ فحص وترتيب الخوادم الآن")
+        self.benchmark_btn = PrimaryButton("فحص وترتيب الخوادم الآن")
         top_h.addWidget(self.benchmark_btn)
 
         header_panel.main_layout.addLayout(top_h)
