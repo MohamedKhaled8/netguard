@@ -1,0 +1,105 @@
+# NetGuard AI - UX & Truth Verification Progress Tracker
+
+Branch: `fix/ux-truth-2`
+Base Commit: `6580919`
+
+## Status Legend
+- `TODO`: Not started
+- `IN_PROGRESS`: Actively being diagnosed/implemented
+- `DONE`: Implemented and verified with empirical evidence (command output, test name, screenshot path, measured numbers)
+- `NOT FEASIBLE`: Technically impossible or dishonest, with documented technical reason and implemented honest alternative
+- `NOT VERIFIED`: Blocked or missing environment capability (e.g. non-admin)
+
+---
+
+## Stage A: Layout, Scale and Readability
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **L0** | Objective layout checker (`scripts/check_layout.py` + pytest) across sizes & scales | DONE | Pending | Built `scripts/check_layout.py` and `tests/unit/test_layout_checker.py`. Generated `docs/layout_before.txt` (6,098 baseline violations) and 112 screenshots in `docs/screenshots/ux2/`. |
+| **L1** | Root cause & fix for zoomed-in feel, RTL horizontal movement & width overflow | TODO | Pending | File:line root causes identified and resolved |
+| **L2** | Mouse wheel & two-finger scrolling everywhere without widget swallowing | TODO | Pending | Synthetic scroll/wheel tests |
+| **L3** | Typography scale & contrast (≥4.5:1, status pills height ≥24 font ≥12) | TODO | Pending | Pixel contrast & font metrics |
+| **L4** | Tables and controls: dynamic row heights, numbers unhidden, stable buttons | TODO | Pending | DNS & Traffic table row geometry checks |
+| **L5** | Remove emoji from UI strings; rename jargon (e.g. VACUUM to plain Arabic) | TODO | Pending | String audit across UI |
+| **L6** | Arabic text quality: grammar/plurals, single digit style, Unicode bidi isolates | TODO | Pending | Text inspection & layout checker |
+| **L7** | Responsive reflow (<900px sidebar icon dock, cards wrap, no overflow) | TODO | Pending | Multi-resolution layout pass |
+
+---
+
+## Stage B: DNS - One Truth, Real Detection, Real Switching
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **B1** | Single `DnsState` source of truth across all views & orchestrator | TODO | Pending | Unification test across views |
+| **B2** | Real configuration detection (active adapter default route, static vs DHCP, DoH/NRPT, `o-o.myaddr.l.google.com`) | TODO | Pending | PowerShell / OS verification output |
+| **B3** | Provider catalogue (`app/dns/providers.json`), grouping, live validation, auto ISP DNS | TODO | Pending | Provider catalogue file & validation test |
+| **B4** | Multi-round UDP benchmark, success rate gate, rank computed after sort | TODO | Pending | `docs/dns_benchmark.md` and benchmark run log |
+| **B5** | Compare card: real current vs fastest; hide "faster" claim if already on fastest | TODO | Pending | UI state proof |
+| **B6** | External DNS change detection (≤5s poll/event, history audit entry) | TODO | Pending | PowerShell change test & UI reflection |
+| **B7** | Safe auto-switch policy (cooldown, hysteresis, meeting protection, clean undo) | TODO | Pending | Policy unit & integration tests |
+| **B8** | Live OS truth test & plain language DNS report | TODO | Pending | OS command outputs before/after |
+
+---
+
+## Stage C: Data Accuracy
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **C0** | Core `assess_network_health()` with hysteresis, multi-probe agreement, no false alarms | TODO | Pending | Unit tests for single drop, sustained loss, recovery |
+| **C1** | Diagnosis layers: ok/warning/bad/not measured ("غير مُقاس"), shared verdict function | TODO | Pending | Telemetry mapping tests |
+| **C2** | Traffic table: fix duplicate PID 2688 bug, group by exe, sortable, protected list | TODO | Pending | Regression test & psutil grouping fix |
+| **C3** | Claims need records: remove unproven "auto-optimized" sentences, audit records | TODO | Pending | Audit search log & UI cleanup |
+| **C4** | Same-fact consistency audit across all screens | TODO | Pending | Cross-view synchronization test |
+
+---
+
+## Stage D: Meeting Priority (Real, Honest, Safe)
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **D1** | Multi-signal `MeetingState` (apps, mic/camera consent store, sustained UDP) | TODO | Pending | Registry / process detection tests |
+| **D2** | Priority classes (REALTIME, INTERACTIVE, BULK, PROTECTED); fix browser-over-meeting bug | TODO | Pending | Regression test: Zoom vs Chrome priority |
+| **D3** | Meeting Guard Tier-1 (DSCP 46 + upload throttle for BULK, clean removal) | TODO | Pending | `Get-NetQosPolicy` verification output |
+| **D4** | Strict Meeting Mode Tier-2 (firewall rules, foreground unblock, crash sweep) | TODO | Pending | Crash sweep test & `restore_netguard_rules.ps1` |
+| **D5** | Pre-flight check ("جهّز لاجتماع") with progress, real burst ping, ≤20s | TODO | Pending | Check execution log |
+| **D6** | Early warning & proactive actions (trends over rolling windows, history logging) | TODO | Pending | Proactive history log verification |
+| **D7** | Meeting health report (local metrics vs remote; honest non-blaming verdict) | TODO | Pending | Sample meeting report data |
+| **D8** | Honest quality advisor (video readiness estimate from measured upload/jitter/loss) | TODO | Pending | Quality advisor calculations test |
+| **D9** | Explicitly NOT FEASIBLE items documented with honest alternatives | TODO | Pending | Documented in final report & UI text |
+
+---
+
+## Stage E: Devices on Network
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **E1** | Local subnet device discovery (ARP/neighbor, rate-limited sweep, OUI vendor lookup) | TODO | Pending | Scan output and history audit entry |
+
+---
+
+## Stage Z: End-to-End Scenarios
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **Z1** | Meeting + background upload saturation (early warning, tier-1 throttle, measured recovery) | TODO | Pending | `docs/scenarios/z1_output.txt` |
+| **Z2** | Browser vs meeting priority (classes REALTIME vs INTERACTIVE/BULK, OS QoS match) | TODO | Pending | `docs/scenarios/z2_output.txt` |
+| **Z3** | DNS degradation before meeting (pre-flight detect, switch/flush, restore) | TODO | Pending | `docs/scenarios/z3_output.txt` |
+| **Z4** | Early warning without false alarms (single drop ignored, sustained trend alerts once) | TODO | Pending | `docs/scenarios/z4_output.txt` |
+| **Z5** | Clean restore (meeting end & simulated crash sweep remove all NetGuard rules) | TODO | Pending | `docs/scenarios/z5_output.txt` |
+
+---
+
+## Stage F: Capability Audit
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **F** | Comprehensive `docs/CAPABILITY_AUDIT.md` across all 14 requested capabilities | TODO | Pending | Verified line-by-line |
+
+---
+
+## Stage G: Final Report & Packaging
+
+| ID | Description | Status | Commit | Evidence / Notes |
+|---|---|---|---|---|
+| **G** | Summary table, layout before/after comparison, root causes, DNS answer, exe build | TODO | Pending | Rebuilt executable & verification pass |

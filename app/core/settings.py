@@ -175,13 +175,13 @@ class UserSettings(QObject):
             if self.event_bus:
                 self.event_bus.publish_sync(EventTopics.MODE_CHANGED, {"mode": target_mode.value})
 
-    def get_policy(self, name: str) -> bool:
+    def get_policy(self, name: str, default: Optional[bool] = None) -> bool:
         if name in self._data.policies:
             return self._data.policies[name]
         alias = self.POLICY_ALIASES.get(name)
         if alias and alias in self._data.policies:
             return self._data.policies[alias]
-        return False
+        return default if default is not None else False
 
     def set_policy(self, name: str, enabled: bool) -> None:
         val = bool(enabled)
