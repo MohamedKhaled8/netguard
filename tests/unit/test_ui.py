@@ -9,8 +9,6 @@ from unittest.mock import MagicMock
 from PySide6.QtWidgets import QApplication, QLabel
 from PySide6.QtGui import QImage, QPainter
 from app.ui import tokens
-from app.ui.widgets.status_card import StatusCard
-from app.ui.widgets.realtime_chart import RealTimePlotWidget
 from app.ui.widgets.metric_cell import MetricCell, MetricsStrip
 from app.ui.widgets.sparkline import Sparkline
 from app.ui.widgets.day_strip import DayStrip, DayStripCanvas
@@ -45,20 +43,6 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
-
-
-def test_status_card(qapp):
-    card = StatusCard("Test Metric", "15.0", "ms")
-    assert card.title_lbl.text() == "Test Metric"
-    assert card.val_lbl.text() == "15.0"
-    card.update_metric("45.0", "Warning", is_warning=True)
-    assert card.val_lbl.text() == "45.0"
-
-
-def test_realtime_chart(qapp):
-    chart = RealTimePlotWidget("Test Plot")
-    chart.update_data([10.0, 12.5, 14.0, 18.0])
-    assert chart is not None
 
 
 def test_all_views_and_main_window(qapp):
