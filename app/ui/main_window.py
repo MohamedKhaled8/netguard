@@ -621,28 +621,37 @@ class MainWindow(QMainWindow):
             logger.warning("Failed to refresh day strips: %s", e)
 
     def _on_ui_tick(self) -> None:
-        """Periodic UI update polling in-memory telemetry completely autonomously."""
-        obs = self.app_core.observability
-        last_diag = self.app_core.diagnosis.last_diagnosis
+        """Periodic UI update polling in-memory telemetry completely autonomously.
 
-        self.view_dashboard.update_telemetry(obs, last_diag)
+        Guaranteed non-overlapping: skips tick if previous cycle is still in progress.
+        """
+        if getattr(self, "_is_ui_tick_running", False):
+            return
+        self._is_ui_tick_running = True
+        try:
+            obs = self.app_core.observability
+            last_diag = self.app_core.diagnosis.last_diagnosis
 
-        # Refresh 48-slot day strip every 60 seconds
-        self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
-        if self.ticker_counter % 60 == 0:
-            self._refresh_day_strips()
+            self.view_dashboard.update_telemetry(obs, last_diag)
 
-        if self.stack.currentWidget() == self.view_diagnosis and last_diag:
-            self.view_diagnosis.update_diagnosis(last_diag)
+            # Refresh 48-slot day strip every 60 seconds
+            self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
+            if self.ticker_counter % 60 == 0:
+                self._refresh_day_strips()
 
-        if self.stack.currentWidget() == self.view_history:
-            if getattr(self.view_history, "current_date", None) == date.today():
-                incidents = self.app_core.ctx.incidents.get_by_date(date.today())
-                self.view_history.update_incidents(incidents)
+            if self.stack.currentWidget() == self.view_diagnosis and last_diag:
+                self.view_diagnosis.update_diagnosis(last_diag)
 
-        if self.stack.currentWidget() == self.view_remediation:
-            audit_records = self.app_core.ctx.audit.get_recent(limit=30)
-            self.view_remediation.update_audit_log(audit_records)
+            if self.stack.currentWidget() == self.view_history:
+                if getattr(self.view_history, "current_date", None) == date.today():
+                    incidents = self.app_core.ctx.incidents.get_by_date(date.today())
+                    self.view_history.update_incidents(incidents)
+
+            if self.stack.currentWidget() == self.view_remediation:
+                audit_records = self.app_core.ctx.audit.get_recent(limit=30)
+                self.view_remediation.update_audit_log(audit_records)
+        finally:
+            self._is_ui_tick_running = False
 
     def _on_run_dns_benchmark(self) -> None:
         if getattr(self, "_is_benchmarking_dns", False):
@@ -790,6 +799,7 @@ class MainWindow(QMainWindow):
                 )
 
     def _on_dashboard_revert_dns(self) -> None:
+        """Asynchronously restore previous DNS or DHCP without blocking the UI thread."""
         iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
         pre = getattr(self, "_last_dns_pre_state", None)
         if pre and not pre.get("is_dhcp") and pre.get("original_servers"):
@@ -799,38 +809,45 @@ class MainWindow(QMainWindow):
             restore_target = []
             desc = "تمت استعادة إعدادات DNS التلقائية من الراوتر (DHCP)."
 
-        ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, restore_target)
-        self.app_core.ctx.platform.flush_dns_cache()
-        self._last_dns_switch_time = time.time()
-        self._active_dns_servers = restore_target
-        self.view_dashboard.log_autonomous_action(
-            "استعادة إعدادات DNS",
-            desc,
-            level="success" if ok else "error",
-        )
+        def _worker():
+            ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, restore_target)
+            self.app_core.ctx.platform.flush_dns_cache()
 
-        import uuid
-        from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
-        revert_record = ActionExecutionRecord(
-            id=str(uuid.uuid4()),
-            action_id="revert_dns_resolver",
-            action_name="استعادة إعدادات DNS",
-            risk_level=RiskLevel.LEVEL_2_CONTROLLED,
-            trigger_diagnosis_id="user_revert",
-            pre_remedy_metrics={"interface": iface},
-            post_remedy_metrics={"active_servers": restore_target, "status": msg},
-            status=ActionExecutionStatus.ROLLED_BACK if ok else ActionExecutionStatus.FAILED,
-            execution_duration_ms=30.0,
-            verification_duration_ms=10.0,
-            error_message=None if ok else msg,
-            rollback_performed=True,
-            rollback_success=ok,
-        )
-        ctx = getattr(getattr(self, "app_core", None), "ctx", None)
-        if ctx and hasattr(ctx, "audit"):
-            ctx.audit.save(revert_record)
-        self._refresh_timeline_from_records()
-        self._on_run_dns_benchmark()
+            import uuid
+            from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+            revert_record = ActionExecutionRecord(
+                id=str(uuid.uuid4()),
+                action_id="revert_dns_resolver",
+                action_name="استعادة إعدادات DNS",
+                risk_level=RiskLevel.LEVEL_2_CONTROLLED,
+                trigger_diagnosis_id="user_revert",
+                pre_remedy_metrics={"interface": iface},
+                post_remedy_metrics={"active_servers": restore_target, "status": msg},
+                status=ActionExecutionStatus.ROLLED_BACK if ok else ActionExecutionStatus.FAILED,
+                execution_duration_ms=30.0,
+                verification_duration_ms=10.0,
+                error_message=None if ok else msg,
+                rollback_performed=True,
+                rollback_success=ok,
+            )
+            ctx = getattr(getattr(self, "app_core", None), "ctx", None)
+            if ctx and hasattr(ctx, "audit"):
+                ctx.audit.save(revert_record)
+
+            def _update_ui():
+                self._last_dns_switch_time = time.time()
+                self._active_dns_servers = restore_target
+                self.view_dashboard.log_autonomous_action(
+                    "استعادة إعدادات DNS",
+                    desc,
+                    level="success" if ok else "error",
+                )
+                self._refresh_timeline_from_records()
+                self._on_run_dns_benchmark()
+
+            QTimer.singleShot(0, _update_ui)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_apply_dns_requested(self, primary_ip: str, secondary_ip: str, name: str) -> None:
         self._last_dns_switch_time = time.time()

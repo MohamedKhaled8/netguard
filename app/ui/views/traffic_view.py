@@ -440,29 +440,37 @@ class TrafficView(QWidget):
                 self.table.setCellWidget(r, 5, btn_th)
 
     def _on_toggle_throttle(self, pname: str, enable: bool) -> None:
-        """Create or remove Windows NetQosPolicy upload throttle for executable."""
+        """Create or remove Windows NetQosPolicy upload throttle for executable asynchronously."""
         policy_name = f"NetGuard_Throttle_{pname}"
         throttle_bps = 5_000_000
         if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
             throttle_bps = self.user_settings.get_qos_upload_throttle_bps()
 
-        if enable:
-            ok, msg = self.platform.create_qos_throttle_policy(policy_name, pname, throttle_bps)
-        else:
-            ok, msg = self.platform.remove_qos_policy(policy_name)
+        def _worker():
+            if enable:
+                ok, msg = self.platform.create_qos_throttle_policy(policy_name, pname, throttle_bps)
+            else:
+                ok, msg = self.platform.remove_qos_policy(policy_name)
+            QTimer.singleShot(0, lambda o=ok, m=msg: self._on_qos_policy_done(o, m))
 
-        if not ok:
-            QMessageBox.warning(self, "سياسة QoS في ويندوز", msg)
-        self.update_profiles(self._last_profiles_cache)
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_toggle_dscp(self, pname: str, enable: bool) -> None:
-        """Create or remove Windows NetQosPolicy DSCP 46 tagging for executable."""
+        """Create or remove Windows NetQosPolicy DSCP 46 tagging for executable asynchronously."""
         policy_name = f"NetGuard_DSCP_{pname}"
-        if enable:
-            ok, msg = self.platform.create_qos_dscp_policy(policy_name, pname, 46)
-        else:
-            ok, msg = self.platform.remove_qos_policy(policy_name)
 
+        def _worker():
+            if enable:
+                ok, msg = self.platform.create_qos_dscp_policy(policy_name, pname, 46)
+            else:
+                ok, msg = self.platform.remove_qos_policy(policy_name)
+            QTimer.singleShot(0, lambda o=ok, m=msg: self._on_qos_policy_done(o, m))
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_qos_policy_done(self, ok: bool, msg: str) -> None:
         if not ok:
             QMessageBox.warning(self, "سياسة QoS في ويندوز", msg)
         self.update_profiles(self._last_profiles_cache)
