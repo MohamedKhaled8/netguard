@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from app.ui import tokens
 from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
 from app.ui.widgets.chip import Chip

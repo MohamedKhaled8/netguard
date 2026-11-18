@@ -15,6 +15,7 @@ from app.core.events.bus import EventBus
 def test_b1_single_source_of_truth():
     mgr = DnsStateManager.get_instance()
     assert mgr is not None
+    mgr._data = DnsStateData()  # Reset for test isolation
 
     updates = []
     mgr.state_changed.connect(lambda s: updates.append(s))

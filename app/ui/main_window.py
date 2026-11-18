@@ -50,7 +50,12 @@ from app.ui.views.traffic_view import TrafficView
 from app.ui.views.history_view import HistoryView
 from app.ui.views.settings_view import SettingsView
 from app.traffic.controller import TrafficController
-from app.core.models.metrics import OperatingMode
+from app.core.models.metrics import (
+    OperatingMode,
+    ActionExecutionRecord,
+    ActionExecutionStatus,
+    RiskLevel,
+)
 from app.core.bus import EventTopics
 
 
