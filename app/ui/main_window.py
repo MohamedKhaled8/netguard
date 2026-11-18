@@ -130,7 +130,18 @@ class SidebarModeOption(QFrame):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self.index)
-        super().mousePressEvent(event)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self.lbl_text.setVisible(False)
+            self.setToolTip(self.label)
+            self.setFixedSize(48, 36)
+        else:
+            self.lbl_text.setVisible(True)
+            self.setToolTip("")
+            self.setFixedHeight(36)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
 
 
 class SidebarWidget(QFrame):
@@ -223,10 +234,10 @@ class SidebarWidget(QFrame):
         mode_col.setContentsMargins(0, 8, 0, 0)
         mode_col.setSpacing(6)
 
-        lbl_mode_caption = QLabel("وضع الإصلاح")
-        lbl_mode_caption.setFont(tokens.get_sans_font(12, 400))
-        lbl_mode_caption.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        mode_col.addWidget(lbl_mode_caption)
+        self.lbl_mode_caption = QLabel("وضع الإصلاح")
+        self.lbl_mode_caption.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_mode_caption.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        mode_col.addWidget(self.lbl_mode_caption)
 
         self.opt_auto = SidebarModeOption(0, "تلقائي", self)
         self.opt_assisted = SidebarModeOption(1, "بموافقتي", self)
@@ -266,20 +277,13 @@ class SidebarWidget(QFrame):
 
     def set_mode(self, mode: str) -> None:
         self._current_mode = mode
-        if mode == "top_bar":
-            self.setFixedWidth(16777215)
-            self.setStyleSheet(f"""
-                QFrame#SidebarDock {{
-                    background-color: {tokens.SIDEBAR};
-                    border: none;
-                    border-bottom: 1px solid {tokens.LINE};
-                }}
-            """)
-            for i, btn in enumerate(self.nav_buttons):
-                self.nav_grid.removeWidget(btn)
-                self.nav_grid.addWidget(btn, i // 2, i % 2)
-        else:
-            self.setFixedWidth(248)
+        if mode == "collapsed":
+            self.setFixedWidth(64)
+            self.sidebar_layout.setContentsMargins(8, 16, 8, 16)
+            self.brand_container.setVisible(False)
+            self.lbl_mode_desc.setVisible(False)
+            self.lbl_mode_caption.setVisible(False)
+            self.btn_restart_admin.setVisible(False)
             self.setStyleSheet(f"""
                 QFrame#SidebarDock {{
                     background-color: {tokens.SIDEBAR};
@@ -288,8 +292,31 @@ class SidebarWidget(QFrame):
                 }}
             """)
             for i, btn in enumerate(self.nav_buttons):
+                btn.set_collapsed(True)
                 self.nav_grid.removeWidget(btn)
                 self.nav_grid.addWidget(btn, i, 0)
+            for opt in self.mode_options:
+                opt.set_collapsed(True)
+        else:
+            self.setFixedWidth(248)
+            self.sidebar_layout.setContentsMargins(16, 20, 16, 20)
+            self.brand_container.setVisible(True)
+            self.lbl_mode_desc.setVisible(True)
+            self.lbl_mode_caption.setVisible(True)
+            self.btn_restart_admin.setVisible(True)
+            self.setStyleSheet(f"""
+                QFrame#SidebarDock {{
+                    background-color: {tokens.SIDEBAR};
+                    border: none;
+                    border-left: 1px solid {tokens.LINE};
+                }}
+            """)
+            for i, btn in enumerate(self.nav_buttons):
+                btn.set_collapsed(False)
+                self.nav_grid.removeWidget(btn)
+                self.nav_grid.addWidget(btn, i, 0)
+            for opt in self.mode_options:
+                opt.set_collapsed(False)
 
     def _on_mode_clicked(self, idx: int) -> None:
         idx_to_mode = {0: OperatingMode.AUTO, 1: OperatingMode.ASK, 2: OperatingMode.WATCH}
@@ -1244,27 +1271,12 @@ class MainWindow(QMainWindow):
         w = self.width()
 
         if w < 900:
-            if getattr(self, "_shell_mode", "dock") != "top_bar":
-                self._shell_mode = "top_bar"
-                self.root_layout.removeWidget(self.sidebar)
-                self.root_layout.removeWidget(self.stack)
-                self.root_layout.setDirection(QVBoxLayout.TopToBottom)
-                self.root_layout.addWidget(self.sidebar)
-                self.root_layout.addWidget(self.stack, stretch=1)
-                self.sidebar.set_mode("top_bar")
+            if getattr(self, "_shell_mode", "dock") != "collapsed":
+                self._shell_mode = "collapsed"
+                self.sidebar.set_mode("collapsed")
         else:
             if getattr(self, "_shell_mode", "dock") != "dock":
                 self._shell_mode = "dock"
-                self.root_layout.removeWidget(self.sidebar)
-                self.root_layout.removeWidget(self.stack)
-                dir_mode = (
-                    QHBoxLayout.RightToLeft
-                    if self.layoutDirection() == Qt.RightToLeft
-                    else QHBoxLayout.LeftToRight
-                )
-                self.root_layout.setDirection(dir_mode)
-                self.root_layout.addWidget(self.sidebar)
-                self.root_layout.addWidget(self.stack, stretch=1)
                 self.sidebar.set_mode("dock")
 
     def closeEvent(self, event) -> None:

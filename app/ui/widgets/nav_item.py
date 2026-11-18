@@ -20,10 +20,26 @@ class NavItem(QPushButton):
         super().__init__(label, parent)
         self.icon_name = icon_name
         self.index = index
+        self._original_label = label
+        self._is_collapsed = False
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(44)
         self.setFont(tokens.get_sans_font(14, 500))
+        self._update_style()
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._is_collapsed = collapsed
+        if collapsed:
+            self.setText("")
+            self.setToolTip(self._original_label)
+            self.setFixedSize(48, 44)
+        else:
+            self.setText(self._original_label)
+            self.setToolTip("")
+            self.setFixedHeight(44)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
         self._update_style()
 
     def setChecked(self, checked: bool) -> None:
@@ -32,6 +48,9 @@ class NavItem(QPushButton):
         self.update()
 
     def _update_style(self) -> None:
+        pad_r = "0px" if self._is_collapsed else "42px"
+        pad_l = "0px" if self._is_collapsed else "12px"
+        align = "center" if self._is_collapsed else "right"
         if self.isChecked():
             self.setStyleSheet(f"""
                 QPushButton {{
@@ -39,9 +58,9 @@ class NavItem(QPushButton):
                     color: {tokens.TEXT};
                     border: none;
                     border-radius: {tokens.RADIUS_BUTTON}px;
-                    padding-right: 42px;
-                    padding-left: 12px;
-                    text-align: right;
+                    padding-right: {pad_r};
+                    padding-left: {pad_l};
+                    text-align: {align};
                     font-size: 14px;
                     font-weight: 500;
                 }}
@@ -53,9 +72,9 @@ class NavItem(QPushButton):
                     color: {tokens.TEXT_MUTED};
                     border: none;
                     border-radius: {tokens.RADIUS_BUTTON}px;
-                    padding-right: 42px;
-                    padding-left: 12px;
-                    text-align: right;
+                    padding-right: {pad_r};
+                    padding-left: {pad_l};
+                    text-align: {align};
                     font-size: 14px;
                     font-weight: 500;
                 }}

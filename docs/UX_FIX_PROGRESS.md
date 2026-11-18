@@ -23,7 +23,7 @@ Base Commit: `6580919`
 | **L4** | Tables and controls: dynamic row heights, numbers unhidden, stable buttons | DONE | `75b7614` | Standardized table rows (54px default section size on DNS and Traffic tables, 48px on Diagnosis). Adjusted button touch targets to >=36px across views. Enforced stable 150px fixed column for DNS apply buttons and centered containers for cell action buttons. Table Row Height violations and Interactive Control Height violations dropped to 0. |
 | **L5** | Remove emoji from UI strings; rename jargon (e.g. VACUUM to plain Arabic) | DONE | `d686d45` | Removed all emojis (🔥, ⚡, 🗑, ⚠️, 🛡, 🟢, 🚦, 📊, 🔍, 🚀, 🧹, 🔄, 💾, ⚙) across all views and i18n dictionaries. Renamed database VACUUM button to plain Arabic: "تنظيف وضغط قاعدة البيانات". Audited UI strings with 0 emojis remaining. |
 | **L6** | Arabic text quality: grammar/plurals, single digit style, Unicode bidi isolates | DONE | `21b497d` | Implemented `format_arabic_connections()` (1 اتصال واحد, 2 اتصالان, 3-10 اتصالات, >10 اتصالاً) and `bidi_isolate()` in `tokens.py`. Applied across Traffic view and Dashboard bar rows. Verified with unit tests in `tests/unit/test_arabic_grammar.py`. |
-| **L7** | Responsive reflow (<900px sidebar icon dock, cards wrap, no overflow) | TODO | Pending | Multi-resolution layout pass |
+| **L7** | Responsive reflow (<900px sidebar icon dock, cards wrap, no overflow) | DONE | Pending | Implemented collapsed 64px icon dock on SidebarWidget with tooltips on hover when width <900px, restoring full 248px width when >=900px. Responsive reflow in Dashboard (tablet 2-col wrap, mobile 1-col wrap). Verified with `tests/unit/test_responsive_collapse.py`. |
 
 ---
 
