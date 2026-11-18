@@ -56,7 +56,7 @@ class TrafficController:
                     total_mbps = (delta_bytes * 8.0) / (dt * 1_000_000.0)
             self._last_net_io = (now_t, io_now)
 
-            profiles = []
+            grouped_processes: Dict[str, Dict[str, Any]] = {}
             for pid, endpoints in active_pids.items():
                 try:
                     p = psutil.Process(pid)
@@ -64,17 +64,34 @@ class TrafficController:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
 
-                category, priority, is_protected = ApplicationCatalog.classify(pname)
-                s_cnt = len(endpoints)
+                k = pname.lower()
+                if k not in grouped_processes:
+                    category, priority, is_protected = ApplicationCatalog.classify(pname)
+                    grouped_processes[k] = {
+                        "name": pname,
+                        "primary_pid": pid,
+                        "pids": [pid],
+                        "endpoints": list(endpoints),
+                        "category": category,
+                        "priority": priority,
+                        "is_protected": is_protected,
+                    }
+                else:
+                    grouped_processes[k]["pids"].append(pid)
+                    grouped_processes[k]["endpoints"].extend(endpoints)
+
+            profiles = []
+            for k, data in grouped_processes.items():
+                s_cnt = len(data["endpoints"])
                 est_mbps = round(total_mbps * (s_cnt / max(1, total_sockets)), 2) if total_sockets > 0 else 0.0
                 profile = ProcessNetworkProfile(
-                    pid=pid,
-                    name=pname,
-                    category=category,
-                    priority_level=priority,
+                    pid=data["primary_pid"],
+                    name=data["name"],
+                    category=data["category"],
+                    priority_level=data["priority"],
                     active_socket_count=s_cnt,
-                    remote_endpoints=endpoints[:5],  # top 5 endpoints
-                    is_protected_system_process=is_protected,
+                    remote_endpoints=data["endpoints"][:5],  # top 5 endpoints
+                    is_protected_system_process=data["is_protected"],
                     is_estimated=True,
                     estimated_bandwidth_mbps=est_mbps,
                 )

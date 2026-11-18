@@ -608,6 +608,13 @@ class MainWindow(QMainWindow):
             latest_inc = incidents[0] if incidents else None
             latest_aud = audits[0] if audits else None
             self.view_dashboard.update_timeline_from_records(latest_inc, latest_aud)
+
+            # Query real count and duration for today (Item C3)
+            today_audits = aud_repo.get_by_date(date.today()) if aud_repo and hasattr(aud_repo, "get_by_date") else []
+            succeeded_today = [a for a in today_audits if getattr(a, "status", None) == ActionExecutionStatus.SUCCEEDED]
+            cnt = len(succeeded_today)
+            avg_dur = (sum(getattr(a, "execution_duration_ms", 0.0) for a in succeeded_today) / (cnt * 1000.0)) if cnt > 0 else 0.0
+            self.view_dashboard.update_daily_incident_summary(cnt, avg_dur)
         except Exception as e:
             logger.warning("Failed to refresh timeline from records: %s", e)
 

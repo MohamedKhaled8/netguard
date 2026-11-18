@@ -84,6 +84,9 @@ class ApplicationCatalog:
         "explorer.exe",
         "dwm.exe",
         "spoolsv.exe",
+        "netguard.exe",
+        "python.exe",
+        "pythonw.exe",
     }
 
     @classmethod

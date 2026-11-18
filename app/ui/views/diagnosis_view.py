@@ -87,7 +87,9 @@ class LayerChecklistRow(QFrame):
         self.lbl_metric.setStyleSheet(f"color: {tokens.TEXT};")
         top_row.addWidget(self.lbl_metric)
 
-        self.chip = Chip("سليم" if status == "ok" else "يحتاج تحسين", variant="ok-soft" if status == "ok" else "tag-warn")
+        chip_text = "سليم" if status == "ok" else ("يحتاج تحسين" if status == "warn" else ("خلل / انقطاع" if status in ("bad", "error", "critical") else "غير مُقاس"))
+        chip_variant = "ok-soft" if status == "ok" else ("tag-warn" if status == "warn" else ("bad-soft" if status in ("bad", "error", "critical") else "neutral"))
+        self.chip = Chip(chip_text, variant=chip_variant)
         top_row.addWidget(self.chip)
         layout.addLayout(top_row)
 
@@ -105,10 +107,10 @@ class LayerChecklistRow(QFrame):
             self.chip.set_variant("ok-soft", "سليم")
         elif status == "warn":
             self.chip.set_variant("tag-warn", "يحتاج تحسين")
-        elif status in ("bad", "error"):
+        elif status in ("bad", "error", "critical"):
             self.chip.set_variant("bad-soft", "خلل / انقطاع")
         else:
-            self.chip.set_variant("neutral", "غير متوفر")
+            self.chip.set_variant("neutral", "غير مُقاس")
 
 
 class DiagnosisView(QWidget):
@@ -307,26 +309,51 @@ class DiagnosisView(QWidget):
             st = "ok" if s_mtu.passed else "warn"
             self.row_l6.update_status(lat_str, st, s_mtu.details)
 
-        # 3. Evidence Table Updates
+        # 3. Evidence Table Updates (Item C1 - Honest 4 states)
+        def _eval_metric(val: Optional[float], ok_thresh: float, warn_thresh: float, unit: str, ok_eval: str, warn_eval: str, bad_eval: str) -> tuple[str, str, str]:
+            if val is None:
+                return "—", "غير مُقاس", "لم يتم الفحص بعد"
+            val_str = f"{val:.1f} {unit}".strip()
+            if val <= ok_thresh:
+                return val_str, "سليم", ok_eval
+            elif val <= warn_thresh:
+                return val_str, "يحتاج تحسين", warn_eval
+            return val_str, "خلل", bad_eval
+
+        gw_v, gw_s, gw_e = _eval_metric(report.gateway_latency_ms, 25.0, 60.0, "ms", "استجابة فورية للراوتر", "تأخر في استجابة الراوتر", "تعذر الوصول للراوتر")
+        ext_v, ext_s, ext_e = _eval_metric(report.external_latency_ms, 80.0, 150.0, "ms", "بنج مستقر مع الخوادم السحابية", "زمن استجابة مرتفع نسبياً", "انقطاع أو بطء حرج")
+        dns_v, dns_s, dns_e = _eval_metric(report.dns_latency_ms, 100.0, 180.0, "ms", "استعلامات DNS فورية", "تأخير في الاستعلام", "خادم DNS غير مستجيب")
+
+        bb_v = f"+{report.bufferbloat_delta_ms:.1f} ms" if report.bufferbloat_delta_ms is not None else (f"{s_mtu.loss_pct:.0f}%" if s_mtu else "—")
+        if report.bufferbloat_grade:
+            bb_s = f"Grade {report.bufferbloat_grade}"
+            bb_e = f"تأخير الطوابير +{report.bufferbloat_delta_ms:.1f}ms (Grade {report.bufferbloat_grade})"
+        elif s_mtu:
+            bb_s = "سليم" if s_mtu.passed else "يحتاج تحسين"
+            bb_e = "تحمل ممتاز لحزم 1472-Byte" if s_mtu.passed else "فقدان في حزم MTU"
+        else:
+            bb_s = "غير مُقاس"
+            bb_e = "لم يُجر اختبار الضغط بعد"
+
+        loss_v = f"{report.packet_loss_pct:.1f}%" if report.packet_loss_pct is not None else "—"
+        if report.packet_loss_pct is None:
+            loss_s, loss_e = "غير مُقاس", "لم يتم قياس فقد الحزم"
+        elif report.packet_loss_pct < 1.0:
+            loss_s, loss_e = "سليم", "لا يوجد أي فقد للحزم"
+        else:
+            loss_s, loss_e = "خلل", f"فقدان {report.packet_loss_pct:.1f}%"
+
+        wifi_v = f"{report.wifi_signal_pct:.0f}%" if report.wifi_signal_pct else "سلكي"
+        wifi_s = "سليم" if (not report.wifi_signal_pct or report.wifi_signal_pct >= 35.0) else "ضعيف"
+        wifi_e = "إشارة لاسلكية ممتازة" if (report.wifi_signal_pct and report.wifi_signal_pct >= 50.0) else "اتصال سلكي مستقر"
+
         table_updates = [
-            (0, f"{report.gateway_latency_ms:.1f} ms" if report.gateway_latency_ms is not None else "—",
-             "سليم" if (report.gateway_latency_ms and report.gateway_latency_ms < 25.0) else "يحتاج تحسين",
-             "استجابة فورية للراوتر" if (report.gateway_latency_ms and report.gateway_latency_ms < 25.0) else "استجابة متأخرة"),
-            (1, f"{report.external_latency_ms:.1f} ms" if report.external_latency_ms is not None else "—",
-             "سليم" if (report.external_latency_ms and report.external_latency_ms < 80.0) else "يحتاج تحسين",
-             "بنج مستقر مع الخوادم السحابية" if report.external_latency_ms else "غير متصل"),
-            (2, f"{report.dns_latency_ms:.1f} ms" if report.dns_latency_ms is not None else "—",
-             "سليم" if (report.dns_latency_ms and report.dns_latency_ms < 100.0) else "يحتاج تحسين",
-             "استعلامات DNS فورية" if report.dns_latency_ms else "تأخير في الاستعلام"),
-            (3, f"+{report.bufferbloat_delta_ms:.1f} ms" if report.bufferbloat_delta_ms is not None else (f"{s_mtu.loss_pct:.0f}%" if s_mtu else "—"),
-             f"Grade {report.bufferbloat_grade}" if report.bufferbloat_grade else ("سليم" if (s_mtu and s_mtu.passed) else "يحتاج تحسين"),
-             f"تأخير الطوابير +{report.bufferbloat_delta_ms:.1f}ms (Grade {report.bufferbloat_grade})" if report.bufferbloat_grade else ("تحمل ممتاز لحزم 1472-Byte" if (s_mtu and s_mtu.passed) else "فقدان في حزم MTU")),
-            (4, f"{report.packet_loss_pct:.1f}%",
-             "سليم" if report.packet_loss_pct < 1.0 else "خلل",
-             "لا يوجد أي فقد للحزم" if report.packet_loss_pct == 0.0 else f"فقدان {report.packet_loss_pct:.1f}%"),
-            (5, f"{report.wifi_signal_pct:.0f}%" if report.wifi_signal_pct else "سلكي",
-             "سليم" if (not report.wifi_signal_pct or report.wifi_signal_pct >= 35.0) else "ضعيف",
-             "إشارة لاسلكية ممتازة" if (report.wifi_signal_pct and report.wifi_signal_pct >= 50.0) else "اتصال سلكي مستقر"),
+            (0, gw_v, gw_s, gw_e),
+            (1, ext_v, ext_s, ext_e),
+            (2, dns_v, dns_s, dns_e),
+            (3, bb_v, bb_s, bb_e),
+            (4, loss_v, loss_s, loss_e),
+            (5, wifi_v, wifi_s, wifi_e),
         ]
 
         for row_idx, val_txt, st_txt, eval_txt in table_updates:
@@ -337,7 +364,14 @@ class DiagnosisView(QWidget):
 
                 v_item.setText(val_txt)
                 s_item.setText(st_txt)
-                s_col = tokens.STATUS_OK if st_txt == "سليم" else (tokens.STATUS_WARN if st_txt in ("يحتاج تحسين", "ضعيف") else tokens.STATUS_BAD)
+                if st_txt == "سليم":
+                    s_col = tokens.STATUS_OK
+                elif st_txt in ("يحتاج تحسين", "ضعيف") or "Grade" in st_txt:
+                    s_col = tokens.STATUS_WARN
+                elif st_txt == "غير مُقاس":
+                    s_col = tokens.TEXT_MUTED
+                else:
+                    s_col = tokens.STATUS_BAD
                 s_item.setForeground(QColor(s_col))
                 e_item.setText(eval_txt)
 

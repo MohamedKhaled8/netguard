@@ -211,7 +211,7 @@ class DashboardView(QWidget):
         self.hero_text_col.addWidget(self.lbl_hero_title)
 
         self.lbl_hero_desc = QLabel(
-            "الاتصال مستقر وقريب من معدلاته المعتادة. رصد NetGuard مشكلة واحدة اليوم وأصلحها تلقائياً خلال 41 ثانية دون تدخل منك."
+            "الاتصال مستقر وقريب من معدلاته المعتادة — لا توجد تدخلات مطلوبة اليوم."
         )
         self.lbl_hero_desc.setFont(tokens.get_sans_font(16, 400))
         self.lbl_hero_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.8;")
@@ -408,6 +408,17 @@ class DashboardView(QWidget):
             self.lbl_hero_title.setText("الشبكة بطيئة")
         if desc:
             self.lbl_hero_desc.setText(desc)
+
+    def update_daily_incident_summary(self, interventions_count: int, avg_duration_sec: Optional[float] = None) -> None:
+        """Update hero description based on real database query of today's interventions (Item C3)."""
+        if interventions_count == 0:
+            self.lbl_hero_desc.setText("الاتصال مستقر وقريب من معدلاته المعتادة — لا توجد تدخلات مطلوبة اليوم.")
+        elif interventions_count == 1:
+            dur_str = f" خلال {int(round(avg_duration_sec))} ثانية" if avg_duration_sec else ""
+            self.lbl_hero_desc.setText(f"رصد NetGuard مشكلة واحدة اليوم وأصلحها تلقائياً{dur_str} دون انقطاع اتصالك.")
+        else:
+            dur_str = f" في متوسط {int(round(avg_duration_sec))} ثانية" if avg_duration_sec else ""
+            self.lbl_hero_desc.setText(f"أصلح NetGuard تلقائياً {interventions_count} تدخلات اليوم{dur_str} لضمان ثبات واستقرار الاتصال.")
 
     def set_probe_status_alert(self, error_message: Optional[str]) -> None:
         """Updates the non-intrusive persistent probe failure alert bar."""

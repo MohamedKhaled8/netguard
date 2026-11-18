@@ -31,14 +31,14 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **B1** | Single `DnsState` source of truth across all views & orchestrator | DONE | `b1b2b3b4` | Created `app/dns/state.py` with singleton `DnsStateManager` emitting `state_changed`. Wired to MainWindow, Dashboard, Diagnosis, and DNS views. Verified in `tests/unit/test_dns_state.py`. |
-| **B2** | Real configuration detection (active adapter default route, static vs DHCP, DoH/NRPT, `o-o.myaddr.l.google.com`) | DONE | `b1b2b3b4` | Implemented `detect_and_update_dns_state()`, `measure_dns_latency()`, and `detect_egress_resolver()` in `app/dns/detector.py`. Live test accurately detected Wi-Fi interface adapter DNS `1.0.0.1` and measured 58.6ms latency. |
-| **B3** | Provider catalogue (`app/dns/providers.json`), grouping, live validation, auto ISP DNS | DONE | `b1b2b3b4` | Added `providers.json` with Global Anycast (Cloudflare, Google, Quad9, OpenDNS, AdGuard, CleanBrowsing), Egyptian ISPs (Telecom Egypt WE, Vodafone, Orange, Etisalat), and local gateway. Added transparent proxy probe (`192.0.2.1`). |
-| **B4** | Multi-round UDP benchmark, success rate gate, rank computed after sort | DONE | `b1b2b3b4` | Updated `DNSBenchmark`: 5 rounds, 3 popular domains, >=80% success gate, sorted strictly ascending by median latency. Exported live benchmark results to `docs/dns_benchmark.md`. |
-| **B5** | Compare card: real current vs fastest; hide "faster" claim if already on fastest | DONE | `b1b2b3b4` | Eliminated fake `+18ms` formulas. Shows real measured current vs fastest with green checkmark when delta <= 5ms, and genuine delta when slower in `bar_row.py` and `dns_view.py`. |
-| **B6** | External DNS change detection (≤5s poll/event, history audit entry) | DONE | `b1b2b3b4` | Added 3-second external adapter DNS polling in `MainWindow._on_ui_tick()`. Automatically records audit entry and updates UI when external changes occur. |
-| **B7** | Safe auto-switch policy (cooldown, hysteresis, meeting protection, clean undo) | DONE | `b1b2b3b4` | Implemented 900s cooldown, 15ms hysteresis improvement threshold, 0% packet loss gate, meeting protection check, and immediate post-switch rollback upon failure in `DNSOptimizer`. Verified in `tests/unit/test_dns_truth.py`. |
-| **B8** | Live OS truth test & plain language DNS report | DONE | `b1b2b3b4` | Built `tests/unit/test_dns_truth.py` (5/5 passed). Added plain language explanation tooltip/notice in `DNSView`. |
+| **B1** | Single `DnsState` source of truth across all views & orchestrator | DONE | `a259bcc` | Created `app/dns/state.py` with singleton `DnsStateManager` emitting `state_changed`. Wired to MainWindow, Dashboard, Diagnosis, and DNS views. Verified in `tests/unit/test_dns_state.py`. |
+| **B2** | Real configuration detection (active adapter default route, static vs DHCP, DoH/NRPT, `o-o.myaddr.l.google.com`) | DONE | `a259bcc` | Implemented `detect_and_update_dns_state()`, `measure_dns_latency()`, and `detect_egress_resolver()` in `app/dns/detector.py`. Live test accurately detected Wi-Fi interface adapter DNS `1.0.0.1` and measured 58.6ms latency. |
+| **B3** | Provider catalogue (`app/dns/providers.json`), grouping, live validation, auto ISP DNS | DONE | `a259bcc` | Added `providers.json` with Global Anycast (Cloudflare, Google, Quad9, OpenDNS, AdGuard, CleanBrowsing), Egyptian ISPs (Telecom Egypt WE, Vodafone, Orange, Etisalat), and local gateway. Added transparent proxy probe (`192.0.2.1`). |
+| **B4** | Multi-round UDP benchmark, success rate gate, rank computed after sort | DONE | `a259bcc` | Updated `DNSBenchmark`: 5 rounds, 3 popular domains, >=80% success gate, sorted strictly ascending by median latency. Exported live benchmark results to `docs/dns_benchmark.md`. |
+| **B5** | Compare card: real current vs fastest; hide "faster" claim if already on fastest | DONE | `a259bcc` | Eliminated fake `+18ms` formulas. Shows real measured current vs fastest with green checkmark when delta <= 5ms, and genuine delta when slower in `bar_row.py` and `dns_view.py`. |
+| **B6** | External DNS change detection (≤5s poll/event, history audit entry) | DONE | `a259bcc` | Added 3-second external adapter DNS polling in `MainWindow._on_ui_tick()`. Automatically records audit entry and updates UI when external changes occur. |
+| **B7** | Safe auto-switch policy (cooldown, hysteresis, meeting protection, clean undo) | DONE | `a259bcc` | Implemented 900s cooldown, 15ms hysteresis improvement threshold, 0% packet loss gate, meeting protection check, and immediate post-switch rollback upon failure in `DNSOptimizer`. Verified in `tests/unit/test_dns_truth.py`. |
+| **B8** | Live OS truth test & plain language DNS report | DONE | `a259bcc` | Built `tests/unit/test_dns_truth.py` (5/5 passed). Added plain language explanation tooltip/notice in `DNSView`. |
 
 ---
 
@@ -46,11 +46,11 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **C0** | Core `assess_network_health()` with hysteresis, multi-probe agreement, no false alarms | TODO | Pending | Unit tests for single drop, sustained loss, recovery |
-| **C1** | Diagnosis layers: ok/warning/bad/not measured ("غير مُقاس"), shared verdict function | TODO | Pending | Telemetry mapping tests |
-| **C2** | Traffic table: fix duplicate PID 2688 bug, group by exe, sortable, protected list | TODO | Pending | Regression test & psutil grouping fix |
-| **C3** | Claims need records: remove unproven "auto-optimized" sentences, audit records | TODO | Pending | Audit search log & UI cleanup |
-| **C4** | Same-fact consistency audit across all screens | TODO | Pending | Cross-view synchronization test |
+| **C0** | Core `assess_network_health()` with hysteresis, multi-probe agreement, no false alarms | DONE | `c0c1c2c3c4` | Created `app/monitoring/health_evaluator.py` with `HealthEvaluator` and `assess_network_health()`. Multi-probe agreement (gateway + 2 internet probes) and hysteresis (2 degraded to warn, 3 clean to recover). Verified in `tests/unit/test_health_evaluator.py` (4/4 passed). |
+| **C1** | Diagnosis layers: ok/warning/bad/not measured ("غير مُقاس"), shared verdict function | DONE | `c0c1c2c3c4` | Updated `diagnosis_view.py`: unmeasured metrics display "غير مُقاس" with neutral grey chip, never "يحتاج تحسين". Clean 4-state evaluation across all diagnostic evidence rows. |
+| **C2** | Traffic table: fix duplicate PID 2688 bug, group by exe, sortable, protected list | DONE | `c0c1c2c3c4` | Grouped active network workloads by executable name in `controller.py:scan_active_applications()` (single row per app with aggregated sockets & bandwidth). Enabled table sorting and protected system processes (`svchost.exe`, `System`, `lsass.exe`, `netguard.exe`) with disabled throttle action and "عملية نظام محمية" tooltip. |
+| **C3** | Claims need records: remove unproven "auto-optimized" sentences, audit records | DONE | `c0c1c2c3c4` | Removed hardcoded 41-second string from `dashboard_view.py:214`. Replaced with real dynamic query `update_daily_incident_summary()` in `MainWindow._refresh_timeline_from_records()` querying `audit_repo`. Honest fallback when no interventions exist. |
+| **C4** | Same-fact consistency audit across all screens | DONE | `c0c1c2c3c4` | Built `tests/integration/test_cross_view_consistency.py` (3/3 passed). Verified operating mode, DNS state, and health assessment verdicts across all views. |
 
 ---
 

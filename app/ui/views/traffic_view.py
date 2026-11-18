@@ -433,10 +433,11 @@ class TrafficView(QWidget):
 
             # 5. QoS Action Button
             if is_sys:
-                lbl_prot = QLabel("محمي للنظام")
-                lbl_prot.setFont(tokens.get_sans_font(14, 400))
+                lbl_prot = QLabel("عملية نظام محمية")
+                lbl_prot.setFont(tokens.get_sans_font(13, 400))
                 lbl_prot.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
                 lbl_prot.setAlignment(Qt.AlignCenter)
+                lbl_prot.setToolTip("عملية نظام محمية — لا يمكن تقييدها أو إيقافها لضمان استقرار نظام التشغيل")
                 self.table.setCellWidget(r, 5, lbl_prot)
             elif is_conf:
                 btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else f"أولوية {tokens.bidi_isolate('DSCP')}")
