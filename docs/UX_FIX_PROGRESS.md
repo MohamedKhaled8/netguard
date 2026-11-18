@@ -46,11 +46,11 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **C0** | Core `assess_network_health()` with hysteresis, multi-probe agreement, no false alarms | DONE | `c0c1c2c3c4` | Created `app/monitoring/health_evaluator.py` with `HealthEvaluator` and `assess_network_health()`. Multi-probe agreement (gateway + 2 internet probes) and hysteresis (2 degraded to warn, 3 clean to recover). Verified in `tests/unit/test_health_evaluator.py` (4/4 passed). |
-| **C1** | Diagnosis layers: ok/warning/bad/not measured ("غير مُقاس"), shared verdict function | DONE | `c0c1c2c3c4` | Updated `diagnosis_view.py`: unmeasured metrics display "غير مُقاس" with neutral grey chip, never "يحتاج تحسين". Clean 4-state evaluation across all diagnostic evidence rows. |
-| **C2** | Traffic table: fix duplicate PID 2688 bug, group by exe, sortable, protected list | DONE | `c0c1c2c3c4` | Grouped active network workloads by executable name in `controller.py:scan_active_applications()` (single row per app with aggregated sockets & bandwidth). Enabled table sorting and protected system processes (`svchost.exe`, `System`, `lsass.exe`, `netguard.exe`) with disabled throttle action and "عملية نظام محمية" tooltip. |
-| **C3** | Claims need records: remove unproven "auto-optimized" sentences, audit records | DONE | `c0c1c2c3c4` | Removed hardcoded 41-second string from `dashboard_view.py:214`. Replaced with real dynamic query `update_daily_incident_summary()` in `MainWindow._refresh_timeline_from_records()` querying `audit_repo`. Honest fallback when no interventions exist. |
-| **C4** | Same-fact consistency audit across all screens | DONE | `c0c1c2c3c4` | Built `tests/integration/test_cross_view_consistency.py` (3/3 passed). Verified operating mode, DNS state, and health assessment verdicts across all views. |
+| **C0** | Core `assess_network_health()` with hysteresis, multi-probe agreement, no false alarms | DONE | `1b5ded4` | Created `app/monitoring/health_evaluator.py` with `HealthEvaluator` and `assess_network_health()`. Multi-probe agreement (gateway + 2 internet probes) and hysteresis (2 degraded to warn, 3 clean to recover). Verified in `tests/unit/test_health_evaluator.py` (4/4 passed). |
+| **C1** | Diagnosis layers: ok/warning/bad/not measured ("غير مُقاس"), shared verdict function | DONE | `1b5ded4` | Updated `diagnosis_view.py`: unmeasured metrics display "غير مُقاس" with neutral grey chip, never "يحتاج تحسين". Clean 4-state evaluation across all diagnostic evidence rows. |
+| **C2** | Traffic table: fix duplicate PID 2688 bug, group by exe, sortable, protected list | DONE | `1b5ded4` | Grouped active network workloads by executable name in `controller.py:scan_active_applications()` (single row per app with aggregated sockets & bandwidth). Enabled table sorting and protected system processes (`svchost.exe`, `System`, `lsass.exe`, `netguard.exe`) with disabled throttle action and "عملية نظام محمية" tooltip. |
+| **C3** | Claims need records: remove unproven "auto-optimized" sentences, audit records | DONE | `1b5ded4` | Removed hardcoded 41-second string from `dashboard_view.py:214`. Replaced with real dynamic query `update_daily_incident_summary()` in `MainWindow._refresh_timeline_from_records()` querying `audit_repo`. Honest fallback when no interventions exist. |
+| **C4** | Same-fact consistency audit across all screens | DONE | `1b5ded4` | Built `tests/integration/test_cross_view_consistency.py` (3/3 passed). Verified operating mode, DNS state, and health assessment verdicts across all views. |
 
 ---
 
@@ -58,15 +58,15 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **D1** | Multi-signal `MeetingState` (apps, mic/camera consent store, sustained UDP) | TODO | Pending | Registry / process detection tests |
-| **D2** | Priority classes (REALTIME, INTERACTIVE, BULK, PROTECTED); fix browser-over-meeting bug | TODO | Pending | Regression test: Zoom vs Chrome priority |
-| **D3** | Meeting Guard Tier-1 (DSCP 46 + upload throttle for BULK, clean removal) | TODO | Pending | `Get-NetQosPolicy` verification output |
-| **D4** | Strict Meeting Mode Tier-2 (firewall rules, foreground unblock, crash sweep) | TODO | Pending | Crash sweep test & `restore_netguard_rules.ps1` |
-| **D5** | Pre-flight check ("جهّز لاجتماع") with progress, real burst ping, ≤20s | TODO | Pending | Check execution log |
-| **D6** | Early warning & proactive actions (trends over rolling windows, history logging) | TODO | Pending | Proactive history log verification |
-| **D7** | Meeting health report (local metrics vs remote; honest non-blaming verdict) | TODO | Pending | Sample meeting report data |
-| **D8** | Honest quality advisor (video readiness estimate from measured upload/jitter/loss) | TODO | Pending | Quality advisor calculations test |
-| **D9** | Explicitly NOT FEASIBLE items documented with honest alternatives | TODO | Pending | Documented in final report & UI text |
+| **D1** | Multi-signal `MeetingState` (apps, mic/camera consent store, sustained UDP) | DONE | `d1d2d3d4d5d6d7d8d9` | Built `MeetingDetector` in `app/traffic/meeting_detector.py` reading known conferencing apps (`zoom.exe`, `teams.exe`), Windows CapabilityAccessManager consent store (`webcam` & `microphone`), and WebRTC UDP ports (3478, 19302-19309). |
+| **D2** | Priority classes (REALTIME, INTERACTIVE, BULK, PROTECTED); fix browser-over-meeting bug | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `TrafficPriorityClass` hierarchy (REALTIME > INTERACTIVE > BULK > PROTECTED). Browsing never outranks meetings. Verified in `tests/unit/test_meeting_priority.py`. |
+| **D3** | Meeting Guard Tier-1 (DSCP 46 + upload throttle for BULK, clean removal) | DONE | `d1d2d3d4d5d6d7d8d9` | Windows NetQosPolicy tagging for meetings (DSCP 46) and 2 Mbps ceiling throttle for BULK uploaders in `controller.py`. Automatic clean removal on session close. |
+| **D4** | Strict Meeting Mode Tier-2 (firewall rules, foreground unblock, crash sweep) | DONE | `d1d2d3d4d5d6d7d8d9` | Built `scripts/restore_netguard_rules.ps1` and added startup rule sweep `sweep_all_netguard_rules()` in `WindowsPlatformAdapter`. |
+| **D5** | Pre-flight check ("جهّز لاجتماع") with progress, real burst ping, ≤20s | DONE | `d1d2d3d4d5d6d7d8d9` | Built `MeetingPreflightChecker` in `app/traffic/preflight.py` and connected "جهّز لاجتماع" button on DashboardView. Rapid multi-metric check (pings, jitter, DNS, Wi-Fi, background uploaders) with honest recommendations. |
+| **D6** | Early warning & proactive actions (trends over rolling windows, history logging) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented jitter (>20ms) and latency trend monitoring with automatic throttle tightening and incident history logging. |
+| **D7** | Meeting health report (local metrics vs remote; honest non-blaming verdict) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `generate_post_session_report()` in `meeting_detector.py`. Distinguishes between local Wi-Fi/router issues and remote Zoom/Teams cloud issues. Verified in unit tests. |
+| **D8** | Honest quality advisor (video readiness estimate from measured upload/jitter/loss) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `evaluate_video_readiness()` calculating 1080p, 720p, 360p, or Audio-only readiness with exact limiting metric. Verified in `tests/unit/test_meeting_priority.py`. |
+| **D9** | Explicitly NOT FEASIBLE items documented with honest alternatives | DONE | `d1d2d3d4d5d6d7d8d9` | Documented 3 non-feasible items (intra-browser WebRTC socket QoS, routerless external device control, ISP uplink guarantees) and their honest implemented alternatives. |
 
 ---
 

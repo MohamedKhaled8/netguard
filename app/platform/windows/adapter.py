@@ -627,3 +627,21 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return False, err or f"فشل حذف سياسة QoS (كود {proc.returncode})"
         except Exception as exc:
             return False, str(exc)
+
+    def sweep_all_netguard_rules(self) -> Tuple[bool, str]:
+        """Sweep and remove all NetGuard QoS policies and Firewall rules (Item D4)."""
+        if not self.is_elevated():
+            return False, "يتطلب تنظيف القواعد صلاحيات مسؤول النظام."
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Remove-NetQosPolicy -Name 'NetGuard_*' -Confirm:$false -ErrorAction SilentlyContinue; "
+                "Remove-NetFirewallRule -Name 'NetGuard_*' -ErrorAction SilentlyContinue",
+            ]
+            subprocess.run(cmd, capture_output=True, text=True, timeout=8.0, check=False, creationflags=_NO_WINDOW)
+            return True, "تم تنظيف كافة قواعد NetGuard بنجاح."
+        except Exception as exc:
+            return False, str(exc)

@@ -28,6 +28,7 @@ class TrafficController:
         self.session_tracker = AppSessionTracker()
         self._last_profiles: Dict[int, ProcessNetworkProfile] = {}
         self._applied_dscp_policies: Set[str] = set()
+        self._applied_throttle_policies: Set[str] = set()
         self._last_net_io: Optional[tuple[float, Any]] = None
 
     async def scan_active_applications(self) -> List[ProcessNetworkProfile]:
@@ -125,16 +126,29 @@ class TrafficController:
                     category=p.category.value,
                 )
 
-                # Attempt real Windows DSCP 46 tagging if elevated and policy enabled
+                # Attempt real Windows DSCP 46 tagging if elevated and policy enabled (Item D3)
                 allow_mg = True
                 if self.user_settings and hasattr(self.user_settings, "get_policy"):
                     allow_mg = self.user_settings.get_policy("meeting_guard", True)
-                if allow_mg and self.platform and p.name.lower() not in self._applied_dscp_policies:
-                    if self.platform.is_elevated():
+                if allow_mg and self.platform:
+                    if p.name.lower() not in self._applied_dscp_policies and self.platform.is_elevated():
                         ok, msg = self.platform.create_qos_dscp_policy(f"NetGuard_DSCP_{p.name}", p.name, 46)
                         if ok:
                             self._applied_dscp_policies.add(p.name.lower())
                             logger.info("Applied real Windows DSCP 46 policy for %s: %s", p.name, msg)
+
+                    # Throttle BULK uploaders to safe 2 Mbps ceiling (Item D3)
+                    bulk_candidates = [
+                        pr.name for pr in profiles
+                        if pr.category == WorkloadCategory.DOWNLOAD or pr.name.lower() in ("onedrive.exe", "dropbox.exe", "qbittorrent.exe", "steam.exe")
+                    ]
+                    for b_name in bulk_candidates:
+                        b_lower = b_name.lower()
+                        if b_lower not in self._applied_throttle_policies and self.platform.is_elevated():
+                            ok_th, msg_th = self.platform.create_qos_throttle_policy(f"NetGuard_Throttle_{b_name}", b_name, 2_000_000)
+                            if ok_th:
+                                self._applied_throttle_policies.add(b_lower)
+                                logger.info("Applied real Windows QoS upload throttle (2M) for BULK uploader %s: %s", b_name, msg_th)
 
         # Check for closed sessions
         for active_session in list(self.session_tracker.get_active_sessions()):
@@ -146,6 +160,13 @@ class TrafficController:
                     if self.platform and self.platform.is_elevated():
                         self.platform.remove_qos_policy(f"NetGuard_DSCP_{active_session.process_name}")
                     self._applied_dscp_policies.discard(p_lower)
+
+                # If no more conferencing active, remove BULK throttles cleanly (Item D3)
+                if not self.session_tracker.has_active_conferencing():
+                    for b_lower in list(self._applied_throttle_policies):
+                        if self.platform and self.platform.is_elevated():
+                            self.platform.remove_qos_policy(f"NetGuard_Throttle_{b_lower}")
+                        self._applied_throttle_policies.discard(b_lower)
 
         conferencing_active = (
             any(p.category == WorkloadCategory.CONFERENCING for p in profiles)

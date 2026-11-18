@@ -89,6 +89,7 @@ class DashboardView(QWidget):
 
     quick_scan_requested = Signal()
     export_report_requested = Signal()
+    meeting_preflight_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -140,10 +141,14 @@ class DashboardView(QWidget):
         self.btn_export = SecondaryButton("تصدير تقرير")
         self.btn_export.clicked.connect(self.export_report_requested.emit)
 
+        self.btn_preflight = SecondaryButton("جهّز لاجتماع")
+        self.btn_preflight.clicked.connect(self.meeting_preflight_requested.emit)
+
         self.btn_scan = PrimaryButton("افحص الآن")
         self.btn_scan.clicked.connect(self._on_scan_clicked)
 
         buttons_box.addWidget(self.btn_export)
+        buttons_box.addWidget(self.btn_preflight)
         buttons_box.addWidget(self.btn_scan)
         self.header_row.addLayout(buttons_box)
 

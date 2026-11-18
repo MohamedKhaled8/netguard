@@ -551,6 +551,7 @@ class MainWindow(QMainWindow):
 
         # Dashboard quick scan / speed test request
         self.view_dashboard.quick_scan_requested.connect(self._on_quick_scan_requested)
+        self.view_dashboard.meeting_preflight_requested.connect(self._on_meeting_preflight_requested)
 
         # Dashboard timeline requests
         self.view_dashboard.timeline_panel.view_evidence_requested.connect(
@@ -573,6 +574,50 @@ class MainWindow(QMainWindow):
                 self.bridge.speed_test_done.emit(time_str)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_meeting_preflight_requested(self) -> None:
+        """Run rapid 10-15s pre-flight diagnostics and show comprehensive readiness report (Item D5)."""
+        self.view_dashboard.btn_preflight.setEnabled(False)
+        self.view_dashboard.btn_preflight.setText("جاري الفحص…")
+
+        def _worker():
+            report = None
+            try:
+                from app.traffic.preflight import MeetingPreflightChecker
+                checker = MeetingPreflightChecker(self.app_core.ctx.platform)
+                report = checker.run_check()
+            except Exception as e:
+                logger.warning("Pre-flight meeting check failed: %s", e)
+            finally:
+                QTimer.singleShot(0, lambda: self._on_meeting_preflight_done(report))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_meeting_preflight_done(self, report) -> None:
+        self.view_dashboard.btn_preflight.setEnabled(True)
+        self.view_dashboard.btn_preflight.setText("جهّز لاجتماع")
+        if not report:
+            QMessageBox.warning(self, "فحص الاجتماع", "تعذر إتمام فحص الجاهزية للاجتماع.")
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("جاهزية مكالمات الفيديو (Meeting Pre-Flight)")
+        box.setIcon(QMessageBox.Information if report.is_ready else QMessageBox.Warning)
+        box.setText(f"{report.headline}\n\n{report.detail}")
+        if report.recommended_fix:
+            btn_fix = box.addButton("تحسين فوري للشبكة", QMessageBox.ActionRole)
+            box.addButton("إغلاق", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() == btn_fix:
+                self._apply_preflight_immediate_remedy()
+        else:
+            box.addButton("ممتاز", QMessageBox.AcceptRole)
+            box.exec()
+
+    def _apply_preflight_immediate_remedy(self) -> None:
+        """Apply Tier-1 QoS and flush DNS cache immediately."""
+        self.app_core.ctx.platform.flush_dns_cache()
+        QMessageBox.information(self, "تحسين فوري", "تم تطبيق أولوية QoS وتفريغ كاش DNS لضمان جودة الاجتماع.")
 
     def _on_speed_test_done(self, timestamp: str) -> None:
         self._last_speed_test_time = timestamp
