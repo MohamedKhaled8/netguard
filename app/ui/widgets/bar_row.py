@@ -184,10 +184,11 @@ class TrafficConsumersPanel(QFrame):
                 color = tokens.STATUS_OK if getattr(p.category, "value", str(getattr(p, "category", ""))) in ("conferencing", "critical") else tokens.ACCENT
                 rows[i].lbl_name.setText(pname)
                 est_mb = getattr(p, "estimated_bandwidth_mbps", None)
+                conn_txt = tokens.format_arabic_connections(s_cnt)
                 if est_mb and est_mb > 0.05:
-                    text_data = f"{s_cnt} اتصال · ~{est_mb:.1f}M (تقديري)"
+                    text_data = f"{conn_txt} · {tokens.bidi_isolate(f'~{est_mb:.1f}M')} (تقديري)"
                 else:
-                    text_data = f"{s_cnt} اتصالات (مقاسة)"
+                    text_data = f"{conn_txt} (مقاسة)"
                 rows[i].update_data(text_data, frac, color)
             else:
                 rows[i].lbl_name.setText("—")

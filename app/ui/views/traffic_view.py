@@ -405,10 +405,11 @@ class TrafficView(QWidget):
             # 3. Bar & Sockets Cell
             frac = min(1.0, max(0.08, sockets_cnt / max(1, max_sockets)))
             est_mb = getattr(p, "estimated_bandwidth_mbps", None)
+            conn_txt = tokens.format_arabic_connections(sockets_cnt)
             if est_mb and est_mb > 0.05:
-                speed_txt = f"{sockets_cnt} · ~{est_mb:.1f}M (تقديري)"
+                speed_txt = f"{conn_txt} · {tokens.bidi_isolate(f'~{est_mb:.1f}M')} (تقديري)"
             else:
-                speed_txt = f"{sockets_cnt} اتصالات (مقاسة)"
+                speed_txt = f"{conn_txt} (مقاسة)"
             cell_w = ProcessTableCell(speed_txt, frac, is_throttled=is_throttled)
             self.table.setCellWidget(r, 3, cell_w)
 
@@ -416,11 +417,11 @@ class TrafficView(QWidget):
             if is_throttled:
                 bps = throttled_apps[pname_lower]
                 mbps = (bps / 1_000_000.0) if bps else 5.0
-                qos_lbl = QLabel(f"مقيد: {mbps:.1f} Mbps (صادر)")
+                qos_lbl = QLabel(f"مقيد: {tokens.bidi_isolate(f'{mbps:.1f} Mbps')} (صادر)")
                 qos_lbl.setFont(tokens.get_sans_font(14, 500))
                 qos_lbl.setStyleSheet(f"color: {tokens.STATUS_WARN};")
             elif is_dscp:
-                qos_lbl = QLabel("أولوية DSCP 46 (صادر)")
+                qos_lbl = QLabel(f"أولوية {tokens.bidi_isolate('DSCP 46')} (صادر)")
                 qos_lbl.setFont(tokens.get_sans_font(14, 500))
                 qos_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
             else:
@@ -438,7 +439,7 @@ class TrafficView(QWidget):
                 lbl_prot.setAlignment(Qt.AlignCenter)
                 self.table.setCellWidget(r, 5, lbl_prot)
             elif is_conf:
-                btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else "أولوية DSCP")
+                btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else f"أولوية {tokens.bidi_isolate('DSCP')}")
                 btn_dscp.setFixedHeight(36)
                 btn_dscp.setFixedWidth(120)
                 btn_dscp.clicked.connect(lambda checked=False, pn=pname, en=not is_dscp: self._on_toggle_dscp(pn, en))
@@ -453,7 +454,7 @@ class TrafficView(QWidget):
                 if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
                     cfg_bps = self.user_settings.get_qos_upload_throttle_bps()
                 cfg_mbps = cfg_bps / 1_000_000.0
-                btn_th = SecondaryButton("إلغاء التقييد" if is_throttled else f"تقييد ({cfg_mbps:.0f}M)")
+                btn_th = SecondaryButton("إلغاء التقييد" if is_throttled else f"تقييد ({tokens.bidi_isolate(f'{cfg_mbps:.0f}M')})")
                 btn_th.setFixedHeight(36)
                 btn_th.setFixedWidth(120)
                 btn_th.clicked.connect(lambda checked=False, pn=pname, en=not is_throttled: self._on_toggle_throttle(pn, en))

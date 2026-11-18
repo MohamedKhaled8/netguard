@@ -127,3 +127,22 @@ def get_mono_font(size: int = 13, weight: int = 400) -> QFont:
     font.setWeight(QFont.Weight(weight))
     font.setStyleHint(QFont.StyleHint.Monospace)
     return font
+
+
+def format_arabic_connections(count: int) -> str:
+    """Format connection count according to Arabic dual and plural grammar rules."""
+    if count == 0:
+        return "لا توجد اتصالات"
+    elif count == 1:
+        return "اتصال واحد"
+    elif count == 2:
+        return "اتصالان"
+    elif 3 <= count <= 10:
+        return f"{count} اتصالات"
+    else:
+        return f"{count} اتصالاً"
+
+
+def bidi_isolate(text: Any) -> str:
+    """Wrap Latin tokens or numeric specs in Unicode LTR isolate so RTL punctuation never scrambles."""
+    return f"\u2066{text}\u2069"
