@@ -94,6 +94,15 @@ class DNSView(QWidget):
             parent=self,
         )
 
+        # Plain language explainer banner (Item B8)
+        self.lbl_dns_explainer = QLabel(
+            "تغيير الـ DNS يسرّع فتح المواقع الجديدة والاتصال الأولي فقط. لا يزيد سرعة التحميل ولا يقلل البنج داخل الألعاب إلا نادراً. نغيّره فقط إذا كان الخادم الحالي بطيئاً أو يفشل في الاستجابة."
+        )
+        self.lbl_dns_explainer.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_dns_explainer.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: {tokens.SURFACE_INSET}; padding: 8px 12px; border-radius: 6px; border: 1px solid {tokens.LINE};")
+        self.lbl_dns_explainer.setWordWrap(True)
+        header_panel.main_layout.addWidget(self.lbl_dns_explainer)
+
         top_h = QHBoxLayout()
         info_col = QVBoxLayout()
         info_col.setSpacing(3)
@@ -315,14 +324,15 @@ class DNSView(QWidget):
         self.bar_fast.set_fraction(max(0.12, min(1.0, best_ms / DEFAULT_THRESHOLDS.latency.gateway_critical_ms)), fill_color=fast_color)
 
         self._has_benchmark_rankings = True
-        if is_optimal or abs(act_ms - best_ms) <= DEFAULT_THRESHOLDS.dns.switching_hysteresis_ms:
+        diff_ms = act_ms - best_ms
+        if is_optimal or abs(diff_ms) <= 5.0:
             name_label = active_name or best.name.replace(" Primary", "").replace(" Secondary", "")
             self.lbl_curr_name.setText(f"الخادم النشط بجهازك ({name_label}) — الأسرع حالياً ✓")
-            self.lbl_fast_name.setText(f"{best.name} · {best.ip} (المرشح الأفضل)")
+            self.lbl_fast_name.setText(f"{best.name} · {best.ip} (أنت تستخدم الخادم الأسرع حالياً — لا حاجة للتغيير)")
         else:
             name_label = active_name or "مزود الخدمة"
-            self.lbl_curr_name.setText(f"الخادم النشط بجهازك ({name_label}) — يتوفر خادم أسرع")
-            self.lbl_fast_name.setText(f"{best.name} · {best.ip} (الأسرع عالمياً ومحلياً)")
+            self.lbl_curr_name.setText(f"الخادم الحالي: {name_label} ({act_ms:.1f} ms)")
+            self.lbl_fast_name.setText(f"الأسرع: {best.name} ({best_ms:.1f} ms) — الفارق: +{diff_ms:.1f} ms")
 
         fit_table_to_content(self.table)
 

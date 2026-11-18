@@ -344,18 +344,18 @@ class DNSRecommendationPanel(QFrame):
             tag_color = tokens.STATUS_BAD
             note_text = f"الخادم يعاني من بطء في الاستجابة ({best_ms:.0f} ms). جاري المتابعة."
 
-        if is_optimal:
-            self.lbl_tag.setText(tag_text)
-            self.lbl_tag.setStyleSheet(f"color: {tag_color};")
-            self.lbl_title.setText(f"خادم DNS الأسرع معتمد تلقائياً ({best_name})")
-            self.lbl_sub.setText(f"استجابة الخادم {best_ms:.0f} ms · تم ضبط وتحسين الاتصال تلقائياً دون تدخل.")
+        if is_optimal or (curr_ms - best_ms) <= 5.0:
+            self.lbl_tag.setText("الخادم الأسرع معتمد ✓")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            self.lbl_title.setText("أنت تستخدم الخادم الأسرع حالياً — لا حاجة للتغيير")
+            self.lbl_sub.setText(f"الخادم المعتمد ({best_name}) يستجيب بسرعة فائقة ({best_ms:.0f} ms).")
             self.lbl_curr_name.setText(f"خادم DNS النشط ({best_name} · {best_ip})")
             self.lbl_curr_ms.setText(f"{best_ms:.0f} ms")
             self.lbl_curr_ms.setStyleSheet(f"color: {ms_color};")
             self.bar_curr.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=ms_color)
             self.fast_row_container.setVisible(False)
             self.lbl_note.setText(note_text)
-            self.btn_action.setText("تم التحسين تلقائياً ✓")
+            self.btn_action.setText("معتمد حالياً ✓")
             self.btn_action.setEnabled(False)
         else:
             diff = max(1, int(round(curr_ms - best_ms)))
@@ -365,15 +365,15 @@ class DNSRecommendationPanel(QFrame):
             if is_autonomous:
                 self.lbl_tag.setText("معالجة ذاتية جارية")
                 self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-                self.lbl_title.setText(f"تحويل DNS تلقائياً إلى {best_name}")
-                self.lbl_sub.setText(f"الخادم الحالي أبطأ بـ {diff}ms. يقوم NetGuard الآن بالتحويل التلقائي.")
+                self.lbl_title.setText(f"الخادم الحالي: {curr_name} ({curr_ms:.0f} ms) — الأسرع: {best_name} ({best_ms:.0f} ms)")
+                self.lbl_sub.setText(f"الفارق: +{diff} ms لصالح {best_name}. يقوم NetGuard بالتحويل التلقائي الآمن.")
                 self.btn_action.setText("جاري التحسين…")
                 self.btn_action.setEnabled(False)
             else:
                 self.lbl_tag.setText("توصية")
                 self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-                self.lbl_title.setText("بدّل DNS لتفتح المواقع أسرع")
-                self.lbl_sub.setText(f"خادم DNS الحالي أبطأ بـ {diff}ms من الأسرع المتاح لك ({best_name}).")
+                self.lbl_title.setText(f"الخادم الحالي: {curr_name} ({curr_ms:.0f} ms) — الأسرع: {best_name} ({best_ms:.0f} ms)")
+                self.lbl_sub.setText(f"الفارق: +{diff} ms لصالح {best_name}. يمكنك التبديل لتسريع فتح الروابط والمواقع.")
                 self.btn_action.setText("طبّق التغيير")
                 self.btn_action.setEnabled(True)
 

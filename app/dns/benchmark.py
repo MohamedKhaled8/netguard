@@ -43,7 +43,6 @@ class DNSBenchmark:
         "google.com",
         "cloudflare.com",
         "wikipedia.org",
-        "github.com",
     ]
 
     def __init__(
@@ -51,7 +50,7 @@ class DNSBenchmark:
         resolvers: Optional[List[tuple[str, str]]] = None,
         domains: Optional[List[str]] = None,
         timeout_sec: float = 2.0,
-        rounds: int = 3,
+        rounds: int = 5,
     ) -> None:
         self.resolvers = resolvers or self.DEFAULT_RESOLVERS
         self.domains = domains or self.DEFAULT_DOMAINS
@@ -118,11 +117,43 @@ class DNSBenchmark:
         )
 
     async def rank_all(self) -> List[ResolverScore]:
-        """Benchmark all configured resolvers concurrently and return sorted by score descending."""
+        """Benchmark all configured resolvers concurrently and return sorted by median latency ascending."""
         tasks = [self.benchmark_resolver(ip, name) for ip, name in self.resolvers]
         scores = await asyncio.gather(*tasks)
-        sorted_scores = sorted(scores, key=lambda s: s.composite_score, reverse=True)
+
+        # Gate: success rate >= 80% (0.80)
+        viable = [s for s in scores if s.success_rate >= 0.80]
+        unviable = [s for s in scores if s.success_rate < 0.80]
+
+        # Sort strictly ascending by median latency
+        sorted_viable = sorted(viable, key=lambda s: s.median_latency_ms)
+        sorted_unviable = sorted(unviable, key=lambda s: (s.failure_rate, s.median_latency_ms))
+        sorted_scores = sorted_viable + sorted_unviable
+
+        # Write benchmark evidence report to docs/dns_benchmark.md
+        self._write_benchmark_report(sorted_scores)
         return sorted_scores
+
+    def _write_benchmark_report(self, scores: List[ResolverScore]) -> None:
+        try:
+            doc_path = "docs/dns_benchmark.md"
+            lines = [
+                "# DNS Resolver Benchmark Report (Item B4)",
+                f"Generated at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                f"Rounds: {self.rounds} | Domains: {', '.join(self.domains)}",
+                "",
+                "| Rank | Resolver Name | IP Address | Median Latency | Mean Latency | Success Rate | Status |",
+                "|---|---|---|---|---|---|---|",
+            ]
+            for idx, s in enumerate(scores):
+                status = "Passed (Viable)" if s.success_rate >= 0.80 else "Rejected (<80% success)"
+                lines.append(
+                    f"| {idx + 1:02d} | {s.name} | `{s.ip}` | {s.median_latency_ms:.1f} ms | {s.mean_latency_ms:.1f} ms | {s.success_rate * 100:.0f}% | {status} |"
+                )
+            with open(doc_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception:
+            pass
 
     # Compatibility alias
     benchmark_all = rank_all

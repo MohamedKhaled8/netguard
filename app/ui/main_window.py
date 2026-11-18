@@ -449,6 +449,10 @@ class MainWindow(QMainWindow):
         # Inspect network hardware asynchronously on launch
         self._async_inspect_network_environment()
 
+        # Connect single source of truth DNS state manager (Item B1)
+        from app.dns.state import DnsStateManager, DnsStateData
+        DnsStateManager.get_instance().state_changed.connect(self._on_dns_state_changed)
+
         # UI Refresh Timer (1 second interval)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._on_ui_tick)
@@ -708,6 +712,45 @@ class MainWindow(QMainWindow):
             if self.ticker_counter % 60 == 0:
                 self._refresh_day_strips()
 
+            # External DNS change detection every 3 seconds (Item B6)
+            if self.ticker_counter % 3 == 0:
+                try:
+                    from app.dns.state import DnsStateManager
+                    from app.dns.detector import identify_provider, measure_dns_latency
+                    mgr = DnsStateManager.get_instance()
+                    iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
+                    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
+                    known_servers = mgr.current.active_servers
+                    if curr_os_servers and known_servers and curr_os_servers != known_servers:
+                        logger.info("External DNS change detected: %s -> %s", known_servers, curr_os_servers)
+                        p_name = identify_provider(curr_os_servers[0]) or f"خادم مخصص ({curr_os_servers[0]})"
+                        ms_val = measure_dns_latency(curr_os_servers[0])
+                        mgr.update(
+                            active_servers=curr_os_servers,
+                            detected_provider=p_name,
+                            last_measured_ms=ms_val,
+                            is_healthy=(ms_val is not None and ms_val < 150.0),
+                        )
+                        if hasattr(self.app_core.orchestrator, "audit_repo"):
+                            import uuid
+                            rec = ActionExecutionRecord(
+                                id=str(uuid.uuid4()),
+                                action_id="external_dns_change_detected",
+                                action_name=f"تم رصد تغيير إعدادات DNS من خارج البرنامج إلى {p_name} ({', '.join(curr_os_servers)})",
+                                risk_level=RiskLevel.LEVEL_1_INFORMATIONAL,
+                                trigger_diagnosis_id="external_monitor",
+                                pre_remedy_metrics={"previous_servers": known_servers},
+                                post_remedy_metrics={"new_servers": curr_os_servers, "latency_ms": ms_val},
+                                status=ActionExecutionStatus.SUCCEEDED,
+                                execution_duration_ms=0.0,
+                                verification_duration_ms=0.0,
+                                error_message=None,
+                                rollback_performed=False,
+                            )
+                            self.app_core.orchestrator.audit_repo.save(rec)
+                except Exception as exc:
+                    logger.debug("External DNS change check exception: %s", exc)
+
             if self.stack.currentWidget() == self.view_diagnosis and last_diag:
                 self.view_diagnosis.update_diagnosis(last_diag)
 
@@ -742,6 +785,39 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_dns_state_changed(self, state: Any) -> None:
+        """Propagate updated DNS single-source-of-truth across all subscribed views (Item B1)."""
+        active_name = getattr(state, "detected_provider", None) or "خادم DNS"
+        active_ms = getattr(state, "last_measured_ms", None) or 0.0
+        active_dns = getattr(state, "active_servers", [])
+
+        self.view_dns.set_active_dns_info(active_dns)
+        scores = getattr(state, "scores", [])
+        if scores:
+            best = getattr(state, "best_server", None) or scores[0]
+            best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
+            is_optimal = any(best.ip in s for s in active_dns) or (active_ms > 0 and (active_ms - best_ms) <= 5.0)
+            self.view_dashboard.update_dns_recommendation(
+                curr_name=active_name,
+                curr_ms=active_ms,
+                best_name=best.name,
+                best_ip=best.ip,
+                best_ms=best_ms,
+                is_optimal=is_optimal,
+            )
+            self.view_diagnosis.update_dns_telemetry(
+                dns_name=active_name,
+                latency_ms=active_ms,
+                is_healthy=getattr(state, "is_healthy", True),
+                is_optimal=is_optimal,
+            )
+            self.view_dns.update_rankings(
+                scores=scores,
+                active_ms=active_ms,
+                active_name=active_name,
+                is_optimal=is_optimal,
+            )
+
     def _on_dns_benchmark_done(self, scores) -> None:
         self._is_benchmarking_dns = False
         self.view_dns.benchmark_btn.setEnabled(True)
@@ -774,18 +850,31 @@ class MainWindow(QMainWindow):
             active_ms = getattr(matched_score, "median_latency_ms", 0.0) or matched_score.mean_latency_ms
             active_name = matched_score.name.replace(" Primary", "").replace(" Secondary", "")
         else:
-            active_ms = max(best_ms + 18.0, 38.0)
-            active_name = "DNS مزود الخدمة"
+            from app.dns.detector import measure_dns_latency, identify_provider
+            active_ip = active_dns[0] if active_dns else "192.168.1.1"
+            active_ms = measure_dns_latency(active_ip)
+            active_name = identify_provider(active_ip) or f"خادم مخصص ({active_ip})"
 
         is_same_ip = any(best.ip in s for s in active_dns) or any(s in best.ip for s in active_dns)
-        is_delta_negligible = (active_ms - best_ms) <= 8.0
+        is_delta_negligible = (active_ms is not None and (active_ms - best_ms) <= 5.0)
         is_optimal = (is_same_ip or is_delta_negligible)
 
         if is_optimal:
-            active_ms = best_ms
             active_name = best_name
+            if active_ms is None:
+                active_ms = best_ms
 
-        is_healthy = (active_ms <= 60.0)
+        is_healthy = (active_ms is not None and active_ms <= 60.0)
+
+        from app.dns.state import DnsStateManager
+        DnsStateManager.get_instance().update(
+            active_servers=active_dns,
+            detected_provider=active_name,
+            last_measured_ms=active_ms,
+            is_healthy=is_healthy,
+            best_server=best,
+            scores=scores,
+        )
         is_auto_mode = (self.app_core.orchestrator.mode == OperatingMode.AUTONOMOUS_SAFE)
 
         # Policy & anti-flapping hysteresis check:

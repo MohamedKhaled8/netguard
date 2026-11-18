@@ -1,0 +1,62 @@
+{
+  "global_anycast": [
+    {
+      "name": "Cloudflare",
+      "primary_ip": "1.1.1.1",
+      "secondary_ip": "1.0.0.1",
+      "doh_url": "https://cloudflare-dns.com/dns-query"
+    },
+    {
+      "name": "Google Public DNS",
+      "primary_ip": "8.8.8.8",
+      "secondary_ip": "8.8.4.4",
+      "doh_url": "https://dns.google/dns-query"
+    },
+    {
+      "name": "Quad9",
+      "primary_ip": "9.9.9.9",
+      "secondary_ip": "149.112.112.112",
+      "doh_url": "https://dns.quad9.net/dns-query"
+    },
+    {
+      "name": "OpenDNS",
+      "primary_ip": "208.67.222.222",
+      "secondary_ip": "208.67.220.220",
+      "doh_url": "https://doh.opendns.com/dns-query"
+    },
+    {
+      "name": "AdGuard DNS",
+      "primary_ip": "94.140.14.14",
+      "secondary_ip": "94.140.15.15",
+      "doh_url": "https://dns.adguard.com/dns-query"
+    },
+    {
+      "name": "CleanBrowsing",
+      "primary_ip": "185.228.168.9",
+      "secondary_ip": "185.228.169.9",
+      "doh_url": "https://doh.cleanbrowsing.org/doh/family-filter/"
+    }
+  ],
+  "egypt_isps": [
+    {
+      "name": "Telecom Egypt (WE)",
+      "primary_ip": "163.121.128.134",
+      "secondary_ip": "163.121.128.135"
+    },
+    {
+      "name": "Vodafone Egypt",
+      "primary_ip": "196.218.0.125",
+      "secondary_ip": "196.218.0.126"
+    },
+    {
+      "name": "Orange Egypt",
+      "primary_ip": "213.131.65.20",
+      "secondary_ip": "213.131.65.21"
+    },
+    {
+      "name": "Etisalat Egypt",
+      "primary_ip": "197.34.1.25",
+      "secondary_ip": "197.34.1.26"
+    }
+  ]
+}
