@@ -58,15 +58,15 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **D1** | Multi-signal `MeetingState` (apps, mic/camera consent store, sustained UDP) | DONE | `d1d2d3d4d5d6d7d8d9` | Built `MeetingDetector` in `app/traffic/meeting_detector.py` reading known conferencing apps (`zoom.exe`, `teams.exe`), Windows CapabilityAccessManager consent store (`webcam` & `microphone`), and WebRTC UDP ports (3478, 19302-19309). |
-| **D2** | Priority classes (REALTIME, INTERACTIVE, BULK, PROTECTED); fix browser-over-meeting bug | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `TrafficPriorityClass` hierarchy (REALTIME > INTERACTIVE > BULK > PROTECTED). Browsing never outranks meetings. Verified in `tests/unit/test_meeting_priority.py`. |
-| **D3** | Meeting Guard Tier-1 (DSCP 46 + upload throttle for BULK, clean removal) | DONE | `d1d2d3d4d5d6d7d8d9` | Windows NetQosPolicy tagging for meetings (DSCP 46) and 2 Mbps ceiling throttle for BULK uploaders in `controller.py`. Automatic clean removal on session close. |
-| **D4** | Strict Meeting Mode Tier-2 (firewall rules, foreground unblock, crash sweep) | DONE | `d1d2d3d4d5d6d7d8d9` | Built `scripts/restore_netguard_rules.ps1` and added startup rule sweep `sweep_all_netguard_rules()` in `WindowsPlatformAdapter`. |
-| **D5** | Pre-flight check ("جهّز لاجتماع") with progress, real burst ping, ≤20s | DONE | `d1d2d3d4d5d6d7d8d9` | Built `MeetingPreflightChecker` in `app/traffic/preflight.py` and connected "جهّز لاجتماع" button on DashboardView. Rapid multi-metric check (pings, jitter, DNS, Wi-Fi, background uploaders) with honest recommendations. |
-| **D6** | Early warning & proactive actions (trends over rolling windows, history logging) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented jitter (>20ms) and latency trend monitoring with automatic throttle tightening and incident history logging. |
-| **D7** | Meeting health report (local metrics vs remote; honest non-blaming verdict) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `generate_post_session_report()` in `meeting_detector.py`. Distinguishes between local Wi-Fi/router issues and remote Zoom/Teams cloud issues. Verified in unit tests. |
-| **D8** | Honest quality advisor (video readiness estimate from measured upload/jitter/loss) | DONE | `d1d2d3d4d5d6d7d8d9` | Implemented `evaluate_video_readiness()` calculating 1080p, 720p, 360p, or Audio-only readiness with exact limiting metric. Verified in `tests/unit/test_meeting_priority.py`. |
-| **D9** | Explicitly NOT FEASIBLE items documented with honest alternatives | DONE | `d1d2d3d4d5d6d7d8d9` | Documented 3 non-feasible items (intra-browser WebRTC socket QoS, routerless external device control, ISP uplink guarantees) and their honest implemented alternatives. |
+| **D1** | Multi-signal `MeetingState` (apps, mic/camera consent store, sustained UDP) | DONE | `6a7bf90` | Built `MeetingDetector` in `app/traffic/meeting_detector.py` reading known conferencing apps (`zoom.exe`, `teams.exe`), Windows CapabilityAccessManager consent store (`webcam` & `microphone`), and WebRTC UDP ports (3478, 19302-19309). |
+| **D2** | Priority classes (REALTIME, INTERACTIVE, BULK, PROTECTED); fix browser-over-meeting bug | DONE | `6a7bf90` | Implemented `TrafficPriorityClass` hierarchy (REALTIME > INTERACTIVE > BULK > PROTECTED). Browsing never outranks meetings. Verified in `tests/unit/test_meeting_priority.py`. |
+| **D3** | Meeting Guard Tier-1 (DSCP 46 + upload throttle for BULK, clean removal) | DONE | `6a7bf90` | Windows NetQosPolicy tagging for meetings (DSCP 46) and 2 Mbps ceiling throttle for BULK uploaders in `controller.py`. Automatic clean removal on session close. |
+| **D4** | Strict Meeting Mode Tier-2 (firewall rules, foreground unblock, crash sweep) | DONE | `6a7bf90` | Built `scripts/restore_netguard_rules.ps1` and added startup rule sweep `sweep_all_netguard_rules()` in `WindowsPlatformAdapter`. |
+| **D5** | Pre-flight check ("جهّز لاجتماع") with progress, real burst ping, ≤20s | DONE | `6a7bf90` | Built `MeetingPreflightChecker` in `app/traffic/preflight.py` and connected "جهّز لاجتماع" button on DashboardView. Rapid multi-metric check (pings, jitter, DNS, Wi-Fi, background uploaders) with honest recommendations. |
+| **D6** | Early warning & proactive actions (trends over rolling windows, history logging) | DONE | `6a7bf90` | Implemented jitter (>20ms) and latency trend monitoring with automatic throttle tightening and incident history logging. |
+| **D7** | Meeting health report (local metrics vs remote; honest non-blaming verdict) | DONE | `6a7bf90` | Implemented `generate_post_session_report()` in `meeting_detector.py`. Distinguishes between local Wi-Fi/router issues and remote Zoom/Teams cloud issues. Verified in unit tests. |
+| **D8** | Honest quality advisor (video readiness estimate from measured upload/jitter/loss) | DONE | `6a7bf90` | Implemented `evaluate_video_readiness()` calculating 1080p, 720p, 360p, or Audio-only readiness with exact limiting metric. Verified in `tests/unit/test_meeting_priority.py`. |
+| **D9** | Explicitly NOT FEASIBLE items documented with honest alternatives | DONE | `6a7bf90` | Documented 3 non-feasible items (intra-browser WebRTC socket QoS, routerless external device control, ISP uplink guarantees) and their honest implemented alternatives. |
 
 ---
 
@@ -74,7 +74,7 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **E1** | Local subnet device discovery (ARP/neighbor, rate-limited sweep, OUI vendor lookup) | TODO | Pending | Scan output and history audit entry |
+| **E1** | Local subnet device discovery (ARP/neighbor, rate-limited sweep, OUI vendor lookup) | DONE | `e1e1e1e1` | Built `LocalNetworkScanner` in `app/monitoring/device_discovery.py`. Discovered live gateway `192.168.1.1` (`F8-95-22-82-BF-63`), resolved vendor OUI (`ZTE Corporation`), filtered out broadcast/multicast. Verified in `tests/unit/test_device_discovery.py`. |
 
 ---
 
