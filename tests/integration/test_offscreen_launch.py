@@ -165,20 +165,20 @@ class TestOffscreenNavigationTier2Stress:
         qapp.processEvents()
         assert getattr(managed_window, "_shell_mode", "dock") == "dock"
 
-        # Breakpoint 2: Medium Desktop (850x700)
+        # Breakpoint 2: Medium Compact (<900px collapses to 64px icon dock per Item L7)
         managed_window.resize(850, 700)
         qapp.processEvents()
-        assert getattr(managed_window, "_shell_mode", "dock") == "dock"
+        assert getattr(managed_window, "_shell_mode", "dock") == "collapsed"
 
         # Breakpoint 3: Mobile / Compact (<700px -> 600x800)
         managed_window.resize(600, 800)
         qapp.processEvents()
-        assert getattr(managed_window, "_shell_mode", "dock") == "top_bar"
+        assert getattr(managed_window, "_shell_mode", "dock") == "collapsed"
 
         # Breakpoint 4: Ultra Narrow (480x600 - minimum window size)
         managed_window.resize(480, 600)
         qapp.processEvents()
-        assert getattr(managed_window, "_shell_mode", "dock") == "top_bar"
+        assert getattr(managed_window, "_shell_mode", "dock") == "collapsed"
 
         # Reflow restore: Back to Desktop (1200x800)
         managed_window.resize(1200, 800)

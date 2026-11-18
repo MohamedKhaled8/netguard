@@ -76,11 +76,12 @@ async def test_dns_optimizer_selection(monkeypatch):
 
     async def mock_rank_all():
         return [
-            ResolverScore(ip="1.1.1.1", name="Cloudflare", mean_latency_ms=10.0, min_latency_ms=8.0, max_latency_ms=12.0, stdev_latency_ms=1.0, failure_rate=0.0, composite_score=96.0),
-            ResolverScore(ip="8.8.8.8", name="Google", mean_latency_ms=20.0, min_latency_ms=18.0, max_latency_ms=22.0, stdev_latency_ms=1.0, failure_rate=0.0, composite_score=92.0),
+            ResolverScore(ip="1.1.1.1", name="Cloudflare", median_latency_ms=10.0, mean_latency_ms=10.0, min_latency_ms=8.0, max_latency_ms=12.0, stdev_latency_ms=1.0, failure_rate=0.0, composite_score=96.0),
+            ResolverScore(ip="8.8.8.8", name="Google", median_latency_ms=20.0, mean_latency_ms=20.0, min_latency_ms=18.0, max_latency_ms=22.0, stdev_latency_ms=1.0, failure_rate=0.0, composite_score=92.0),
         ]
 
     monkeypatch.setattr(optimizer.benchmark, "rank_all", mock_rank_all)
+    monkeypatch.setattr("app.dns.detector.measure_dns_latency", lambda ip, timeout_sec=2.0: 45.0)
 
     best = await optimizer.auto_optimize_dns()
     assert best is not None

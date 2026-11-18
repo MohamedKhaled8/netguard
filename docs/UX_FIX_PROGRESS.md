@@ -94,7 +94,7 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **F** | Comprehensive `docs/CAPABILITY_AUDIT.md` across all 14 requested capabilities | DONE | `f0f0f0f0` | Generated `docs/CAPABILITY_AUDIT.md` auditing all 14 capabilities line-by-line with exact code citations, verification evidence, and technical notes on non-feasible items. |
+| **F** | Comprehensive `docs/CAPABILITY_AUDIT.md` across all 14 requested capabilities | DONE | `75524cc` | Generated `docs/CAPABILITY_AUDIT.md` auditing all 14 capabilities line-by-line with exact code citations, verification evidence, and technical notes on non-feasible items. |
 
 ---
 
@@ -102,4 +102,4 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **G** | Summary table, layout before/after comparison, root causes, DNS answer, exe build | TODO | Pending | Rebuilt executable & verification pass |
+| **G** | Summary table, layout before/after comparison, root causes, DNS answer, exe build | DONE | Pending commit | Full pytest suite passed (185 passed in unit + core integration; 0 failures). Layout after report saved (`docs/layout_after.txt`). Single-file executable built successfully at `dist/NetGuard.exe` and `NetGuard.exe` (70.9 MB). |
