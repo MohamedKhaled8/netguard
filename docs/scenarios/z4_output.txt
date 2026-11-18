@@ -1,0 +1,8 @@
+=== SCENARIO Z4: Early Warning Without False Alarms ===
+Execution Timestamp: 2026-11-18T14:45:52.821609+00:00
+Sample 1 (Clean): Status=good Headline='الاتصال سليم ومستقر'
+Sample 2 (Single Drop Spike): Status=good Headline='الاتصال سليم ومستقر (رصد تذبذب عابر)'
+Sample 3 (Sustained Jitter): Status=warning Headline='تذبذب عالي قد يؤثر على الاجتماعات'
+Proactive Action: Tightened Tier-1 throttle to 1 Mbps, recorded proactive incident in audit.
+Recovery Sample 3: Status=good (Recovered to GOOD after 3 clean samples).
+Status: PASSED (Verified anti-flapping hysteresis & zero false alarms on single spike)

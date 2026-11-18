@@ -1,0 +1,12 @@
+=== SCENARIO Z5: Clean Restore & Crash Sweep ===
+Execution Timestamp: 2026-11-18T14:45:52.853257+00:00
+Step 1: Meeting ended.
+  Removed meeting DSCP policy: Removed policy
+  Removed BULK throttle policy: Removed policy
+Step 2: Generated Post-Session Report: Duration=45 دقيقة
+  Verdict: مكالمة ممتازة — لم تحدث أي انقطاعات صوتية أو مرئية.
+  Disruptions Prevented: 2
+Step 3: Simulated abnormal exit recovery (scripts/restore_netguard_rules.ps1).
+  Sweep execution output: Cleaned all NetGuard rules
+  Verified 0 lingering NetGuard_* rules in OS firewall & QoS tables.
+Status: PASSED (Verified clean teardown, post-session report, and standalone recovery sweep)

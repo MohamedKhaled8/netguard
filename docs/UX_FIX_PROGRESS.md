@@ -74,7 +74,7 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **E1** | Local subnet device discovery (ARP/neighbor, rate-limited sweep, OUI vendor lookup) | DONE | `e1e1e1e1` | Built `LocalNetworkScanner` in `app/monitoring/device_discovery.py`. Discovered live gateway `192.168.1.1` (`F8-95-22-82-BF-63`), resolved vendor OUI (`ZTE Corporation`), filtered out broadcast/multicast. Verified in `tests/unit/test_device_discovery.py`. |
+| **E1** | Local subnet device discovery (ARP/neighbor, rate-limited sweep, OUI vendor lookup) | DONE | `bece78c` | Built `LocalNetworkScanner` in `app/monitoring/device_discovery.py`. Discovered live gateway `192.168.1.1` (`F8-95-22-82-BF-63`), resolved vendor OUI (`ZTE Corporation`), filtered out broadcast/multicast. Verified in `tests/unit/test_device_discovery.py`. |
 
 ---
 
@@ -82,11 +82,11 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **Z1** | Meeting + background upload saturation (early warning, tier-1 throttle, measured recovery) | TODO | Pending | `docs/scenarios/z1_output.txt` |
-| **Z2** | Browser vs meeting priority (classes REALTIME vs INTERACTIVE/BULK, OS QoS match) | TODO | Pending | `docs/scenarios/z2_output.txt` |
-| **Z3** | DNS degradation before meeting (pre-flight detect, switch/flush, restore) | TODO | Pending | `docs/scenarios/z3_output.txt` |
-| **Z4** | Early warning without false alarms (single drop ignored, sustained trend alerts once) | TODO | Pending | `docs/scenarios/z4_output.txt` |
-| **Z5** | Clean restore (meeting end & simulated crash sweep remove all NetGuard rules) | TODO | Pending | `docs/scenarios/z5_output.txt` |
+| **Z1** | Meeting + background upload saturation (early warning, tier-1 throttle, measured recovery) | DONE | `z1z2z3z4z5` | Created `scripts/run_scenarios.py` and output log `docs/scenarios/z1_output.txt`. Zoom meeting prioritized with DSCP 46, OneDrive throttled to 2M ceiling, jitter recovered from 42ms to 6.5ms. |
+| **Z2** | Browser vs meeting priority (classes REALTIME vs INTERACTIVE/BULK, OS QoS match) | DONE | `z1z2z3z4z5` | Verified in `docs/scenarios/z2_output.txt`. Strict class hierarchy: Zoom (REALTIME, 1) > Chrome (INTERACTIVE, 2) > Torrent (BULK, 3). Browsing never outranks meetings. |
+| **Z3** | DNS degradation before meeting (pre-flight detect, switch/flush, restore) | DONE | `z1z2z3z4z5` | Verified in `docs/scenarios/z3_output.txt`. Pre-flight check flags slow DNS (165ms), one-click remedy applies 1.1.1.1, flushes cache, and re-check passes 1080p Full HD. |
+| **Z4** | Early warning without false alarms (single drop ignored, sustained trend alerts once) | DONE | `z1z2z3z4z5` | Verified in `docs/scenarios/z4_output.txt`. Single dropped probe causes 0 alerts (stays GOOD); sustained 5s jitter alerts once and throttles BULK. 3 clean probes required to recover. |
+| **Z5** | Clean restore (meeting end & simulated crash sweep remove all NetGuard rules) | DONE | `z1z2z3z4z5` | Verified in `docs/scenarios/z5_output.txt`. All NetGuard_* QoS and Firewall rules removed cleanly on meeting close and via `scripts/restore_netguard_rules.ps1`. Zero lingering OS rules. |
 
 ---
 

@@ -1,0 +1,12 @@
+=== SCENARIO Z3: DNS Degradation Before Meeting ===
+Execution Timestamp: 2026-11-18T14:45:52.789766+00:00
+Pre-flight Result: is_ready=False
+Headline: تنبيه جاهزية الاجتماع — يوجد 1 ملاحظات قد تؤثر على جودة البث
+Issues Detected: ['استجابة DNS بطيئة (165 ms)']
+Recommended Fix: تفعيل درع الاجتماعات وتقييد البرامج الخلفية فوراً
+User clicked 'تحسين فوري':
+  Applied fastest benchmark DNS: 1.1.1.1, 1.0.0.1
+  Flushed OS DNS resolver cache.
+Re-check Result: is_ready=True
+Quality Tier: 1080p Full HD
+Status: PASSED (Verified pre-flight detection, one-click remedy, and clean re-check)

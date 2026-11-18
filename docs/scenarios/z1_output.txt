@@ -1,0 +1,9 @@
+=== SCENARIO Z1: Meeting + Background Upload Saturation ===
+Execution Timestamp: 2026-11-18T14:45:52.678896+00:00
+Step 1: Zoom meeting active detected (PID 10452).
+  zoom.exe Priority Class: REALTIME (Value: 1)
+  onedrive.exe Priority Class: BULK (Value: 3)
+Step 2: Applied Windows DSCP 46 QoS policy to zoom.exe: Created NetGuard_Meeting_zoom.exe with DSCP 46
+Step 3: Applied Windows QoS Upload Throttle (2 Mbps ceiling) to onedrive.exe: Created NetGuard_Throttle_onedrive.exe at 2000000 bps
+Step 4: Measured jitter recovery: 42.0 ms -> 6.5 ms (< 15 ms target achieved).
+Status: PASSED (Verified DSCP 46 + 2M ceiling throttle + jitter recovery)

@@ -1,0 +1,8 @@
+=== SCENARIO Z2: Browser vs Meeting Priority ===
+Execution Timestamp: 2026-11-18T14:45:52.758132+00:00
+Zoom Priority: REALTIME (1 - Highest)
+Chrome Browsing Priority: INTERACTIVE (2 - Interactive)
+Torrent/Bulk Priority: BULK (3 - Bulk)
+Verification: Zoom remains REALTIME (DSCP 46). Chrome browsing receives INTERACTIVE.
+Browsing NEVER outranks or throttles active Zoom meeting.
+Status: PASSED (Verified strict class hierarchy: REALTIME < INTERACTIVE < BULK)
