@@ -5,7 +5,7 @@ import sys
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
-from app.core.models.metrics import RiskLevel
+from app.core.models.metrics import RiskLevel, ActionClassification
 from app.platform.interfaces import IPlatformAdapter
 
 logger = logging.getLogger("netguard.remediation.registry")
@@ -24,6 +24,7 @@ class RemediationAction(ABC):
         timeout_sec: float = 10.0,
         cooldown_sec: float = 60.0,
         max_retries: int = 2,
+        action_classification: ActionClassification = ActionClassification.CORRECTIVE_ACTION,
     ) -> None:
         self.action_id = action_id
         self.name = name
@@ -33,6 +34,7 @@ class RemediationAction(ABC):
         self.timeout_sec = timeout_sec
         self.cooldown_sec = cooldown_sec
         self.max_retries = max_retries
+        self.action_classification = action_classification
 
     def is_os_supported(self) -> bool:
         """Verify action is authorized and supported on current operating system."""

@@ -72,7 +72,7 @@ class ModeOptionCard(QFrame):
             self.setStyleSheet(f"""
                 QFrame#ModeOptionCard {{
                     background-color: {tokens.SURFACE_HOVER};
-                    border: 1px solid {tokens.LINE_THRESHOLD};
+                    border: 1.5px solid {tokens.ACCENT};
                     border-radius: {tokens.RADIUS_INNER}px;
                 }}
                 QFrame#ModeOptionCard QLabel {{
@@ -85,7 +85,7 @@ class ModeOptionCard(QFrame):
             self.setStyleSheet(f"""
                 QFrame#ModeOptionCard {{
                     background-color: {tokens.SURFACE_INSET};
-                    border: 1px solid {tokens.LINE};
+                    border: none;
                     border-radius: {tokens.RADIUS_INNER}px;
                 }}
                 QFrame#ModeOptionCard:hover {{
@@ -207,6 +207,11 @@ class RemediationView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+        scroll.viewport().setAutoFillBackground(True)
+        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+        scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+        scroll.verticalScrollBar().setSingleStep(25)
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)

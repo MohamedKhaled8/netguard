@@ -45,7 +45,20 @@ class GatewayProbe(BaseProbe):
                     status=ProbeStatus.UNAVAILABLE,
                     confidence=1.0,
                     error_message="No default gateway detected on active interfaces",
-                )
+                ),
+                ProbeResult(
+                    timestamp=now,
+                    source=MeasurementSource.WINDOWS_IPHLP,
+                    target="gateway",
+                    metric_type=MetricType.GATEWAY_PACKET_LOSS,
+                    raw_value=1.0,
+                    normalized_value=1.0,
+                    unit="ratio",
+                    status=ProbeStatus.UNAVAILABLE,
+                    confidence=1.0,
+                    packet_loss_ratio=1.0,
+                    error_message="No default gateway detected on active interfaces",
+                ),
             ]
 
         # Execute ping via executor to keep event loop unblocked

@@ -1,0 +1,38 @@
+{
+  "duration_sec": 30,
+  "first_window_shown_ms": 4232.3,
+  "stalls_over_50ms_count": 284,
+  "stalls_over_100ms_count": 272,
+  "max_stall_ms": 3343.59,
+  "top_stalls": [
+    {
+      "timestamp": 1795028540.3858933,
+      "lateness_ms": 3343.59,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n"
+    },
+    {
+      "timestamp": 1795028540.287783,
+      "lateness_ms": 3266.16,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 779, in _on_ui_tick\n    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 274, in get_interface_dns_servers\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    },
+    {
+      "timestamp": 1795028540.226091,
+      "lateness_ms": 3204.92,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 779, in _on_ui_tick\n    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 274, in get_interface_dns_servers\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    },
+    {
+      "timestamp": 1795028540.1649795,
+      "lateness_ms": 3143.33,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 779, in _on_ui_tick\n    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 274, in get_interface_dns_servers\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    },
+    {
+      "timestamp": 1795028540.1028905,
+      "lateness_ms": 3081.76,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 779, in _on_ui_tick\n    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 274, in get_interface_dns_servers\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    }
+  ],
+  "subprocess_spawns_total": 30,
+  "subprocess_on_ui_thread": 23,
+  "database_queries_total": 19,
+  "database_queries_on_ui_thread": 19
+}

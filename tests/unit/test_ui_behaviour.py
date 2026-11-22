@@ -387,19 +387,12 @@ def test_locale_parsing_samples_windows_adapter(managed_window: MainWindow):
     }
 
     for lang, (raw_text, expected_signal) in samples.items():
-        fake_proc = subprocess.CompletedProcess(
-            args=["netsh", "wlan", "show", "interfaces"],
-            returncode=0,
-            stdout=raw_text,
-            stderr="",
+        metrics = adapter.parse_wlan_output(raw_text)
+        assert metrics.get("is_wifi") is True
+        assert metrics.get("signal_percent") == expected_signal, (
+            f"Failed for {lang}: expected {expected_signal}, got {metrics.get('signal_percent')}"
         )
-        with patch.object(subprocess, "run", return_value=fake_proc):
-            metrics = adapter.get_wifi_metrics("Wi-Fi")
-            assert metrics.get("is_wifi") is True
-            assert metrics.get("signal_percent") == expected_signal, (
-                f"Failed for {lang}: expected {expected_signal}, got {metrics.get('signal_percent')}"
-            )
-            assert metrics.get("ssid") == "HomeNetwork_5G"
+        assert metrics.get("ssid") == "HomeNetwork_5G"
 
 
 # ===========================================================================

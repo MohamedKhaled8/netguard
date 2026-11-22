@@ -1,7 +1,6 @@
 """Global stylesheet generation for NetGuard AI.
 
-100% token-driven, dark warm-neutral graphite (#0E1012).
-No glow, no neon, no gradients, flat surfaces separated by 1px hairlines.
+Token-driven dark surfaces. Cards use SURFACE on BG, separated by a 1px line.
 """
 
 from __future__ import annotations
@@ -95,8 +94,10 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
 QLabel {{
     background: transparent;
     color: {tokens.TEXT};
-    border: none;
+    border: 0px solid transparent;
     border-radius: 0px;
+    padding: 0px;
+    outline: none;
 }}
 
 /* =========================================================================
@@ -154,7 +155,7 @@ QComboBox QAbstractItemView {{
 QTableWidget, QTableView {{
     background-color: transparent;
     border: none;
-    gridline-color: {tokens.LINE};
+    gridline-color: transparent;
     color: {tokens.TEXT};
     selection-background-color: {tokens.SURFACE_HOVER};
     selection-color: {tokens.TEXT};
@@ -164,7 +165,6 @@ QHeaderView::section {{
     background-color: transparent;
     color: {tokens.TEXT_MUTED};
     border: none;
-    border-bottom: 1px solid {tokens.LINE};
     padding: 8px 10px;
     font-size: 12px;
     font-weight: 500;

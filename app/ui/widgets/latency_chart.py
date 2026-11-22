@@ -34,6 +34,7 @@ from PySide6.QtCore import (
     QEasingCurve,
 )
 from app.ui import tokens
+from app.ui.animation_clock import AnimationMasterClock
 
 
 class LatencyPlotCanvas(QWidget):
@@ -41,9 +42,12 @@ class LatencyPlotCanvas(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(240)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setMinimumHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.samples: List[float] = []
         self.timestamps: List[str] = []
+        self.range_minutes: int = 60
         self.incident_index: Optional[int] = None
         self.incident_time_str: str = "—"
         self._reveal_progress = 1.0
@@ -51,10 +55,16 @@ class LatencyPlotCanvas(QWidget):
 
         self._init_default_data()
 
+        self._is_paused = False
         if tokens.ANIMATIONS_ENABLED:
-            self._pulse_timer = QTimer(self)
-            self._pulse_timer.timeout.connect(self._on_pulse_tick)
-            self._pulse_timer.start(50)
+            AnimationMasterClock.get_instance().subscribe(self._on_pulse_tick)
+
+    def set_paused(self, paused: bool) -> None:
+        self._is_paused = paused
+        if paused:
+            AnimationMasterClock.get_instance().unsubscribe(self._on_pulse_tick)
+        else:
+            AnimationMasterClock.get_instance().subscribe(self._on_pulse_tick)
 
     def get_reveal_progress(self) -> float:
         return self._reveal_progress
@@ -65,8 +75,17 @@ class LatencyPlotCanvas(QWidget):
 
     reveal_progress = Property(float, get_reveal_progress, set_reveal_progress)
 
-    def _on_pulse_tick(self) -> None:
-        self._pulse_phase = (self._pulse_phase + 0.028) % 1.0
+    def _on_pulse_tick(self, delta_ms: float = 50.0) -> None:
+        if getattr(self, "_is_paused", False):
+            return
+        clock = AnimationMasterClock.get_instance()
+        if clock.is_low_resource_mode:
+            return
+        # Skip repaints when idle/static (no incident marker to pulse)
+        if self.incident_index is None:
+            return
+        increment = 0.028 * (delta_ms / 50.0)
+        self._pulse_phase = (self._pulse_phase + increment) % 1.0
         self.update()
 
     def _init_default_data(self) -> None:
@@ -76,8 +95,8 @@ class LatencyPlotCanvas(QWidget):
         self.incident_time_str = "—"
 
     def set_data(self, samples: List[float], incident_idx: Optional[int] = None) -> None:
-        if samples and len(samples) >= 15:
-            self.samples = list(samples)
+        if samples:
+            self.samples = list(samples)[-60:]
             if incident_idx is not None:
                 self.incident_index = incident_idx
             else:
@@ -86,6 +105,9 @@ class LatencyPlotCanvas(QWidget):
                     self.incident_index = self.samples.index(max_v)
                 else:
                     self.incident_index = None
+        else:
+            self.samples = []
+            self.incident_index = None
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -100,10 +122,10 @@ class LatencyPlotCanvas(QWidget):
             painter.drawText(self.rect(), Qt.AlignCenter, "في انتظار تسجيل قياسات حقيقية…")
             return
 
-        pad_left = 38.0
+        pad_left = 42.0
         pad_right = 24.0
-        pad_top = 40.0
-        pad_bottom = 28.0
+        pad_top = 18.0
+        pad_bottom = 20.0
 
         plot_w = w - pad_left - pad_right
         plot_h = h - pad_top - pad_bottom
@@ -136,14 +158,15 @@ class LatencyPlotCanvas(QWidget):
         painter.setPen(dash_pen)
         painter.drawLine(QPointF(pad_left, y_thresh), QPointF(pad_left + plot_w, y_thresh))
 
-        # Label for threshold
-        painter.setFont(tokens.get_sans_font(12, 400))
+        # Label for threshold: subtle pill badge on the far right without colliding with wave
+        painter.setFont(tokens.get_sans_font(10, 500))
+        pill_rect = QRectF(pad_left + plot_w - 110, y_thresh - 17, 105, 15)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(tokens.SURFACE_INSET)))
+        painter.drawRoundedRect(pill_rect, 3, 3)
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
-        painter.drawText(
-            QRectF(pad_left + plot_w - 140, y_thresh - 16, 140, 14),
-            Qt.AlignRight | Qt.AlignVCenter,
-            "حد الاستقرار المرجعي",
-        )
+        ref_ms = int(DEFAULT_THRESHOLDS.latency.external_warning_ms)
+        painter.drawText(pill_rect, Qt.AlignCenter, f"حد مرجعي: {ref_ms} ms")
 
         # -------------------------------------------------------------
         # 2. X Axis (5 Mono Time Labels)
@@ -152,12 +175,18 @@ class LatencyPlotCanvas(QWidget):
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
         num_ticks = 5
         n_pts = len(self.samples)
+        now = datetime.now()
+        range_min = getattr(self, "range_minutes", 60)
 
         for i in range(num_ticks):
             frac = i / (num_ticks - 1)
             x_pos = pad_left + frac * plot_w
             idx = int(round(frac * (n_pts - 1)))
-            time_txt = self.timestamps[idx] if idx < len(self.timestamps) else "16:00"
+            if self.timestamps and idx < len(self.timestamps) and self.timestamps[idx]:
+                time_txt = self.timestamps[idx]
+            else:
+                tick_dt = now - timedelta(minutes=int(round((1.0 - frac) * range_min)))
+                time_txt = tick_dt.strftime("%H:%M")
             painter.drawText(
                 QRectF(x_pos - 25, bottom_y + 6, 50, 16),
                 Qt.AlignCenter,
@@ -226,9 +255,12 @@ class LatencyPlotCanvas(QWidget):
                 painter.drawPath(bad_path)
 
                 # Incident Chip badge: "15:32 · ارتفاع التأخير"
-                chip_txt = f"{self.incident_time_str} · ارتفاع التأخير"
+                if self.incident_time_str and self.incident_time_str != "—":
+                    chip_txt = f"{self.incident_time_str} · ارتفاع التأخير"
+                else:
+                    chip_txt = "ارتفاع التأخير"
                 painter.setFont(tokens.get_sans_font(12, 500))
-                chip_w = 130.0
+                chip_w = 130.0 if chip_txt != "ارتفاع التأخير" else 100.0
                 chip_h = 24.0
                 chip_x = max(pad_left, min(w - pad_right - chip_w, inc_pt.x() - chip_w / 2))
                 chip_y = max(6.0, inc_pt.y() - chip_h - 10.0)
@@ -263,32 +295,49 @@ class LatencyPlotCanvas(QWidget):
 class LatencyChart(QFrame):
     """Complete Latency Chart Panel Widget with Range Switch & Stats Footer."""
 
+    def set_paused(self, paused: bool) -> None:
+        if hasattr(self, "canvas") and hasattr(self.canvas, "set_paused"):
+            self.canvas.set_paused(paused)
+        elif hasattr(self, "_pulse_timer"):
+            if paused and self._pulse_timer.isActive():
+                self._pulse_timer.stop()
+            elif not paused and not self._pulse_timer.isActive():
+                self._pulse_timer.start(50)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("LatencyChartPanel")
+        from PySide6.QtWidgets import QSizePolicy
+        self.setMinimumHeight(375)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(f"""
             QFrame#LatencyChartPanel {{
                 background-color: {tokens.SURFACE};
                 border: 1px solid {tokens.LINE};
                 border-radius: {tokens.RADIUS_PANEL}px;
             }}
+            QFrame#LatencyChartPanel QLabel {{
+                background: transparent;
+                border: 0px solid transparent;
+            }}
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
 
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
 
         title_col = QVBoxLayout()
-        title_col.setSpacing(3)
+        title_col.setSpacing(2)
         self.lbl_title = QLabel("زمن الاستجابة")
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(16, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.lbl_sub = QLabel("الوقت اللازم لوصول بياناتك إلى الإنترنت والعودة. الأقل أفضل.")
-        self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         title_col.addWidget(self.lbl_title)
@@ -309,36 +358,49 @@ class LatencyChart(QFrame):
 
         div = QFrame()
         div.setFrameShape(QFrame.HLine)
-        div.setStyleSheet(f"background-color: {tokens.LINE}; border: none; max-height: 1px;")
+        div.setStyleSheet("background-color: rgba(255, 255, 255, 0.05); border: none; max-height: 1px;")
         layout.addWidget(div)
 
         stats_row = QHBoxLayout()
-        stats_row.setContentsMargins(10, 4, 10, 4)
+        stats_row.setContentsMargins(0, 6, 0, 2)
+        stats_row.setSpacing(10)
 
-        def make_stat_col(label_txt: str, val_txt: str, val_color: str = tokens.TEXT) -> Tuple[QWidget, QLabel]:
-            col_w = QWidget()
-            col_l = QVBoxLayout(col_w)
-            col_l.setContentsMargins(0, 0, 0, 0)
+        def make_stat_col(label_txt: str, val_txt: str, val_color: str = tokens.TEXT) -> Tuple[QFrame, QLabel]:
+            box = QFrame()
+            box.setObjectName("LatencyStatBox")
+            box.setFixedHeight(54)
+            box.setStyleSheet("""
+                QFrame#LatencyStatBox {
+                    background: transparent;
+                    border: 0px solid transparent;
+                }
+                QFrame#LatencyStatBox QLabel {
+                    background: transparent;
+                    border: 0px solid transparent;
+                }
+            """)
+            col_l = QVBoxLayout(box)
+            col_l.setContentsMargins(8, 6, 8, 6)
             col_l.setSpacing(2)
             col_l.setAlignment(Qt.AlignCenter)
 
             lbl = QLabel(label_txt)
-            lbl.setFont(tokens.get_sans_font(12, 400))
-            lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            lbl.setFont(tokens.get_sans_font(11, 400))
+            lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; border: none; background: transparent;")
             lbl.setAlignment(Qt.AlignCenter)
 
             val_lbl = QLabel(val_txt)
-            val_lbl.setFont(tokens.get_mono_font(20, 500))
-            val_lbl.setStyleSheet(f"color: {val_color};")
+            val_lbl.setFont(tokens.get_mono_font(18, 600))
+            val_lbl.setStyleSheet(f"color: {val_color}; border: none; background: transparent;")
             val_lbl.setAlignment(Qt.AlignCenter)
 
             col_l.addWidget(lbl)
             col_l.addWidget(val_lbl)
-            return col_w, val_lbl
+            return box, val_lbl
 
-        col_avg, self.lbl_avg = make_stat_col("المتوسط", "ms 29", tokens.TEXT)
-        col_max, self.lbl_max = make_stat_col("أعلى قيمة", "ms 182", tokens.BAD_SOFT_TEXT)
-        col_dur, self.lbl_dur = make_stat_col("مدة المشكلة", "41 ث", tokens.TEXT)
+        col_avg, self.lbl_avg = make_stat_col("المتوسط", "—", tokens.TEXT)
+        col_max, self.lbl_max = make_stat_col("أعلى قيمة", "—", tokens.TEXT)
+        col_dur, self.lbl_dur = make_stat_col("مدة المشكلة", "—", tokens.TEXT)
 
         stats_row.addWidget(col_avg)
         stats_row.addWidget(col_max)
@@ -346,11 +408,18 @@ class LatencyChart(QFrame):
         layout.addLayout(stats_row)
 
     def _on_range_changed(self, idx: int, label: str) -> None:
+        ranges = [60, 360, 1440]
+        self.canvas.range_minutes = ranges[idx] if idx < len(ranges) else 60
         self.canvas.set_data(self.canvas.samples)
 
-    def update_telemetry(self, samples: List[float], avg_ms: float = 29.0, max_ms: float = 182.0, duration_str: str = "41 ث") -> None:
-        if samples and len(samples) >= 15:
+    def update_telemetry(self, samples: List[float], avg_ms: float = 0.0, max_ms: float = 0.0, duration_str: str = "—") -> None:
+        if samples:
             self.canvas.set_data(samples)
-            self.lbl_avg.setText(f"ms {avg_ms:.0f}")
-            self.lbl_max.setText(f"ms {max_ms:.0f}")
+            self.lbl_avg.setText(f"{avg_ms:.0f} ms")
+            self.lbl_max.setText(f"{max_ms:.0f} ms")
             self.lbl_dur.setText(duration_str)
+        else:
+            self.canvas.set_data([])
+            self.lbl_avg.setText("—")
+            self.lbl_max.setText("—")
+            self.lbl_dur.setText("—")

@@ -1,39 +1,46 @@
 """Design tokens for NetGuard AI.
 
-Single source of truth for colors, typography, metrics, spacing, and radii.
-Strictly adheres to dark, warm-neutral graphite palette (#0E1012).
-No emoji, no neon, no glow, no gradients, flat surfaces separated by 1px hairlines.
+Three layers: primitive hex values, semantic roles, then component use.
+Dark operational surfaces, one warm action accent, status colors only for real state.
+Arabic UI keeps IBM Plex Sans Arabic. Display faces without Arabic glyphs
+(Playfair, Chakra Petch, Orbitron) are not used for labels.
 """
 
 from __future__ import annotations
 import os
 import logging
-from typing import Optional
+from typing import Any, Optional
 from PySide6.QtGui import QFont, QFontDatabase
 
 logger = logging.getLogger("netguard.tokens")
 
 # -----------------------------------------------------------------------------
-# Colors (Dark warm-neutral graphite palette)
+# Colors
+# Primitive surfaces stay near-black. Accent is the action color only.
+# Status green / amber / red stay separate from the accent so health is not
+# confused with a button.
 # -----------------------------------------------------------------------------
-BG = "#0E1012"
-SIDEBAR = "#0A0B0C"
-SURFACE = "#15181A"
-SURFACE_INSET = "#101315"
-RANGE_TRACK = "#0E1012"
-SURFACE_HOVER = "#1B1F22"
-SURFACE_SELECTED = "#1B1F22"
+BG = "#090B0E"
+SIDEBAR = "#0C0E12"
+SURFACE = "#161A1F"
+SURFACE_INSET = "#101318"
+RANGE_TRACK = "#090B0E"
+SURFACE_HOVER = "#1E242B"
+SURFACE_SELECTED = "#241910"
 
-LINE = "#25292C"
-LINE_STRONG = "#2C3033"
-LINE_THRESHOLD = "#3A4044"
+LINE = "#2A3138"
+LINE_STRONG = "#3A434C"
+LINE_THRESHOLD = "#4A545E"
 
 TEXT = "#ECEBE6"
-TEXT_SECONDARY = "#B4B8BC"
-TEXT_MUTED = "#9AA0A6"
+TEXT_SECONDARY = "#C5C9CE"
+TEXT_MUTED = "#A7ADB4"
 
-# Single UI accent (ivory) - can be re-themed in one place
-ACCENT = "#ECEBE6"
+# Action accent. Dark text on this orange clears 4.5:1; white text does not.
+ACCENT = "#FF5701"
+ACCENT_HOVER = "#E64E00"
+ACCENT_PRESSED = "#C44300"
+ON_ACCENT = "#111827"
 
 # Status colors (ONLY used to convey real status)
 STATUS_OK = "#5FD38D"
@@ -76,8 +83,12 @@ RADIUS_BAR = 3
 
 BORDER_WIDTH = 1
 
-# Global animation kill-switch
+# Global animation switch and master clock parameters
+# Energy-efficient 20 FPS (50ms) unified clock (< 0.1% CPU, ideal for low-end 2GB hardware)
 ANIMATIONS_ENABLED = True
+LOW_RESOURCE_MODE = False
+ANIMATION_MASTER_FPS = 20
+ANIMATION_MASTER_INTERVAL_MS = 50
 
 # -----------------------------------------------------------------------------
 # Typography
@@ -146,3 +157,33 @@ def format_arabic_connections(count: int) -> str:
 def bidi_isolate(text: Any) -> str:
     """Wrap Latin tokens or numeric specs in Unicode LTR isolate so RTL punctuation never scrambles."""
     return f"\u2066{text}\u2069"
+
+
+def _flatten_frame_style(style: str) -> str:
+    """Windows still paints a black box when the stylesheet says border: none."""
+    text = style or ""
+    text = text.replace("border: none", "border: 0px solid transparent")
+    text = text.replace("border:none", "border: 0px solid transparent")
+    if "border" not in text and "{" not in text:
+        body = text.rstrip().rstrip(";")
+        text = (body + "; " if body else "") + "background: transparent; border: 0px solid transparent; padding: 0px;"
+    return text
+
+
+def _install_label_frame_fix() -> None:
+    """QLabel/QFrame/QPushButton: Windows paints a black box when border: none."""
+    from PySide6.QtWidgets import QFrame, QLabel, QPushButton
+
+    for cls in (QLabel, QFrame, QPushButton):
+        if getattr(cls, "_netguard_frame_fix", False):
+            continue
+        original = cls.setStyleSheet
+
+        def set_style(self, style: str, original=original) -> None:
+            original(self, _flatten_frame_style(style))
+
+        cls.setStyleSheet = set_style
+        cls._netguard_frame_fix = True
+
+
+_install_label_frame_fix()

@@ -49,3 +49,15 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
+
+.serena/
+.token-savior-cache.json
+*.log
+stdout.txt
+stderr.txt
+/*.png
+artifacts/
+artifacts_screenshots/
+dist/
+build/
+

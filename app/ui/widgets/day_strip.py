@@ -24,10 +24,10 @@ class DayStripCanvas(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(68)
         self.setMouseTracking(True)
         self.bar_states: List[str] = ["no-data"] * 48
         self._init_default_day()
+        # Removed setMinimumWidth/MaximumWidth for responsive wrapping in dashboard grid
 
     def _init_default_day(self) -> None:
         now = datetime.now()
@@ -100,22 +100,17 @@ class DayStripCanvas(QWidget):
         painter.setPen(QColor(tokens.TEXT_MUTED))
 
         axis_points = [
-            (0.0, "00:00", Qt.AlignLeft),
-            (0.25, "06:00", Qt.AlignCenter),
-            (0.50, "12:00", Qt.AlignCenter),
-            (0.75, "18:00", Qt.AlignCenter),
-            (1.0, "24:00", Qt.AlignRight),
+            (0.0, "00:00"),
+            (0.25, "06:00"),
+            (0.50, "12:00"),
+            (0.75, "18:00"),
+            (1.0, "24:00"),
         ]
         label_y = 50.0
-        for frac, txt, align in axis_points:
+        for frac, txt in axis_points:
             x_pos = frac * w
-            if align == Qt.AlignLeft:
-                rect = QRectF(0.0, label_y, 40, 16)
-            elif align == Qt.AlignRight:
-                rect = QRectF(max(0.0, w - 40.0), label_y, 40, 16)
-            else:
-                rect = QRectF(x_pos - 20, label_y, 40, 16)
-            painter.drawText(rect, align | Qt.AlignVCenter, txt)
+            rect = QRectF(max(0.0, min(w - 56.0, x_pos - 28.0)), label_y, 56.0, 18.0)
+            painter.drawText(rect, Qt.AlignCenter | Qt.AlignVCenter, txt)
 
     def mouseMoveEvent(self, event) -> None:
         pos_x = event.position().x()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import json
+import threading
+import time
 from datetime import date, datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from app.core.models.metrics import Measurement, MetricType, ProbeStatus, MeasurementSource
@@ -13,37 +15,56 @@ class MeasurementRepository:
 
     def __init__(self, db_manager: DatabaseManager) -> None:
         self.db = db_manager
+        self._batch_queue: List[Measurement] = []
+        self._batch_lock = threading.Lock()
+        self._last_flush = time.time()
 
     def save(self, m: Measurement) -> int:
+        with self._batch_lock:
+            self._batch_queue.append(m)
+            self._counter = getattr(self, "_counter", 0) + 1
+            assigned_id = self._counter
+            should_flush = len(self._batch_queue) >= 15 or (time.time() - self._last_flush) >= 2.0
+
+        if should_flush:
+            self.flush()
+        return assigned_id
+
+    def flush(self) -> None:
+        with self._batch_lock:
+            if not self._batch_queue:
+                return
+            to_save = list(self._batch_queue)
+            self._batch_queue.clear()
+            self._last_flush = time.time()
+
         query = """
         INSERT INTO measurements (
             timestamp, source, target_or_interface, metric_type,
             raw_value, normalized_value, unit, status, confidence, metadata_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
-        metadata_str = json.dumps(m.metadata) if m.metadata else None
-        ts_str = m.timestamp.isoformat()
-        with self.db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                query,
-                (
-                    ts_str,
-                    m.source.value,
-                    m.target_or_interface,
-                    m.metric_type.value,
-                    m.raw_value,
-                    m.normalized_value,
-                    m.unit,
-                    m.status.value,
-                    m.confidence,
-                    metadata_str,
-                ),
+        rows = [
+            (
+                m.timestamp.isoformat(),
+                m.source.value,
+                m.target_or_interface,
+                m.metric_type.value,
+                m.raw_value,
+                m.normalized_value,
+                m.unit,
+                m.status.value,
+                m.confidence,
+                json.dumps(m.metadata) if m.metadata else None,
             )
+            for m in to_save
+        ]
+        with self.db.get_connection() as conn:
+            conn.executemany(query, rows)
             conn.commit()
-            return cur.lastrowid
 
     def get_latest_by_metric(self, metric_type: MetricType, limit: int = 10) -> List[Measurement]:
+        self.flush()
         query = """
         SELECT id, timestamp, source, target_or_interface, metric_type,
                raw_value, normalized_value, unit, status, confidence, metadata_json
@@ -61,6 +82,7 @@ class MeasurementRepository:
         return results
 
     def get_recent(self, limit: int = 50) -> List[Measurement]:
+        self.flush()
         query = """
         SELECT id, timestamp, source, target_or_interface, metric_type,
                raw_value, normalized_value, unit, status, confidence, metadata_json
@@ -78,6 +100,7 @@ class MeasurementRepository:
 
     def downsample_to_aggregates(self, cutoff_timestamp: Optional[datetime] = None) -> int:
         """Downsample 1-second raw measurements into 1-minute aggregates (min/avg/max/p95, loss_rate)."""
+        self.flush()
         if cutoff_timestamp is None:
             cutoff_timestamp = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         cutoff_str = cutoff_timestamp.isoformat()
@@ -202,6 +225,7 @@ class MeasurementRepository:
         audit_repo: Optional[Any] = None,
     ) -> Dict[str, int]:
         """Purge all measurements, aggregates, incidents, and audit records, reclaiming disk space with VACUUM."""
+        self.flush()
         deleted_raw = 0
         deleted_aggs = 0
         with self.db.get_connection() as conn:
@@ -237,6 +261,7 @@ class MeasurementRepository:
         evaluating metrics and incidents against thresholds to return
         a list of 48 states ('healthy', 'slow', 'bad', 'no-data', 'future').
         """
+        self.flush()
         if thresholds is None:
             try:
                 from app.core.thresholds import DEFAULT_THRESHOLDS

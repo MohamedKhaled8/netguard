@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QFrame,
     QComboBox,
+    QLineEdit,
+    QProgressBar,
     QScrollArea,
 )
 from PySide6.QtCore import Qt
@@ -81,6 +83,11 @@ class SettingsView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+        scroll.viewport().setAutoFillBackground(True)
+        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+        scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+        scroll.verticalScrollBar().setSingleStep(25)
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
@@ -174,7 +181,107 @@ class SettingsView(QWidget):
         layout.addWidget(intervals_panel)
 
         # -------------------------------------------------------------
-        # 3. Actions Row
+        # 3. Versioning & Remote Updates Panel
+        # -------------------------------------------------------------
+        from app.version import __version__
+        from app.core.updater import UpdateChecker, get_configured_update_source, get_auto_install_updates
+        update_panel = Panel(
+            title="إصدار التطبيق والتحديثات البرمجية",
+            subtitle="نظام التحديثات المركزي لمتابعة أحدث معايير الأمان وتحديثات سرعة الشبكة",
+            parent=self,
+        )
+
+        self.input_update_source = QLineEdit()
+        self.input_update_source.setFixedHeight(40)
+        self.input_update_source.setFont(tokens.get_sans_font(13, 400))
+        self.input_update_source.setPlaceholderText(r"\\SERVER\NetGuardUpdates\version.json أو http://192.168.1.x:8765/version.json")
+        initial_source = get_configured_update_source()
+        if initial_source:
+            self.input_update_source.setText(initial_source)
+
+        row_source = SettingFormRow(
+            "مصدر التحديثات الذاتي (LAN / HTTP)",
+            "مسار مجلد شبكي مشترك (UNC) أو رابط خادم HTTP المحلي لتحميل التحديثات لجميع أجهزة الشبكة.",
+            self.input_update_source,
+            parent=self,
+        )
+        update_panel.main_layout.addWidget(row_source)
+
+        self.toggle_auto_update = ToggleSwitch(parent=self)
+        self.toggle_auto_update.setChecked(get_auto_install_updates())
+        row_auto = SettingFormRow(
+            "تثبيت التحديثات تلقائياً",
+            "تنزيل وتثبيت التحديثات في الخلفية وإعادة تشغيل التطبيق تلقائياً دون الحاجة للنقر اليدوي.",
+            self.toggle_auto_update,
+            parent=self,
+        )
+        update_panel.main_layout.addWidget(row_auto)
+
+        update_col = QVBoxLayout()
+        update_col.setContentsMargins(16, 10, 16, 12)
+        update_col.setSpacing(10)
+
+        ver_row = QHBoxLayout()
+        ver_row.setSpacing(12)
+
+        lbl_ver_title = QLabel("رقم الإصدار الحالي:")
+        lbl_ver_title.setFont(tokens.get_sans_font(13, 500))
+        lbl_ver_title.setStyleSheet(f"color: {tokens.TEXT};")
+        ver_row.addWidget(lbl_ver_title)
+
+        self.lbl_current_version = QLabel(f"v{__version__} (مستقر)")
+        self.lbl_current_version.setFont(tokens.get_mono_font(13, 600))
+        self.lbl_current_version.setStyleSheet(f"color: {tokens.ACCENT}; background: rgba(255, 87, 1, 0.14); padding: 3px 8px; border-radius: 6px;")
+        ver_row.addWidget(self.lbl_current_version)
+        ver_row.addStretch()
+
+        self.btn_check_updates = SecondaryButton("التحقق من وجود تحديثات")
+        self.btn_check_updates.clicked.connect(self._on_check_updates_clicked)
+        ver_row.addWidget(self.btn_check_updates)
+
+        self.btn_install_update = PrimaryButton("تنزيل وتثبيت التحديث الآن")
+        self.btn_install_update.clicked.connect(self._on_install_update_clicked)
+        self.btn_install_update.hide()
+        ver_row.addWidget(self.btn_install_update)
+        update_col.addLayout(ver_row)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {tokens.BG};
+                border: 1px solid {tokens.LINE};
+                border-radius: 4px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {tokens.ACCENT};
+                border-radius: 3px;
+            }}
+        """)
+        self.progress_bar.hide()
+        update_col.addWidget(self.progress_bar)
+
+        self.lbl_update_status = QLabel("التطبيق متصل بمركز التحديثات التلقائية وجاهز لاستقبال التحديثات.")
+        self.lbl_update_status.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_update_status.setWordWrap(True)
+        update_col.addWidget(self.lbl_update_status)
+
+        update_panel.main_layout.addLayout(update_col)
+        layout.addWidget(update_panel)
+
+        self.updater = UpdateChecker(parent=self)
+        self.updater.update_found.connect(self._on_update_found)
+        self.updater.up_to_date.connect(self._on_up_to_date)
+        self.updater.check_failed.connect(self._on_update_failed)
+        self.updater.download_progress.connect(self._on_download_progress)
+        self.updater.download_finished.connect(self._on_download_finished)
+        self.updater.download_failed.connect(self._on_download_failed)
+        self.updater.install_failed.connect(self._on_install_failed)
+
+        # -------------------------------------------------------------
+        # 4. Actions Row
         # -------------------------------------------------------------
         actions_row = QHBoxLayout()
         actions_row.setContentsMargins(0, 8, 0, 0)
@@ -185,6 +292,94 @@ class SettingsView(QWidget):
 
         scroll.setWidget(content_widget)
         root_layout.addWidget(scroll)
+
+    def _on_check_updates_clicked(self) -> None:
+        src = self.input_update_source.text().strip()
+        self.updater.set_source(src)
+        self.btn_check_updates.setEnabled(False)
+        self.btn_check_updates.setText("جاري الفحص...")
+        self.btn_install_update.hide()
+        self.progress_bar.hide()
+        self.lbl_update_status.setText("جاري الاتصال بخادم التحديثات الذاتي للتحقق من وجود إصدار أحدث...")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.updater.check_for_updates_async()
+
+    def _on_update_found(self, data: dict) -> None:
+        new_v = data.get("version", "جديد")
+        notes = data.get("changelog") or data.get("release_notes") or "تحسينات عامة على الأداء والاستقرار"
+        self.btn_check_updates.setEnabled(True)
+        self.btn_check_updates.setText("إعادة الفحص")
+
+        is_auto = self.toggle_auto_update.isChecked() if hasattr(self, "toggle_auto_update") else True
+        if is_auto:
+            self.btn_install_update.hide()
+            self.lbl_update_status.setText(f"🎉 يتوفر إصدار جديد v{new_v}. جاري التنزيل والتثبيت التلقائي الآن...\n{notes}")
+            self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_OK}; font-weight: 500;")
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.show()
+            self.updater.download_update_async(data)
+        else:
+            self.btn_install_update.setText(f"تنزيل وتثبيت v{new_v} الآن")
+            self.btn_install_update.setEnabled(True)
+            self.btn_install_update.show()
+            self.lbl_update_status.setText(f"🎉 يتوفر إصدار جديد v{new_v}:\n{notes}")
+            self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_OK}; font-weight: 500;")
+
+    def _on_up_to_date(self, msg: str) -> None:
+        self.btn_check_updates.setEnabled(True)
+        self.btn_check_updates.setText("التحقق من وجود تحديثات")
+        self.btn_install_update.hide()
+        self.progress_bar.hide()
+        self.lbl_update_status.setText(f"✓ {msg}")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_OK};")
+
+    def _on_update_failed(self, err: str) -> None:
+        self.btn_check_updates.setEnabled(True)
+        self.btn_check_updates.setText("إعادة المحاولة")
+        self.btn_install_update.hide()
+        self.progress_bar.hide()
+        self.lbl_update_status.setText(f"تعذر استرداد التحديث:\n{err}")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+
+    def _on_install_update_clicked(self) -> None:
+        self.btn_install_update.setEnabled(False)
+        self.btn_install_update.setText("جاري التنزيل...")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        self.lbl_update_status.setText("بدء تنزيل حزمة التحديث ومطابقة التجزئة...")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.TEXT};")
+        self.updater.download_update_async()
+
+    def _on_download_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            pct = min(100, max(0, int((done / total) * 100)))
+            self.progress_bar.setValue(pct)
+            done_mb = done / (1024 * 1024)
+            total_mb = total / (1024 * 1024)
+            self.lbl_update_status.setText(f"جاري تنزيل التحديث: {pct}% ({done_mb:.1f} ميجابايت من أصل {total_mb:.1f} ميجابايت)...")
+        else:
+            self.lbl_update_status.setText(f"جاري تنزيل التحديث: {done / (1024 * 1024):.1f} ميجابايت...")
+
+    def _on_download_finished(self, staged_path: str) -> None:
+        self.progress_bar.setValue(100)
+        self.btn_install_update.setText("تم التحقق بنجاح ✓")
+        self.lbl_update_status.setText("✓ تم التحقق من سلامة الحزمة بنجاح (رمز SHA-256 مطابق). جاري تطبيق التحديث وإعادة تشغيل التطبيق...")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_OK}; font-weight: 500;")
+        self.updater.apply_update_and_restart(staged_path)
+
+    def _on_download_failed(self, err: str) -> None:
+        self.progress_bar.hide()
+        self.btn_install_update.setEnabled(True)
+        self.btn_install_update.setText("إعادة محاولة التنزيل")
+        self.lbl_update_status.setText(f"فشل التنزيل أو مطابقة التجزئة:\n{err}")
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+
+    def _on_install_failed(self, msg: str) -> None:
+        self.btn_install_update.setEnabled(True)
+        self.lbl_update_status.setText(msg)
+        self.lbl_update_status.setStyleSheet(f"color: {tokens.TEXT};")
 
     def set_operating_mode(self, mode: OperatingMode | str) -> None:
         m = OperatingMode(mode)

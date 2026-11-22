@@ -44,6 +44,7 @@ class DeepScanReport:
     explanation_arabic: str
     bufferbloat_grade: Optional[str] = None
     bufferbloat_delta_ms: Optional[float] = None
+    multi_protocol_report: Optional[Any] = None
 
 
 class DeepScanner:
@@ -149,10 +150,10 @@ class DeepScanner:
         )
 
         # -------------------------------------------------------------
-        # Step 3: Global Destination Reachability (TCP 3-Way Handshakes)
+        # Step 3: Global Destination Reachability & Multi-Protocol Trace
         # -------------------------------------------------------------
         if progress_callback:
-            progress_callback(3, total_steps, "فحص الوصول إلى الخوادم السحابية العالمية...")
+            progress_callback(3, total_steps, "فحص الوصول للإنترنت وتحليل المسار متعدد البروتوكولات...")
 
         destinations = [("1.1.1.1", 53), ("8.8.8.8", 53), ("google.com", 80)]
         ext_latencies: List[float] = []
@@ -164,6 +165,14 @@ class DeepScanner:
                 ext_latencies.append(lat)
             else:
                 ext_fails += 1
+
+        multi_proto_report = None
+        try:
+            from app.diagnosis.traceroute import MultiProtocolAnalyzer
+            analyzer = MultiProtocolAnalyzer(platform_adapter=self.platform)
+            multi_proto_report = analyzer.run_full_analysis(target_ip="1.1.1.1", max_hops=10)
+        except Exception as exc:
+            pass
 
         ext_loss = (ext_fails / float(len(destinations))) * 100.0
         ext_avg = (sum(ext_latencies) / len(ext_latencies)) if ext_latencies else None
@@ -181,7 +190,11 @@ class DeepScanner:
                 latency_ms=ext_avg,
                 loss_pct=ext_loss,
                 details=ext_details,
-                raw_data={"samples": ext_latencies, "fails": ext_fails},
+                raw_data={
+                    "samples": ext_latencies,
+                    "fails": ext_fails,
+                    "multi_proto_report": multi_proto_report,
+                },
             )
         )
 
@@ -303,6 +316,12 @@ class DeepScanner:
                 + " · ".join(f"{s.name}: {s.details}" for s in steps if not s.passed)
             )
 
+        loss_candidates = [
+            float(s.loss_pct) for s in steps
+            if hasattr(s, "loss_pct") and s.loss_pct is not None and math.isfinite(s.loss_pct)
+        ]
+        calculated_loss_pct = max(loss_candidates) if loss_candidates else 0.0
+
         return DeepScanReport(
             timestamp=datetime.now(timezone.utc),
             duration_sec=duration,
@@ -311,10 +330,11 @@ class DeepScanner:
             gateway_latency_ms=gw_res,
             dns_latency_ms=dns_res,
             external_latency_ms=ext_res,
-            packet_loss_pct=steps[0].loss_pct,
+            packet_loss_pct=calculated_loss_pct,
             wifi_signal_pct=signal_pct if (is_wifi and signal_pct and signal_pct > 0) else None,
             summary_arabic=summary,
             explanation_arabic=explanation,
             bufferbloat_grade=bb_grade,
             bufferbloat_delta_ms=bb_delta,
+            multi_protocol_report=multi_proto_report,
         )

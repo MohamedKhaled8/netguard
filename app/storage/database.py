@@ -129,6 +129,37 @@ class DatabaseManager:
             conn.commit()
             logger.info("Database schema migrated to version 2 (aggregates) at %s", self.db_path)
 
+        if current_version < 3:
+            cols = [
+                ("fingerprint", "TEXT DEFAULT ''"),
+                ("first_detected", "TEXT"),
+                ("last_observed", "TEXT"),
+                ("occurrence_count", "INTEGER DEFAULT 1"),
+                ("status", "TEXT DEFAULT 'diagnosed'"),
+                ("resolution_type", "TEXT DEFAULT 'diagnosed_only'"),
+                ("affected_component", "TEXT DEFAULT 'network'"),
+                ("cause_classification", "TEXT DEFAULT 'probable_cause'"),
+                ("action_record_id", "TEXT"),
+                ("resolved_at", "TEXT"),
+            ]
+            for col_name, col_def in cols:
+                try:
+                    conn.execute(f"ALTER TABLE incidents ADD COLUMN {col_name} {col_def};")
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                conn.execute("ALTER TABLE actions_audit ADD COLUMN action_classification TEXT DEFAULT 'corrective_action';")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_fingerprint ON incidents(fingerprint);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);")
+            except Exception:
+                pass
+            conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (3);")
+            conn.commit()
+            logger.info("Database schema migrated to version 3 (unified incident lifecycle) at %s", self.db_path)
+
     def vacuum(self) -> None:
         """Run VACUUM to reclaim free space from pruned rows in autocommit mode."""
         if str(self.db_path) == ":memory:":

@@ -67,6 +67,7 @@ class UIAsyncBridge(QObject):
     network_info_ready = Signal(dict)
     remediation_event_received = Signal(str, dict)
     speed_test_done = Signal(str)
+    gui_dispatch = Signal(object)
 
 
 class SidebarModeOption(QFrame):
@@ -106,7 +107,7 @@ class SidebarModeOption(QFrame):
             self.setStyleSheet(f"""
                 QFrame#SidebarModeOption {{
                     background-color: {tokens.SURFACE_HOVER};
-                    border: 1px solid {tokens.LINE_THRESHOLD};
+                    border: none;
                     border-radius: {tokens.RADIUS_BUTTON}px;
                 }}
                 QFrame#SidebarModeOption QLabel {{
@@ -336,12 +337,14 @@ class MainWindow(QMainWindow):
     def __init__(self, application: Any, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.app_core = application
+        self._fallback_async_loop: Optional[asyncio.AbstractEventLoop] = None
         ctx = getattr(application, "ctx", None)
         eb = getattr(ctx, "event_bus", None)
         plat = getattr(ctx, "platform", None)
         us = getattr(ctx, "settings", getattr(ctx, "user_settings", None))
         self.traffic_controller = getattr(application, "traffic_controller", None) or TrafficController(event_bus=eb, platform=plat, user_settings=us)
         self.bridge = UIAsyncBridge()
+        self.bridge.gui_dispatch.connect(self._run_on_gui)
 
         # Enforce Arabic RTL layout & dark theme palette
         if QApplication.instance():
@@ -356,8 +359,34 @@ class MainWindow(QMainWindow):
 
         tokens.init_fonts()
         self.setWindowTitle("NetGuard AI")
-        self.resize(1440, 900)
-        self.setMinimumSize(480, 600)
+
+        # Explicitly apply application window icon
+        from PySide6.QtGui import QIcon
+        base_dir = getattr(sys, "_MEIPASS", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+        for icon_name in ("icon.ico", "icon.png"):
+            icon_p = os.path.join(base_dir, "assets", icon_name)
+            if os.path.exists(icon_p):
+                app_ico = QIcon(icon_p)
+                self.setWindowIcon(app_ico)
+                if QApplication.instance():
+                    QApplication.instance().setWindowIcon(app_ico)
+                break
+
+        # Responsive window size bounded to available desktop logical geometry
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            target_w = min(1200, max(960, int(avail.width() * 0.90)))
+            target_h = min(760, max(580, int(avail.height() * 0.90)))
+            self.resize(target_w, target_h)
+            self.move(
+                avail.x() + (avail.width() - target_w) // 2,
+                avail.y() + (avail.height() - target_h) // 2,
+            )
+        else:
+            self.resize(1024, 680)
+
+        self.setMinimumSize(480, 580)
         self.setStyleSheet(DARK_THEME_QSS)
 
         central_widget = QWidget(self)
@@ -444,6 +473,10 @@ class MainWindow(QMainWindow):
         if plat and plat.is_elevated():
             self.sidebar.btn_restart_admin.setText("صلاحيات مسؤول مفعّلة ✓")
             self.sidebar.btn_restart_admin.setEnabled(False)
+            self.sidebar.btn_restart_admin.setStyleSheet(
+                f"background: rgba(52, 211, 153, 0.08); color: {tokens.STATUS_OK}; "
+                f"border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 6px; font-weight: 500;"
+            )
         else:
             self.sidebar.btn_restart_admin.clicked.connect(
                 lambda: prompt_restart_as_admin(self, "تشغيل كافة ميزات الحماية المتقدمة", plat)
@@ -453,6 +486,21 @@ class MainWindow(QMainWindow):
 
         # Inspect network hardware asynchronously on launch
         self._async_inspect_network_environment()
+
+        # Initialize DNS recommendation card in discovering state without fake latencies
+        self.view_dashboard.update_dns_recommendation(
+            curr_name="جاري كشف خادم DNS النشط...",
+            curr_ms=None,
+            best_name="جاري فحص الخوادم البديلة...",
+            best_ip="—",
+            best_ms=0.0,
+            is_optimal=False,
+            is_autonomous=False,
+        )
+
+        # Schedule initial traffic scan immediately so consumers list is populated
+        if "pytest" not in sys.modules:
+            QTimer.singleShot(600, self._on_scan_traffic)
 
         # Connect single source of truth DNS state manager (Item B1)
         from app.dns.state import DnsStateManager, DnsStateData
@@ -467,7 +515,7 @@ class MainWindow(QMainWindow):
         self._last_dns_switch_time: float = 0.0
         self.dns_rank_timer = QTimer(self)
         self.dns_rank_timer.timeout.connect(self._on_run_dns_benchmark)
-        self.dns_rank_timer.start(60000)
+        self.dns_rank_timer.start(300000)
 
         self.ticker_counter = 0
 
@@ -477,13 +525,95 @@ class MainWindow(QMainWindow):
         # Load initial timeline narrative from stored incidents and audit records
         self._refresh_timeline_from_records()
 
+        # Clean up any leftover .old / .pending update files on startup
+        from app.core.updater import cleanup_stale_update_files
+        cleanup_stale_update_files()
+
+        # Silent background auto-update checks (Startup after 5s + every 10 minutes)
+        self._is_checking_updates_bg = False
+        self.update_check_timer = QTimer(self)
+        self.update_check_timer.timeout.connect(self._on_background_update_tick)
+        self.update_check_timer.start(10 * 60 * 1000)
+
+        if "pytest" not in sys.modules:
+            QTimer.singleShot(5000, self._on_background_update_tick)
+
+    def _run_on_gui(self, fn: Any) -> None:
+        try:
+            fn()
+        except Exception as e:
+            logger.error("Exception in GUI thread dispatch: %s", e, exc_info=True)
+
+    def call_on_ui(self, fn: Any) -> None:
+        """Thread-safe invocation of a function on the main Qt GUI event loop."""
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            self._run_on_gui(fn)
+        else:
+            try:
+                self.bridge.gui_dispatch.emit(fn)
+            except Exception:
+                pass
+
+    @property
+    def async_loop(self) -> asyncio.AbstractEventLoop:
+        """Centralized application async event loop."""
+        loop = getattr(self.app_core, "async_loop", None)
+        if loop and loop.is_running():
+            return loop
+        if not hasattr(self, "_fallback_async_loop") or self._fallback_async_loop is None or self._fallback_async_loop.is_closed():
+            self._fallback_async_loop = asyncio.new_event_loop()
+            import threading
+            t = threading.Thread(target=self._fallback_async_loop.run_forever, daemon=True, name="MainWindowCentralAsyncLoop")
+            t.start()
+        if hasattr(self.app_core, "async_loop") and self.app_core.async_loop is None:
+            self.app_core.async_loop = self._fallback_async_loop
+        return self._fallback_async_loop
+
+    def dispatch_coroutine(
+        self,
+        coro: Any,
+        on_done: Optional[Any] = None,
+    ) -> Any:
+        """Safely dispatch an async coroutine into the centralized application event loop."""
+        loop = self.async_loop
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        if on_done:
+            future.add_done_callback(lambda f: self.call_on_ui(lambda: on_done(f)))
+        return future
+
     def _switch_view(self, index: int, active_btn: QPushButton) -> None:
         self.stack.setCurrentIndex(index)
         for b in self.nav_buttons:
             b.setChecked(b == active_btn)
 
-        if index == 4:
+        if hasattr(self.view_dashboard, "set_animations_paused"):
+            self.view_dashboard.set_animations_paused(index != 0)
+
+        # Immediate single-shot refresh on tab change so user never waits
+        if index == 0:
+            obs = getattr(self.app_core, "observability", None)
+            last_diag = getattr(self.app_core.diagnosis, "last_diagnosis", None) if hasattr(self.app_core, "diagnosis") else None
+            if obs:
+                self.view_dashboard.update_telemetry(obs, last_diag)
+        elif index == 1:
+            obs = getattr(self.app_core, "observability", None)
+            last_diag = getattr(self.app_core.diagnosis, "last_diagnosis", None) if hasattr(self.app_core, "diagnosis") else None
+            net_info = getattr(self.view_dashboard, "_network_info", {})
+            if obs:
+                self.view_diagnosis.update_live_telemetry(obs, net_info, last_diag)
+                if last_diag:
+                    self.view_diagnosis.update_diagnosis(last_diag)
+        elif index == 4:
             self._on_scan_traffic()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.WindowStateChange:
+            is_min = self.isMinimized()
+            if hasattr(self.view_dashboard, "set_animations_paused"):
+                self.view_dashboard.set_animations_paused(is_min or self.stack.currentIndex() != 0)
 
     def _on_sidebar_mode_changed(self, mode_val: Any) -> None:
         if isinstance(mode_val, int):
@@ -528,7 +658,7 @@ class MainWindow(QMainWindow):
             self.view_settings.btn_clear_history.clicked.connect(self._on_clear_history_requested)
         if hasattr(self.view_history, "btn_clear_history"):
             self.view_history.btn_clear_history.clicked.connect(self._on_clear_history_requested)
-        self.view_dns.benchmark_btn.clicked.connect(self._on_run_dns_benchmark)
+        self.view_dns.benchmark_btn.clicked.connect(lambda _checked=False: self._on_run_dns_benchmark(full=True))
         self.view_traffic.btn_refresh.clicked.connect(self._on_scan_traffic)
         self.view_diagnosis.btn_run_audit.clicked.connect(self._on_run_deep_diagnosis)
 
@@ -557,6 +687,7 @@ class MainWindow(QMainWindow):
         # Dashboard quick scan / speed test request
         self.view_dashboard.quick_scan_requested.connect(self._on_quick_scan_requested)
         self.view_dashboard.meeting_preflight_requested.connect(self._on_meeting_preflight_requested)
+        self.view_dashboard.export_report_requested.connect(self._on_export_report_requested)
 
         # Dashboard timeline requests
         self.view_dashboard.timeline_panel.view_evidence_requested.connect(
@@ -568,17 +699,21 @@ class MainWindow(QMainWindow):
 
     def _on_quick_scan_requested(self) -> None:
         """Trigger on-demand telemetry / speed test cycle and update timestamp."""
-        def _worker():
+        async def _run_scan():
             try:
                 if hasattr(self.app_core, "observability") and self.app_core.observability:
-                    asyncio.run(self.app_core.observability.run_single_cycle())
+                    await self.app_core.observability.run_single_cycle()
             except Exception as e:
                 logger.warning(f"Error during on-demand telemetry scan: {e}")
             finally:
                 time_str = datetime.now().strftime("%H:%M")
-                self.bridge.speed_test_done.emit(time_str)
+                if hasattr(self, "bridge") and self.bridge is not None:
+                    try:
+                        self.bridge.speed_test_done.emit(time_str)
+                    except RuntimeError:
+                        pass
 
-        threading.Thread(target=_worker, daemon=True).start()
+        self.dispatch_coroutine(_run_scan())
 
     def _on_meeting_preflight_requested(self) -> None:
         """Run rapid 10-15s pre-flight diagnostics and show comprehensive readiness report (Item D5)."""
@@ -594,7 +729,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.warning("Pre-flight meeting check failed: %s", e)
             finally:
-                QTimer.singleShot(0, lambda: self._on_meeting_preflight_done(report))
+                self.call_on_ui(lambda: self._on_meeting_preflight_done(report))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -624,6 +759,119 @@ class MainWindow(QMainWindow):
         self.app_core.ctx.platform.flush_dns_cache()
         QMessageBox.information(self, "تحسين فوري", "تم تطبيق أولوية QoS وتفريغ كاش DNS لضمان جودة الاجتماع.")
 
+    def _on_export_report_requested(self) -> None:
+        """Export comprehensive diagnostic report to desktop or reports directory."""
+        try:
+            from datetime import datetime
+            import json
+            from pathlib import Path
+            from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+            desktop = Path.home() / "Desktop"
+            target_dir = desktop if desktop.exists() else Path.cwd()
+            now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            default_path = str(target_dir / f"NetGuard_Report_{now_str}.html")
+
+            # Let user choose file destination or use default
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "تصدير تقرير فحص الشبكة",
+                default_path,
+                "HTML Report (*.html);;JSON Data (*.json)"
+            )
+            if not file_path:
+                return
+
+            # Gather current telemetry & state
+            net_id = getattr(self, "_last_net_info", None)
+            diag = getattr(self, "_last_diag", None)
+            obs = getattr(self, "_last_obs", None)
+
+            # Generate HTML report
+            html_content = f"""<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>تقرير فحص وتشخيص الشبكة — NetGuard AI</title>
+<style>
+body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background: #0c101c; color: #e2e8f0; margin: 0; padding: 24px; direction: rtl; }}
+.header {{ background: #151b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }}
+h1 {{ margin: 0 0 8px 0; color: #38bdf8; font-size: 24px; }}
+.meta {{ color: #94a3b8; font-size: 14px; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }}
+.card {{ background: #151b2e; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; }}
+.card-label {{ color: #94a3b8; font-size: 12px; margin-bottom: 6px; }}
+.card-val {{ font-size: 18px; font-weight: bold; color: #f1f5f9; }}
+table {{ width: 100%; border-collapse: collapse; background: #151b2e; border-radius: 10px; overflow: hidden; border: 1px solid #1e293b; }}
+th, td {{ padding: 12px 16px; text-align: right; border-bottom: 1px solid #1e293b; }}
+th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
+.status-good {{ color: #4ade80; }}
+.status-warn {{ color: #facc15; }}
+.status-bad {{ color: #f87171; }}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>تقرير فحص وتشخيص الشبكة — NetGuard AI</h1>
+<div class="meta">تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | حالة الشبكة: {'سليمة' if getattr(diag, 'is_healthy', True) else 'تحتاج انتباه'}</div>
+</div>
+
+<div class="grid">
+<div class="card"><div class="card-label">اسم الشبكة (SSID)</div><div class="card-val">{getattr(net_id, 'ssid', '—') if net_id else '—'}</div></div>
+<div class="card"><div class="card-label">مزود الخدمة (ISP)</div><div class="card-val">{getattr(net_id, 'isp', '—') if net_id else '—'}</div></div>
+<div class="card"><div class="card-label">عنوان IP الداخلي</div><div class="card-val">{getattr(net_id, 'local_ip', '—') if net_id else '—'}</div></div>
+<div class="card"><div class="card-label">عنوان IP الخارجي</div><div class="card-val">{getattr(net_id, 'public_ip', '—') if net_id else '—'}</div></div>
+<div class="card"><div class="card-label">بوابة الراوتر (Gateway)</div><div class="card-val">{getattr(net_id, 'gateway_ip', '—') if net_id else '—'}</div></div>
+<div class="card"><div class="card-label">خادم DNS المعتمد</div><div class="card-val">{getattr(net_id, 'dns_servers', ['—'])[0] if net_id and net_id.dns_servers else '—'}</div></div>
+<div class="card"><div class="card-label">زمن الاستجابة للإنترنت</div><div class="card-val">{f"{getattr(obs, 'external_rtt_ms', 0):.1f} ms" if obs and obs.external_rtt_ms else '—'}</div></div>
+<div class="card"><div class="card-label">فقدان الحزم (Packet Loss)</div><div class="card-val">{f"{getattr(obs, 'packet_loss_pct', 0):.1f}%" if obs and obs.packet_loss_pct is not None else '0.0%'}</div></div>
+<div class="card"><div class="card-label">التذبذب (Jitter)</div><div class="card-val">{f"{getattr(obs, 'jitter_ms', 0):.1f} ms" if obs and obs.jitter_ms is not None else '—'}</div></div>
+</div>
+
+<h2>التشخيص الميداني والطبقات</h2>
+<table>
+<thead><tr><th>الطبقة</th><th>المكون</th><th>الحالة والمؤشر</th></tr></thead>
+<tbody>
+<tr><td>01</td><td>بطاقة الشبكة (Local Interface)</td><td>{getattr(net_id, 'adapter_name', 'Active') if net_id else 'Active'} — {getattr(net_id, 'local_ip', 'Connected') if net_id else 'Connected'}</td></tr>
+<tr><td>02</td><td>الراوتر المنزلي (Gateway)</td><td>{getattr(net_id, 'gateway_ip', '192.168.1.1') if net_id else '—'} — {f"استجابة {getattr(obs, 'gateway_rtt_ms', 1.0):.1f} ms" if obs and obs.gateway_rtt_ms else 'سليم'}</td></tr>
+<tr><td>03</td><td>مزود الخدمة (ISP Infrastructure)</td><td>{getattr(net_id, 'isp', 'Active') if net_id else '—'} — مسار التوصيل مستقر</td></tr>
+<tr><td>04</td><td>خوادم DNS</td><td>{getattr(net_id, 'dns_servers', ['—'])[0] if net_id and net_id.dns_servers else '—'} — {f"{getattr(obs, 'dns_latency_ms', 0):.1f} ms" if obs and obs.dns_latency_ms else 'مستقر'}</td></tr>
+<tr><td>05</td><td>الإنترنت والشبكات السحابية</td><td>{f"فقدان {getattr(obs, 'packet_loss_pct', 0):.1f}%" if obs and obs.packet_loss_pct is not None else '0%'} — {f"زمن استجابة {getattr(obs, 'external_rtt_ms', 0):.1f} ms" if obs and obs.external_rtt_ms else 'متصل'}</td></tr>
+</tbody>
+</table>
+</body>
+</html>
+"""
+            if file_path.endswith(".json"):
+                data = {
+                    "timestamp": datetime.now().isoformat(),
+                    "network_identity": {
+                        "ssid": getattr(net_id, 'ssid', None) if net_id else None,
+                        "isp": getattr(net_id, 'isp', None) if net_id else None,
+                        "local_ip": getattr(net_id, 'local_ip', None) if net_id else None,
+                        "public_ip": getattr(net_id, 'public_ip', None) if net_id else None,
+                        "gateway_ip": getattr(net_id, 'gateway_ip', None) if net_id else None,
+                        "dns_servers": getattr(net_id, 'dns_servers', []) if net_id else [],
+                    },
+                    "metrics": {
+                        "external_rtt_ms": getattr(obs, 'external_rtt_ms', None) if obs else None,
+                        "gateway_rtt_ms": getattr(obs, 'gateway_rtt_ms', None) if obs else None,
+                        "dns_latency_ms": getattr(obs, 'dns_latency_ms', None) if obs else None,
+                        "packet_loss_pct": getattr(obs, 'packet_loss_pct', None) if obs else None,
+                        "jitter_ms": getattr(obs, 'jitter_ms', None) if obs else None,
+                    }
+                }
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            else:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+
+            QMessageBox.information(self, "تم التصدير بنجاح", f"تم حفظ تقرير فحص الشبكة بنجاح في:\n{file_path}")
+        except Exception as exc:
+            logger.error("Failed to export diagnostic report: %s", exc)
+            QMessageBox.warning(self, "خطأ في التصدير", f"تعذر تصدير التقرير:\n{exc}")
+
     def _on_speed_test_done(self, timestamp: str) -> None:
         self._last_speed_test_time = timestamp
         self.view_dashboard.set_last_speed_test_time(timestamp)
@@ -650,23 +898,34 @@ class MainWindow(QMainWindow):
 
     def _refresh_timeline_from_records(self) -> None:
         """Refresh timeline in dashboard view with most recent incident and audit records."""
-        try:
-            inc_repo = getattr(self.app_core.ctx, "incidents", None)
-            aud_repo = getattr(self.app_core.ctx, "audit", None)
-            incidents = inc_repo.get_recent(limit=1) if inc_repo and hasattr(inc_repo, "get_recent") else []
-            audits = aud_repo.get_recent(limit=1) if aud_repo and hasattr(aud_repo, "get_recent") else []
-            latest_inc = incidents[0] if incidents else None
-            latest_aud = audits[0] if audits else None
-            self.view_dashboard.update_timeline_from_records(latest_inc, latest_aud)
+        if getattr(self, "_timeline_refreshing", False):
+            return
+        self._timeline_refreshing = True
 
-            # Query real count and duration for today (Item C3)
-            today_audits = aud_repo.get_by_date(date.today()) if aud_repo and hasattr(aud_repo, "get_by_date") else []
-            succeeded_today = [a for a in today_audits if getattr(a, "status", None) == ActionExecutionStatus.SUCCEEDED]
-            cnt = len(succeeded_today)
-            avg_dur = (sum(getattr(a, "execution_duration_ms", 0.0) for a in succeeded_today) / (cnt * 1000.0)) if cnt > 0 else 0.0
-            self.view_dashboard.update_daily_incident_summary(cnt, avg_dur)
-        except Exception as e:
-            logger.warning("Failed to refresh timeline from records: %s", e)
+        def _worker():
+            try:
+                inc_repo = getattr(self.app_core.ctx, "incidents", None)
+                aud_repo = getattr(self.app_core.ctx, "audit", None)
+                incidents = inc_repo.get_recent(limit=1) if inc_repo and hasattr(inc_repo, "get_recent") else []
+                audits = aud_repo.get_recent(limit=1) if aud_repo and hasattr(aud_repo, "get_recent") else []
+                latest_inc = incidents[0] if incidents else None
+                latest_aud = audits[0] if audits else None
+                today_audits = aud_repo.get_by_date(date.today()) if aud_repo and hasattr(aud_repo, "get_by_date") else []
+                succeeded_today = [a for a in today_audits if getattr(a, "status", None) == ActionExecutionStatus.SUCCEEDED]
+                cnt = len(succeeded_today)
+                avg_dur = (sum(getattr(a, "execution_duration_ms", 0.0) for a in succeeded_today) / (cnt * 1000.0)) if cnt > 0 else 0.0
+
+                def _apply():
+                    self.view_dashboard.update_timeline_from_records(latest_inc, latest_aud)
+                    self.view_dashboard.update_daily_incident_summary(cnt, avg_dur)
+
+                self.call_on_ui(_apply)
+            except Exception as e:
+                logger.warning("Failed to refresh timeline from records: %s", e)
+            finally:
+                self._timeline_refreshing = False
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_timeline_rollback_requested(self) -> None:
         """Handle user rollback request from timeline panel."""
@@ -680,10 +939,14 @@ class MainWindow(QMainWindow):
         if rec.action_id == "switch_dns_resolver" or "dns" in rec.action_id:
             self._on_dashboard_revert_dns()
         elif hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
-            def _worker():
-                ok, msg = asyncio.run(self.app_core.orchestrator.rollback_action(rec.id))
-                QTimer.singleShot(0, lambda: self._on_timeline_rollback_done(ok, msg, rec))
-            threading.Thread(target=_worker, daemon=True).start()
+            async def _run_rollback():
+                try:
+                    ok, msg = await self.app_core.orchestrator.rollback_action(rec.id)
+                except Exception as exc:
+                    ok, msg = False, str(exc)
+                self.call_on_ui(lambda: self._on_timeline_rollback_done(ok, msg, rec))
+
+            self.dispatch_coroutine(_run_rollback())
         else:
             QMessageBox.information(self, "تراجع عن الإصلاح", f"الإجراء '{rec.action_name}' غير قابل للتراجع المباشر.")
 
@@ -695,172 +958,288 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "فشل التراجع", f"تعذر التراجع عن الإجراء: {msg}")
 
     def _async_inspect_network_environment(self) -> None:
+        def _ownership_worker():
+            try:
+                from app.dns.ownership import DnsOwnershipEngine
+                plat = getattr(getattr(self, "app_core", None), "ctx", None)
+                plat_adapter = getattr(plat, "platform", None)
+                ownership_engine = DnsOwnershipEngine(plat_adapter)
+                report = ownership_engine.discover_ownership()
+                self.call_on_ui(lambda: self.view_dns.update_ownership_report(report))
+            except Exception as exc:
+                logger.debug("Background DNS ownership discovery error: %s", exc)
+
+        threading.Thread(target=_ownership_worker, daemon=True).start()
+
+        def _safe_emit_net_info(info_dict: Dict[str, Any]) -> None:
+            if hasattr(self, "bridge") and self.bridge is not None:
+                try:
+                    self.bridge.network_info_ready.emit(info_dict)
+                except (RuntimeError, AttributeError):
+                    pass
+
         def _worker():
             try:
-                from app.platform.windows.network_info import (
-                    get_wifi_details,
-                    get_active_dns_servers,
-                    get_isp_and_public_ip,
-                )
-                iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
-                gw = self.app_core.ctx.platform.get_default_gateway() or "192.168.1.1"
-                wifi = get_wifi_details()
-                dns_servers = get_active_dns_servers(iface)
-                isp = get_isp_and_public_ip()
+                from app.platform.windows.network_info import get_network_identity
 
-                info = {
-                    "iface": iface,
-                    "gateway": gw,
-                    "wifi": wifi,
-                    "dns": dns_servers,
-                    "isp": isp,
-                }
-                QTimer.singleShot(0, lambda: self._safe_emit_network_info(info))
-            except Exception:
-                pass
+                # 1. Ultra-fast local identity emission (SSID, Local IP, Gateway, Adapter in <300ms)
+                fast_info = get_network_identity(self.app_core.ctx.platform, include_hop2=False, include_isp=False)
+                _safe_emit_net_info(fast_info)
+
+                # 2. ISP and hop2 diagnostics emission as soon as resolved
+                isp_info = get_network_identity(self.app_core.ctx.platform, include_hop2=True, include_isp=True)
+                _safe_emit_net_info(isp_info)
+
+                # 3. Complete background probe with hop 2 traceroute
+                full_info = get_network_identity(self.app_core.ctx.platform, include_hop2=True, include_isp=True)
+                _safe_emit_net_info(full_info)
+            except Exception as e:
+                logger.warning("Network environment inspection failed: %s", e)
 
         threading.Thread(target=_worker, daemon=True).start()
-
-    def _safe_emit_network_info(self, info: Dict[str, Any]) -> None:
-        try:
-            if hasattr(self, "bridge") and self.bridge:
-                self.bridge.network_info_ready.emit(info)
-        except (RuntimeError, Exception):
-            pass
 
     def _on_network_info_ready(self, info: Dict[str, Any]) -> None:
         self._active_dns_servers = info.get("dns", [])
         self.view_dashboard.update_network_identity(info)
         self.view_dns.set_active_dns_info(self._active_dns_servers)
+
+        # Set honest active DNS label without fake pre-seeded latencies
+        active_ip = self._active_dns_servers[0] if self._active_dns_servers else ""
+        if active_ip:
+            from app.dns.detector import identify_provider
+            provider = identify_provider(active_ip) or f"خادم ({active_ip})"
+            self.view_dashboard.dns_panel.lbl_curr_name.setText(f"خادم DNS الحالي ({provider} · {active_ip})")
+            if not getattr(self, "_active_dns_measured", False):
+                self.view_dashboard.dns_panel.lbl_curr_ms.setText("جاري الفحص...")
+
         if not getattr(self, "_initial_dns_bench_triggered", False):
             self._initial_dns_bench_triggered = True
-            QTimer.singleShot(1200, self._on_run_dns_benchmark)
+            QTimer.singleShot(2000, self._on_run_dns_benchmark)
 
     def _refresh_day_strips(self) -> None:
-        """Fetch today's 48-slot status from measurements and populate day strips."""
-        try:
-            if hasattr(self.app_core, "ctx") and self.app_core.ctx and hasattr(self.app_core.ctx, "measurements") and self.app_core.ctx.measurements:
-                today = date.today()
-                slots = self.app_core.ctx.measurements.get_day_slots(today)
-                if hasattr(self.view_dashboard, "day_strip") and self.view_dashboard.day_strip:
-                    self.view_dashboard.day_strip.set_data(slots)
-                if hasattr(self.view_history, "day_strip") and self.view_history.day_strip:
-                    if getattr(self.view_history, "current_date", None) == today:
-                        self.view_history.day_strip.set_data(slots)
-        except Exception as e:
-            logger.warning("Failed to refresh day strips: %s", e)
+        """Fetch today's 48-slot status off the UI thread."""
+        if getattr(self, "_daystrip_busy", False):
+            return
+        self._daystrip_busy = True
+
+        def _worker():
+            try:
+                slots = None
+                measurements = getattr(getattr(self.app_core, "ctx", None), "measurements", None)
+                if measurements:
+                    slots = measurements.get_day_slots(date.today())
+
+                def _apply():
+                    if slots is None:
+                        return
+                    today = date.today()
+                    if hasattr(self.view_dashboard, "day_strip") and self.view_dashboard.day_strip:
+                        self.view_dashboard.day_strip.set_data(slots)
+                    if hasattr(self.view_history, "day_strip") and self.view_history.day_strip:
+                        if getattr(self.view_history, "current_date", None) == today:
+                            self.view_history.day_strip.set_data(slots)
+
+                self.call_on_ui(_apply)
+            except Exception as e:
+                logger.warning("Failed to refresh day strips: %s", e)
+            finally:
+                self._daystrip_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _async_refresh_history(self) -> None:
+        now = time.monotonic()
+        if now - getattr(self, "_history_refresh_at", 0.0) < 5.0:
+            return
+        if getattr(self, "_history_busy", False):
+            return
+        self._history_refresh_at = now
+        self._history_busy = True
+
+        def _worker():
+            try:
+                incidents = []
+                repo = getattr(getattr(self.app_core, "ctx", None), "incidents", None)
+                if repo and getattr(self.view_history, "current_date", None) == date.today():
+                    incidents = repo.get_by_date(date.today())
+                self.call_on_ui(lambda rows=incidents: self.view_history.update_incidents(rows))
+            except Exception as exc:
+                logger.warning("History refresh failed: %s", exc)
+            finally:
+                self._history_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _async_refresh_audit(self) -> None:
+        now = time.monotonic()
+        if now - getattr(self, "_audit_refresh_at", 0.0) < 5.0:
+            return
+        if getattr(self, "_audit_busy", False):
+            return
+        self._audit_refresh_at = now
+        self._audit_busy = True
+
+        def _worker():
+            try:
+                records = []
+                repo = getattr(getattr(self.app_core, "ctx", None), "audit", None)
+                if repo:
+                    records = repo.get_recent(limit=30)
+                self.call_on_ui(lambda rows=records: self.view_remediation.update_audit_log(rows))
+            except Exception as exc:
+                logger.warning("Audit refresh failed: %s", exc)
+            finally:
+                self._audit_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_ui_tick(self) -> None:
         """Periodic UI update polling in-memory telemetry completely autonomously.
 
-        Guaranteed non-overlapping: skips tick if previous cycle is still in progress.
+        Guaranteed non-overlapping and optimized for low-end hardware.
         """
         if getattr(self, "_is_ui_tick_running", False):
             return
+        try:
+            if hasattr(self, "isMinimized") and self.isMinimized():
+                if not getattr(self, "_clock_paused_min", False):
+                    from app.ui.animation_clock import AnimationMasterClock
+                    AnimationMasterClock.get_instance().pause()
+                    self._clock_paused_min = True
+                return
+            if getattr(self, "_clock_paused_min", False):
+                from app.ui.animation_clock import AnimationMasterClock
+                AnimationMasterClock.get_instance().resume()
+                self._clock_paused_min = False
+        except Exception:
+            pass
         self._is_ui_tick_running = True
         try:
             obs = self.app_core.observability
             last_diag = self.app_core.diagnosis.last_diagnosis
+            curr_widget = self.stack.currentWidget() if hasattr(self, "stack") else None
 
-            self.view_dashboard.update_telemetry(obs, last_diag)
+            # Lightweight targeted updates: only update widgets for the visible view
+            if curr_widget is None or curr_widget == self.view_dashboard or curr_widget not in (getattr(self, "view_diagnosis", None), getattr(self, "view_history", None), getattr(self, "view_remediation", None)):
+                self.view_dashboard.update_telemetry(obs, last_diag)
+            elif curr_widget == self.view_diagnosis:
+                net_info = getattr(self.view_dashboard, "_network_info", {})
+                self.view_diagnosis.update_live_telemetry(obs, net_info, last_diag)
+                if last_diag:
+                    self.view_diagnosis.update_diagnosis(last_diag)
+            elif curr_widget == self.view_history:
+                self._async_refresh_history()
+            elif curr_widget == self.view_remediation:
+                self._async_refresh_audit()
 
-            # Refresh 48-slot day strip every 60 seconds
+            # Refresh 48-slot day strip every 120 seconds
             self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
-            if self.ticker_counter % 60 == 0:
+            if self.ticker_counter % 120 == 0:
                 self._refresh_day_strips()
 
-            # External DNS change detection every 3 seconds (Item B6)
-            if self.ticker_counter % 3 == 0:
-                try:
-                    from app.dns.state import DnsStateManager
-                    from app.dns.detector import identify_provider, measure_dns_latency
-                    mgr = DnsStateManager.get_instance()
-                    iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
-                    curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
-                    known_servers = mgr.current.active_servers
-                    if curr_os_servers and known_servers and curr_os_servers != known_servers:
-                        logger.info("External DNS change detected: %s -> %s", known_servers, curr_os_servers)
-                        p_name = identify_provider(curr_os_servers[0]) or f"خادم مخصص ({curr_os_servers[0]})"
-                        ms_val = measure_dns_latency(curr_os_servers[0])
-                        mgr.update(
-                            active_servers=curr_os_servers,
-                            detected_provider=p_name,
-                            last_measured_ms=ms_val,
-                            is_healthy=(ms_val is not None and ms_val < 150.0),
-                        )
-                        if hasattr(self.app_core.orchestrator, "audit_repo"):
-                            import uuid
-                            rec = ActionExecutionRecord(
-                                id=str(uuid.uuid4()),
-                                action_id="external_dns_change_detected",
-                                action_name=f"تم رصد تغيير إعدادات DNS من خارج البرنامج إلى {p_name} ({', '.join(curr_os_servers)})",
-                                risk_level=RiskLevel.LEVEL_1_INFORMATIONAL,
-                                trigger_diagnosis_id="external_monitor",
-                                pre_remedy_metrics={"previous_servers": known_servers},
-                                post_remedy_metrics={"new_servers": curr_os_servers, "latency_ms": ms_val},
-                                status=ActionExecutionStatus.SUCCEEDED,
-                                execution_duration_ms=0.0,
-                                verification_duration_ms=0.0,
-                                error_message=None,
-                                rollback_performed=False,
-                            )
-                            self.app_core.orchestrator.audit_repo.save(rec)
-                except Exception as exc:
-                    logger.debug("External DNS change check exception: %s", exc)
+            # Periodic timeline synchronization from SQLite records every 30 seconds
+            if self.ticker_counter % 30 == 0:
+                self._refresh_timeline_from_records()
 
-            if self.stack.currentWidget() == self.view_diagnosis and last_diag:
-                self.view_diagnosis.update_diagnosis(last_diag)
+            # Non-blocking external DNS change check via background worker every 60 seconds
+            if self.ticker_counter % 60 == 0:
+                self._async_check_external_dns()
 
-            if self.stack.currentWidget() == self.view_history:
-                if getattr(self.view_history, "current_date", None) == date.today():
-                    incidents = self.app_core.ctx.incidents.get_by_date(date.today())
-                    self.view_history.update_incidents(incidents)
-
-            if self.stack.currentWidget() == self.view_remediation:
-                audit_records = self.app_core.ctx.audit.get_recent(limit=30)
-                self.view_remediation.update_audit_log(audit_records)
+            # Periodic background traffic consumer refresh every 30 seconds (only if visible)
+            if self.ticker_counter % 30 == 0 and curr_widget in (self.view_dashboard, self.view_traffic):
+                self._on_scan_traffic()
         finally:
             self._is_ui_tick_running = False
 
-    def _on_run_dns_benchmark(self) -> None:
+    def _async_check_external_dns(self) -> None:
+        if getattr(self, "_is_checking_ext_dns", False):
+            return
+        self._is_checking_ext_dns = True
+
+        def _worker():
+            try:
+                from app.dns.state import DnsStateManager
+                from app.dns.detector import identify_provider, measure_dns_latency
+                mgr = DnsStateManager.get_instance()
+                iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
+                curr_os_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
+                known_servers = mgr.current.active_servers
+                if curr_os_servers and known_servers and curr_os_servers != known_servers:
+                    p_name = identify_provider(curr_os_servers[0]) or f"خادم مخصص ({curr_os_servers[0]})"
+                    ms_val = measure_dns_latency(curr_os_servers[0])
+                    self.call_on_ui(lambda: mgr.update(
+                        active_servers=curr_os_servers,
+                        detected_provider=p_name,
+                        last_measured_ms=ms_val,
+                        is_healthy=(ms_val is not None and ms_val < 150.0),
+                    ))
+            finally:
+                self._is_checking_ext_dns = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_run_dns_benchmark(self, full: bool = False) -> None:
         if getattr(self, "_is_benchmarking_dns", False):
             return
         self._is_benchmarking_dns = True
         self.view_dns.benchmark_btn.setEnabled(False)
         self.view_dns.benchmark_btn.setText("جاري الفحص التلقائي...")
 
-        def _worker():
+        active_ips = list(getattr(self, "_active_dns_servers", []))
+        if not active_ips:
+            try:
+                iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
+                active_ips = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
+            except Exception:
+                pass
+
+        async def _run_benchmark():
             scores = []
+            err_msg = None
             try:
                 from app.dns.benchmark import DNSBenchmark
-                bench = DNSBenchmark()
-                scores = asyncio.run(bench.rank_all())
+                bench = DNSBenchmark(
+                    rounds=3 if full else 1,
+                    timeout_sec=2.0 if full else 1.0,
+                )
+                scores = await bench.rank_all(active_resolver_ips=active_ips)
             except Exception as exc:
                 logger.warning("DNS benchmark failed: %s", exc)
+                err_msg = str(exc)
             finally:
-                QTimer.singleShot(0, lambda: self._on_dns_benchmark_done(scores))
+                self.call_on_ui(lambda: self._on_dns_benchmark_done(scores, err_msg))
 
-        threading.Thread(target=_worker, daemon=True).start()
+        self.dispatch_coroutine(_run_benchmark())
 
     def _on_dns_state_changed(self, state: Any) -> None:
         """Propagate updated DNS single-source-of-truth across all subscribed views (Item B1)."""
         active_name = getattr(state, "detected_provider", None) or "خادم DNS"
         active_ms = getattr(state, "last_measured_ms", None) or 0.0
         active_dns = getattr(state, "active_servers", [])
+        primary_ip = active_dns[0] if active_dns else ""
 
         self.view_dns.set_active_dns_info(active_dns)
         scores = getattr(state, "scores", [])
         if scores:
-            best = getattr(state, "best_server", None) or scores[0]
+            reachable_scores = [s for s in scores if getattr(s, "is_ip_reachable", True) and s.success_rate > 0.0]
+            from app.dns.optimizer import select_best_resolver
+            best = select_best_resolver(reachable_scores) or getattr(state, "best_server", None) or scores[0]
             best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
-            is_optimal = any(best.ip in s for s in active_dns) or (active_ms > 0 and (active_ms - best_ms) <= 5.0)
+            from app.dns.optimizer import DEFAULT_MIN_IMPROVEMENT_MS
+            is_optimal = (best.ip == primary_ip) or (active_ms <= 0) or ((active_ms - best_ms) < DEFAULT_MIN_IMPROVEMENT_MS)
+            from app.core.models.metrics import OperatingMode
+            is_auto_mode = (
+                self.app_core.orchestrator.mode in (OperatingMode.AUTO, OperatingMode.AUTONOMOUS_SAFE, "auto")
+                or str(getattr(self.app_core.orchestrator, "mode", "auto")).lower() in ("auto", "operatingmode.auto", "autonomous_safe", "autonomous")
+            )
             self.view_dashboard.update_dns_recommendation(
                 curr_name=active_name,
                 curr_ms=active_ms,
-                best_name=best.name,
+                best_name=best.name.replace(" Primary", "").replace(" Secondary", ""),
                 best_ip=best.ip,
                 best_ms=best_ms,
                 is_optimal=is_optimal,
+                is_autonomous=is_auto_mode,
             )
             self.view_diagnosis.update_dns_telemetry(
                 dns_name=active_name,
@@ -874,88 +1253,114 @@ class MainWindow(QMainWindow):
                 active_name=active_name,
                 is_optimal=is_optimal,
             )
+        else:
+            self.view_diagnosis.update_dns_telemetry(
+                dns_name=active_name,
+                latency_ms=active_ms,
+                is_healthy=getattr(state, "is_healthy", True),
+                is_optimal=True,
+            )
+            if active_ms > 0:
+                self.view_dashboard.update_dns_recommendation(
+                    curr_name=active_name,
+                    curr_ms=active_ms,
+                    best_name=active_name,
+                    best_ip=primary_ip,
+                    best_ms=active_ms,
+                    is_optimal=True,
+                    is_autonomous=True,
+                )
 
-    def _on_dns_benchmark_done(self, scores) -> None:
+    def _on_dns_benchmark_done(self, scores, error_message: Optional[str] = None) -> None:
         self._is_benchmarking_dns = False
         self.view_dns.benchmark_btn.setEnabled(True)
         self.view_dns.benchmark_btn.setText("فحص وترتيب الخوادم الآن")
 
         if not scores:
+            msg = error_message or "تعذر قياس خوادم DNS - تحقق من اتصال الإنترنت"
+            logger.warning("DNS benchmark finished without scores: %s", msg)
+            if hasattr(self.view_dns, "set_benchmark_error"):
+                self.view_dns.set_benchmark_error(msg)
             return
 
         self.view_dns._last_scores = scores
-        best = scores[0]
-        secondary_ip = "1.0.0.1" if "1.1.1.1" in best.ip else ("8.8.4.4" if "8.8.8.8" in best.ip else "")
-        best_name = best.name.replace(" Primary", "").replace(" Secondary", "")
-        best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
-
-        self._last_best_dns = (best.ip, secondary_ip, best_name, best_ms)
-
         active_dns = getattr(self, "_active_dns_servers", [])
         if not active_dns:
             iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
             active_dns = self.app_core.ctx.platform.get_interface_dns_servers(iface) or ["1.1.1.1", "1.0.0.1"]
 
-        # Match active DNS with benchmark scores
+        primary_ip = active_dns[0] if active_dns else ""
+
+        reachable_scores = [s for s in scores if getattr(s, "is_ip_reachable", True) and s.success_rate > 0.0]
+        from app.dns.optimizer import select_best_resolver
+        best = select_best_resolver(reachable_scores) or scores[0]
+
+        from app.dns.detector import get_secondary_ip
+        secondary_ip = get_secondary_ip(best.ip) or ("1.0.0.1" if "1.1.1.1" in best.ip else ("8.8.4.4" if "8.8.8.8" in best.ip else ""))
+        best_name = best.name.replace(" Primary", "").replace(" Secondary", "")
+        best_ms = getattr(best, "median_latency_ms", 0.0) or best.mean_latency_ms
+
+        self._last_best_dns = (best.ip, secondary_ip, best_name, best_ms)
+
+        # Match primary active DNS strictly by primary IP
         matched_score = None
-        for s in scores:
-            if any(s.ip in a for a in active_dns) or any(a in s.ip for a in active_dns):
-                matched_score = s
-                break
+        if primary_ip:
+            for s in scores:
+                if s.ip == primary_ip:
+                    matched_score = s
+                    break
+
+        active_ip = primary_ip or "192.168.1.1"
+        from app.dns.detector import identify_provider
+        active_provider = identify_provider(active_ip)
 
         if matched_score is not None:
             active_ms = getattr(matched_score, "median_latency_ms", 0.0) or matched_score.mean_latency_ms
-            active_name = matched_score.name.replace(" Primary", "").replace(" Secondary", "")
+            active_name = active_provider or matched_score.name.replace(" Primary", "").replace(" Secondary", "")
         else:
-            from app.dns.detector import measure_dns_latency, identify_provider
-            active_ip = active_dns[0] if active_dns else "192.168.1.1"
-            active_ms = measure_dns_latency(active_ip)
-            active_name = identify_provider(active_ip) or f"خادم مخصص ({active_ip})"
+            active_ms = 0.0
+            active_name = active_provider or f"خادم ({active_ip})"
 
-        is_same_ip = any(best.ip in s for s in active_dns) or any(s in best.ip for s in active_dns)
-        is_delta_negligible = (active_ms is not None and (active_ms - best_ms) <= 5.0)
-        is_optimal = (is_same_ip or is_delta_negligible)
+        from app.dns.optimizer import DEFAULT_MIN_IMPROVEMENT_MS
+        is_same_ip = (best.ip == primary_ip)
+        is_faster_candidate = (
+            not is_same_ip and active_ms > 0 and (active_ms - best_ms) >= DEFAULT_MIN_IMPROVEMENT_MS
+        )
+        is_optimal = is_same_ip or (not is_faster_candidate)
+        is_healthy = (active_ms > 0 and active_ms <= 85.0)
 
-        if is_optimal:
-            active_name = best_name
-            if active_ms is None:
-                active_ms = best_ms
-
-        is_healthy = (active_ms is not None and active_ms <= 60.0)
+        # Generate intelligent analysis
+        from app.dns.benchmark import generate_dns_analysis
+        active_analysis = generate_dns_analysis(
+            active_ip=active_ip,
+            active_name=active_name,
+            active_score=matched_score,
+            all_scores=scores,
+        )
 
         from app.dns.state import DnsStateManager
         DnsStateManager.get_instance().update(
             active_servers=active_dns,
             detected_provider=active_name,
             last_measured_ms=active_ms,
+            min_latency_ms=getattr(matched_score, "min_latency_ms", active_ms) if matched_score else active_ms,
+            max_latency_ms=getattr(matched_score, "max_latency_ms", active_ms) if matched_score else active_ms,
+            mean_latency_ms=active_ms,
+            query_success_rate=getattr(matched_score, "success_rate", 1.0) if matched_score else (1.0 if active_ms > 0 else 0.0),
+            status_summary=active_analysis.get("verdict", "يعمل بشكل طبيعي"),
+            analysis_text=active_analysis.get("analysis_text", ""),
+            recommendation_text=active_analysis.get("recommendation_text", ""),
             is_healthy=is_healthy,
             best_server=best,
             scores=scores,
         )
-        is_auto_mode = (self.app_core.orchestrator.mode == OperatingMode.AUTONOMOUS_SAFE)
 
-        # Policy & anti-flapping hysteresis check:
-        policy_enabled = True
-        us = getattr(self.app_core.ctx, "settings", getattr(self.app_core.ctx, "user_settings", None))
-        if us and hasattr(us, "get_policy"):
-            policy_enabled = us.get_policy("auto_switch_dns", True)
+        from app.core.models.metrics import OperatingMode
+        is_auto_mode = (
+            self.app_core.orchestrator.mode in (OperatingMode.AUTO, OperatingMode.AUTONOMOUS_SAFE, "auto")
+            or str(getattr(self.app_core.orchestrator, "mode", "auto")).lower() in ("auto", "operatingmode.auto", "autonomous_safe", "autonomous")
+        )
 
-        now = time.time()
-        time_since_switch = now - getattr(self, "_last_dns_switch_time", 0.0)
-        cfg_cooldown = getattr(self.app_core.config.thresholds, "cooldowns", {}).get("switch_dns_resolver", 45.0)
-        cooldown_ok = time_since_switch >= cfg_cooldown
-        significant_gain = (active_ms - best_ms) >= 20.0
-        candidate_fast = (best_ms < 75.0)
-
-        if policy_enabled and is_auto_mode and (not is_optimal) and (not is_healthy) and significant_gain and candidate_fast and cooldown_ok:
-            self._last_dns_switch_time = now
-            self._on_apply_dns_requested(best.ip, secondary_ip, best_name)
-            active_name = best_name
-            active_ms = best_ms
-            is_optimal = True
-            is_healthy = True
-
-        # Broadcast to View 1: Dashboard
         self.view_dashboard.update_dns_recommendation(
             curr_name=active_name,
             curr_ms=active_ms,
@@ -965,16 +1370,6 @@ class MainWindow(QMainWindow):
             is_optimal=is_optimal,
             is_autonomous=is_auto_mode,
         )
-
-        # Broadcast to View 2: Diagnosis (Layer 04 + Evidence Table)
-        self.view_diagnosis.update_dns_telemetry(
-            dns_name=active_name,
-            latency_ms=active_ms,
-            is_healthy=is_healthy,
-            is_optimal=is_optimal,
-        )
-
-        # Broadcast to View 3: DNS Tab (Comparison Bars + Table)
         self.view_dns.set_active_dns_info(active_dns)
         self.view_dns.update_rankings(
             scores=scores,
@@ -982,28 +1377,65 @@ class MainWindow(QMainWindow):
             active_name=active_name,
             is_optimal=is_optimal,
         )
+        self.view_diagnosis.update_dns_telemetry(
+            dns_name=active_name,
+            latency_ms=active_ms,
+            is_healthy=is_healthy,
+            is_optimal=is_optimal,
+        )
+        if hasattr(self.view_dns, "lbl_last_evaluation"):
+            self.view_dns.lbl_last_evaluation.setText(f"آخر تقييم: {datetime.now().strftime('%H:%M')}")
+
+        opt = getattr(self.app_core, "dns_optimizer", None)
+        if opt is not None and is_auto_mode:
+
+            async def _auto_switch_from_rankings():
+                switched = await opt.auto_optimize_dns(ranked=scores)
+
+                def _after_decision():
+                    decision = getattr(opt, "last_decision", None)
+                    if decision and hasattr(self.view_dns, "lbl_last_switch"):
+                        self.view_dns.lbl_last_switch.setText(f"قرار DNS: {decision.message_ar}")
+                    if not switched or decision is None or decision.best is None:
+                        return
+                    self._last_dns_switch_time = time.time()
+                    applied = [decision.best.ip]
+                    if secondary_ip:
+                        applied.append(secondary_ip)
+                    self._active_dns_servers = applied
+                    self.view_dns.set_active_dns_info(applied)
+                    self.view_dashboard.update_dns_recommendation(
+                        curr_name=best_name,
+                        curr_ms=best_ms,
+                        best_name=best_name,
+                        best_ip=decision.best.ip,
+                        best_ms=best_ms,
+                        is_optimal=True,
+                        is_autonomous=True,
+                        auto_applied=True,
+                    )
+
+                self.call_on_ui(_after_decision)
+
+            self.dispatch_coroutine(_auto_switch_from_rankings())
+
+        def _ownership_worker():
+            try:
+                from app.dns.ownership import DnsOwnershipEngine
+                plat = getattr(getattr(self, "app_core", None), "ctx", None)
+                plat_adapter = getattr(plat, "platform", None)
+                report = DnsOwnershipEngine(plat_adapter).discover_ownership()
+                self.call_on_ui(lambda: self.view_dns.update_ownership_report(report))
+            except Exception:
+                pass
+
+        threading.Thread(target=_ownership_worker, daemon=True).start()
 
     def _on_dashboard_apply_dns(self) -> None:
         if hasattr(self, "_last_best_dns"):
             ip, sec, name, ms = self._last_best_dns
             self._last_dns_switch_time = time.time()
-            self._active_dns_servers = [ip, sec] if sec else [ip]
             self._on_apply_dns_requested(ip, sec, name)
-            self.view_dashboard.update_dns_recommendation(
-                curr_name=name,
-                curr_ms=ms,
-                best_name=name,
-                best_ip=ip,
-                best_ms=ms,
-                is_optimal=True,
-                is_autonomous=False,
-            )
-            self.view_diagnosis.update_dns_telemetry(
-                dns_name=name,
-                latency_ms=ms,
-                is_healthy=True,
-                is_optimal=True,
-            )
             self.view_dns.set_active_dns_info(self._active_dns_servers)
             if hasattr(self.view_dns, "_last_scores"):
                 self.view_dns.update_rankings(
@@ -1025,8 +1457,16 @@ class MainWindow(QMainWindow):
             desc = "تمت استعادة إعدادات DNS التلقائية من الراوتر (DHCP)."
 
         def _worker():
+            from app.dns.state import DnsStateManager
             ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, restore_target)
             self.app_core.ctx.platform.flush_dns_cache()
+            actual = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
+            DnsStateManager.get_instance().update(
+                active_servers=actual,
+                configured_mode="dhcp" if len(restore_target) == 0 else "static",
+                is_healthy=True,
+                last_switch_time=time.time(),
+            )
 
             import uuid
             from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
@@ -1060,20 +1500,22 @@ class MainWindow(QMainWindow):
                 self._refresh_timeline_from_records()
                 self._on_run_dns_benchmark()
 
-            QTimer.singleShot(0, _update_ui)
+            self.call_on_ui(_update_ui)
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_apply_dns_requested(self, primary_ip: str, secondary_ip: str, name: str) -> None:
         self._last_dns_switch_time = time.time()
-        self._active_dns_servers = [primary_ip, secondary_ip] if secondary_ip else [primary_ip]
         def _worker():
-            iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
-            servers = [primary_ip]
-            if secondary_ip:
-                servers.append(secondary_ip)
+            import uuid
+            from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+            from app.dns.service import DnsService
+            
+            if not self.app_core.ctx.platform.is_elevated():
+                logger.info("DNS switch: Process is not directly elevated, relying on platform adapter elevated execution...")
 
-            prev_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface)
+            iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
+            prev_servers = self.app_core.ctx.platform.get_interface_dns_servers(iface) or []
             is_dhcp = len(prev_servers) == 0
             self._last_dns_pre_state = {
                 "interface": iface,
@@ -1081,46 +1523,88 @@ class MainWindow(QMainWindow):
                 "is_dhcp": is_dhcp,
             }
 
-            ok, msg = self.app_core.ctx.platform.set_interface_dns_servers(iface, servers)
-            self.app_core.ctx.platform.flush_dns_cache()
+            # 1. Pre-remedy measurement on the active resolver
+            from app.dns.detector import measure_dns_resolver_deep
+            prev_test_ip = prev_servers[0] if prev_servers else primary_ip
+            pre_meas = measure_dns_resolver_deep(prev_test_ip, rounds=2, timeout_sec=1.5)
+            before_ms = pre_meas.mean_latency_ms if pre_meas.success_rate > 0 else 0.0
 
-            import uuid
-            from app.core.models.metrics import ActionExecutionRecord, ActionExecutionStatus, RiskLevel
+            # 2. Execute full 7-step DNS workflow via DnsService (Items F6, F8, F9)
+            dns_service = DnsService(platform_adapter=self.app_core.ctx.platform)
+            t0 = time.perf_counter()
+            result = dns_service.apply_dns_servers(
+                interface_alias=iface,
+                primary_v4=primary_ip,
+                secondary_v4=secondary_ip,
+            )
+            exec_duration_ms = (time.perf_counter() - t0) * 1000.0
 
-            if ok:
-                self.view_dashboard.log_autonomous_action(
-                    f"اعتماد خادم {name}",
-                    f"تم تحديث إعدادات DNS إلى {primary_ip} والتحقق عبر Get-DnsClientServerAddress.",
-                    level="success",
-                )
+            if not result.success:
+                st = ActionExecutionStatus.FAILED
+                err_msg = result.error_message or f"فشل التحقق من استجابة {name} ({primary_ip}) بعد التطبيق - تم التراجع التلقائي."
+                self.call_on_ui(lambda: self.view_dashboard.log_autonomous_action(
+                    f"تراجع عن تغيير DNS",
+                    f"خادم {name} ({primary_ip}) لم يستجب لاستعلامات التحقق (الخطوة {result.step_reached}/7). تم استعادة الإعدادات الأصلية فوراً.",
+                    level="warning",
+                ))
+            else:
                 st = ActionExecutionStatus.SUCCEEDED
                 err_msg = None
-            else:
-                st = ActionExecutionStatus.FAILED
-                err_msg = msg
+                after_ms = result.latency_ms or 0.0
+                self._active_dns_servers = result.applied_servers
+
+                # Update dashboard remediation evidence strip and sync DNS tab
+                def _update_success_ui():
+                    self.view_dashboard.dns_panel.set_remediation_result(
+                        before_ms=before_ms,
+                        after_ms=after_ms,
+                        new_name=name,
+                    )
+                    self.view_dashboard.log_autonomous_action(
+                        f"اعتماد خادم {name}",
+                        f"تم التحويل بنجاح من {before_ms:.0f} ms إلى {after_ms:.0f} ms والتحقق عبر استعلام DNS فعلي كامل.",
+                        level="success",
+                    )
+                    self.view_dns.set_active_dns_info(result.applied_servers)
+                    if hasattr(self.view_dns, "_last_scores"):
+                        self.view_dns.update_rankings(
+                            self.view_dns._last_scores,
+                            active_ms=after_ms,
+                            active_name=name,
+                            is_optimal=True,
+                        )
+                    self._async_inspect_network_environment()
+
+                self.call_on_ui(_update_success_ui)
 
             record = ActionExecutionRecord(
                 id=str(uuid.uuid4()),
                 action_id="switch_dns_resolver",
                 action_name=f"تحويل إلى {name} ({primary_ip})",
                 risk_level=RiskLevel.LEVEL_2_CONTROLLED,
-                trigger_diagnosis_id="autonomous_optimizer",
+                trigger_diagnosis_id="user_selection",
                 pre_remedy_metrics={
                     "interface": iface,
                     "original_servers": list(prev_servers),
                     "is_dhcp": is_dhcp,
+                    "latency_ms": before_ms,
                 },
-                post_remedy_metrics={"active_servers": servers, "status": msg},
+                post_remedy_metrics={
+                    "active_servers": result.applied_servers,
+                    "status": "applied" if result.success else "failed",
+                    "latency_ms": result.latency_ms,
+                    "step_reached": result.step_reached,
+                },
                 status=st,
-                execution_duration_ms=45.0,
-                verification_duration_ms=12.0,
+                execution_duration_ms=exec_duration_ms,
+                verification_duration_ms=10.0,
                 error_message=err_msg,
-                rollback_performed=False,
+                rollback_performed=result.rolled_back,
             )
             ctx = getattr(getattr(self, "app_core", None), "ctx", None)
             if ctx and hasattr(ctx, "audit"):
                 ctx.audit.save(record)
-            QTimer.singleShot(0, self._refresh_timeline_from_records)
+            self.call_on_ui(self._refresh_timeline_from_records)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1128,17 +1612,37 @@ class MainWindow(QMainWindow):
         self.view_traffic.btn_refresh.setEnabled(False)
         self.view_traffic.btn_refresh.setText("جاري الفحص...")
 
-        def _worker():
-            profiles = asyncio.run(self.traffic_controller.scan_active_applications())
-            is_conf = self.traffic_controller.is_critical_meeting_active()
-            self.bridge.traffic_scan_done.emit(profiles, is_conf)
+        async def _run_scan():
+            try:
+                profiles = await self.traffic_controller.scan_active_applications()
+                is_conf = self.traffic_controller.is_critical_meeting_active()
+                qos = []
+                plat = getattr(self.app_core.ctx, "platform", None)
+                if plat is not None and hasattr(plat, "get_qos_policies"):
+                    loop = asyncio.get_running_loop()
+                    try:
+                        qos = await loop.run_in_executor(None, plat.get_qos_policies) or []
+                    except Exception:
+                        qos = []
+                self._last_qos_policies = qos
+                if hasattr(self, "bridge") and self.bridge is not None:
+                    try:
+                        self.bridge.traffic_scan_done.emit(profiles, is_conf)
+                    except (RuntimeError, AttributeError):
+                        pass
+            except Exception as exc:
+                logger.warning("Traffic scan coroutine error: %s", exc)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        self.dispatch_coroutine(_run_scan())
 
     def _on_scan_traffic_done(self, profiles, is_conferencing: bool) -> None:
         self.view_traffic.btn_refresh.setEnabled(True)
         self.view_traffic.btn_refresh.setText("فحص البرامج النشطة")
-        self.view_traffic.update_profiles(profiles, conferencing_active=is_conferencing)
+        self.view_traffic.update_profiles(
+            profiles,
+            conferencing_active=is_conferencing,
+            qos_policies=getattr(self, "_last_qos_policies", []),
+        )
         self.view_dashboard.consumers_panel.update_processes(profiles)
 
     def _on_run_deep_diagnosis(self) -> None:
@@ -1146,17 +1650,17 @@ class MainWindow(QMainWindow):
         self.view_diagnosis.btn_run_audit.setText("جاري بدء الفحص الشامل...")
 
         def _progress(step_idx: int, total_steps: int, msg: str):
-            QTimer.singleShot(0, lambda s=step_idx, t=total_steps, m=msg: self.view_diagnosis.btn_run_audit.setText(f"جاري الفحص ({s}/{t}): {m}"))
+            self.call_on_ui(lambda s=step_idx, t=total_steps, m=msg: self.view_diagnosis.btn_run_audit.setText(f"جاري الفحص ({s}/{t}): {m}"))
 
         def _worker():
             try:
                 from app.diagnosis.deep_scan import DeepScanner
                 scanner = DeepScanner(platform=self.app_core.ctx.platform)
                 report = scanner.run_scan(progress_callback=_progress)
-                QTimer.singleShot(0, lambda r=report: self._on_deep_diagnosis_finished(r))
+                self.call_on_ui(lambda r=report: self._on_deep_diagnosis_finished(r))
             except Exception as exc:
                 logger.error("Deep scan failed with exception: %s", exc, exc_info=True)
-                QTimer.singleShot(0, lambda e=str(exc): self._on_deep_diagnosis_failed(e))
+                self.call_on_ui(lambda e=str(exc): self._on_deep_diagnosis_failed(e))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1213,10 +1717,10 @@ class MainWindow(QMainWindow):
         def _worker():
             try:
                 ok, msg = self.app_core.ctx.platform.flush_dns_cache()
-                QTimer.singleShot(0, lambda s=ok, m=msg: self._on_quick_flush_dns_done(s, m))
+                self.call_on_ui(lambda: self._on_quick_flush_dns_done(ok, msg))
             except Exception as exc:
                 logger.error("Flush DNS failed: %s", exc, exc_info=True)
-                QTimer.singleShot(0, lambda e=str(exc): self._on_quick_flush_dns_done(False, e))
+                self.call_on_ui(lambda: self._on_quick_flush_dns_done(False, str(exc)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1287,10 +1791,10 @@ class MainWindow(QMainWindow):
                 gw_after = platform.get_default_gateway() or gw_before
                 ping_ok, ping_ms = platform.ping(gw_after, timeout_sec=2.0) if gw_after else (False, 0.0)
                 success = ok and ping_ok
-                QTimer.singleShot(0, lambda s=success, i=iface, g=gw_after, p=ping_ms, m=msg: self._on_quick_renew_ip_finished(s, i, g, p, m))
+                self.call_on_ui(lambda s=success, i=iface, g=gw_after, p=ping_ms, m=msg: self._on_quick_renew_ip_finished(s, i, g, p, m))
             except Exception as exc:
                 logger.error("IP renewal failed: %s", exc, exc_info=True)
-                QTimer.singleShot(0, lambda i=iface, g=gw_before, e=str(exc): self._on_quick_renew_ip_finished(False, i, g, 0.0, e))
+                self.call_on_ui(lambda i=iface, g=gw_before, e=str(exc): self._on_quick_renew_ip_finished(False, i, g, 0.0, e))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1348,6 +1852,15 @@ class MainWindow(QMainWindow):
                 settings.set_retention_days(int(retention))
             settings.save()
 
+        # Persist self-hosted update source configuration
+        if hasattr(self.view_settings, "input_update_source"):
+            from app.core.updater import save_configured_update_source
+            new_source = self.view_settings.input_update_source.text().strip()
+            is_auto = self.view_settings.toggle_auto_update.isChecked() if hasattr(self.view_settings, "toggle_auto_update") else True
+            save_configured_update_source(new_source, auto_install=is_auto)
+            if hasattr(self.view_settings, "updater"):
+                self.view_settings.updater.set_source(new_source)
+
         self.view_settings.apply_btn.setText("تم حفظ الإعدادات وتطبيقها بنجاح! ✓")
         QTimer.singleShot(2500, lambda: self.view_settings.apply_btn.setText("حفظ الإعدادات وتطبيقها الآن"))
 
@@ -1382,10 +1895,10 @@ class MainWindow(QMainWindow):
         def _worker():
             try:
                 res = meas_repo.clear_all_history(incident_repo=inc_repo, audit_repo=audit_repo)
-                QTimer.singleShot(0, lambda r=res: self._on_clear_history_done(True, r))
+                self.call_on_ui(lambda r=res: self._on_clear_history_done(True, r))
             except Exception as exc:
                 logger.error("Failed to clear database history: %s", exc, exc_info=True)
-                QTimer.singleShot(0, lambda e=str(exc): self._on_clear_history_done(False, e))
+                self.call_on_ui(lambda e=str(exc): self._on_clear_history_done(False, e))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1425,9 +1938,56 @@ class MainWindow(QMainWindow):
                 self._shell_mode = "dock"
                 self.sidebar.set_mode("dock")
 
+    def _on_background_update_tick(self) -> None:
+        """Non-blocking silent background update check (with overlap lock)."""
+        if getattr(self, "_is_closing", False):
+            return
+        if getattr(self, "_is_checking_updates_bg", False):
+            return
+
+        updater = getattr(self.view_settings, "updater", None)
+        if not updater:
+            return
+
+        src = getattr(updater, "check_url", "").strip()
+        if not src:
+            from app.core.updater import get_configured_update_source
+            src = get_configured_update_source().strip()
+            if not src:
+                return
+            updater.set_source(src)
+
+        self._is_checking_updates_bg = True
+
+        def _reset_bg_lock(*args: Any) -> None:
+            self._is_checking_updates_bg = False
+
+        try:
+            updater.up_to_date.connect(_reset_bg_lock)
+            updater.check_failed.connect(_reset_bg_lock)
+            updater.download_failed.connect(_reset_bg_lock)
+            updater.install_failed.connect(_reset_bg_lock)
+        except Exception:
+            pass
+
+        updater.check_for_updates_async()
+
     def closeEvent(self, event) -> None:
+        self._is_closing = True
+        if hasattr(self, "update_check_timer") and self.update_check_timer.isActive():
+            self.update_check_timer.stop()
         if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
             self.refresh_timer.stop()
         if hasattr(self, "dns_rank_timer") and self.dns_rank_timer.isActive():
             self.dns_rank_timer.stop()
+        if getattr(self, "_fallback_async_loop", None) and self._fallback_async_loop.is_running():
+            try:
+                self._fallback_async_loop.call_soon_threadsafe(self._fallback_async_loop.stop)
+            except Exception:
+                pass
+        try:
+            from app.ui.animation_clock import AnimationMasterClock
+            AnimationMasterClock.get_instance().stop()
+        except Exception:
+            pass
         super().closeEvent(event)

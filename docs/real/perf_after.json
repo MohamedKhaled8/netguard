@@ -1,0 +1,38 @@
+{
+  "duration_sec": 30,
+  "first_window_shown_ms": 7240.2,
+  "stalls_over_50ms_count": 69,
+  "stalls_over_100ms_count": 51,
+  "max_stall_ms": 1774.43,
+  "top_stalls": [
+    {
+      "timestamp": 1795028835.7752392,
+      "lateness_ms": 1774.43,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n"
+    },
+    {
+      "timestamp": 1795028835.7069452,
+      "lateness_ms": 1705.7,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 1158, in _on_scan_traffic_done\n    self.view_traffic.update_profiles(profiles, conferencing_active=is_conferencing)\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\views\\traffic_view.py\", line 403, in update_profiles\n    self.table.setCellWidget(r, 2, chip_box)\n"
+    },
+    {
+      "timestamp": 1795028835.6412015,
+      "lateness_ms": 1639.95,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 1158, in _on_scan_traffic_done\n    self.view_traffic.update_profiles(profiles, conferencing_active=is_conferencing)\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\views\\traffic_view.py\", line 414, in update_profiles\n    self.table.setCellWidget(r, 3, cell_w)\n"
+    },
+    {
+      "timestamp": 1795028835.5755,
+      "lateness_ms": 1573.97,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 1158, in _on_scan_traffic_done\n    self.view_traffic.update_profiles(profiles, conferencing_active=is_conferencing)\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\views\\traffic_view.py\", line 357, in update_profiles\n    active_policies = self.platform.get_qos_policies() if self.platform else []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 492, in get_qos_policies\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    },
+    {
+      "timestamp": 1795028835.5133293,
+      "lateness_ms": 1511.86,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\main_window.py\", line 1158, in _on_scan_traffic_done\n    self.view_traffic.update_profiles(profiles, conferencing_active=is_conferencing)\n  File \"E:\\Mt FlutterProject\\netguard\\app\\ui\\views\\traffic_view.py\", line 357, in update_profiles\n    active_policies = self.platform.get_qos_policies() if self.platform else []\n  File \"E:\\Mt FlutterProject\\netguard\\app\\platform\\windows\\adapter.py\", line 492, in get_qos_policies\n    proc = subprocess.run(\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 550, in run\n    stdout, stderr = process.communicate(input, timeout=timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1209, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n  File \"C:\\Program Files\\Python312\\Lib\\subprocess.py\", line 1628, in _communicate\n    self.stdout_thread.join(self._remaining_time(endtime))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1153, in join\n    self._wait_for_tstate_lock(timeout=max(timeout, 0))\n  File \"C:\\Program Files\\Python312\\Lib\\threading.py\", line 1169, in _wait_for_tstate_lock\n    if lock.acquire(block, timeout):\n"
+    }
+  ],
+  "subprocess_spawns_total": 20,
+  "subprocess_on_ui_thread": 6,
+  "database_queries_total": 22,
+  "database_queries_on_ui_thread": 22
+}

@@ -123,11 +123,12 @@ class DNSResolutionProbe(BaseProbe):
                     source=MeasurementSource.DNS_QUERY,
                     target=domain,
                     metric_type=MetricType.DNS_LATENCY,
-                    raw_value=0.0,
-                    normalized_value=0.0,
+                    raw_value=self.timeout_sec * 1000.0,
+                    normalized_value=self.timeout_sec * 1000.0,
                     unit="ms",
                     status=ProbeStatus.FAILED,
                     confidence=0.9,
+                    latency_ms=None,
                     error_message=str(exc),
                 )
             ]

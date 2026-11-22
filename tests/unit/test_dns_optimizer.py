@@ -8,14 +8,22 @@ from app.platform.interfaces import IPlatformAdapter
 
 
 class MockDNSPlatform(IPlatformAdapter):
+    def __init__(self) -> None:
+        self.dns_servers = ["192.168.1.1"]
+        self.apply_ok = True
+
     def is_elevated(self): return True
     def get_default_gateway(self): return "192.168.1.1"
     def get_primary_interface(self): return "Wi-Fi"
     def ping(self, t, s=1.5): return True, 10.0
     def tcp_connect(self, t, p=80, s=2.0): return True, 10.0
     def flush_dns_cache(self): return True, "Flushed"
-    def get_interface_dns_servers(self, name): return ["192.168.1.1"]
-    def set_interface_dns_servers(self, name, s): return True, "OK"
+    def get_interface_dns_servers(self, name): return list(self.dns_servers)
+    def set_interface_dns_servers(self, name, s):
+        if not self.apply_ok:
+            return False, "access denied"
+        self.dns_servers = list(s)
+        return True, "OK"
     def renew_ip_lease(self, name): return True, "OK"
     def get_wifi_metrics(self, name=None): return {}
 
@@ -86,6 +94,29 @@ async def test_dns_optimizer_selection(monkeypatch):
     best = await optimizer.auto_optimize_dns()
     assert best is not None
     assert best.ip == "1.1.1.1"
+    assert "1.1.1.1" in platform.get_interface_dns_servers("Wi-Fi")
+
+
+@pytest.mark.asyncio
+async def test_dns_optimizer_rejects_failed_os_apply(monkeypatch):
+    platform = MockDNSPlatform()
+    platform.apply_ok = False
+    bus = EventBus()
+    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus)
+
+    async def mock_rank_all():
+        return [
+            ResolverScore(ip="1.1.1.1", name="Cloudflare", median_latency_ms=10.0, mean_latency_ms=10.0, min_latency_ms=8.0, max_latency_ms=12.0, stdev_latency_ms=1.0, failure_rate=0.0, composite_score=96.0),
+        ]
+
+    monkeypatch.setattr(optimizer.benchmark, "rank_all", mock_rank_all)
+    monkeypatch.setattr("app.dns.detector.measure_dns_latency", lambda ip, timeout_sec=2.0: 80.0)
+
+    best = await optimizer.auto_optimize_dns()
+    assert best is None
+    assert optimizer.last_decision is not None
+    assert optimizer.last_decision.reason_code == "os_apply_failed"
+    assert platform.get_interface_dns_servers("Wi-Fi") == ["192.168.1.1"]
 
 
 @pytest.mark.asyncio

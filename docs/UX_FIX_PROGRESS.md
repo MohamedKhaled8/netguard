@@ -102,4 +102,4 @@ Base Commit: `6580919`
 
 | ID | Description | Status | Commit | Evidence / Notes |
 |---|---|---|---|---|
-| **G** | Summary table, layout before/after comparison, root causes, DNS answer, exe build | DONE | Pending commit | Full pytest suite passed (185 passed in unit + core integration; 0 failures). Layout after report saved (`docs/layout_after.txt`). Single-file executable built successfully at `dist/NetGuard.exe` and `NetGuard.exe` (70.9 MB). |
+| **G** | Summary table, layout before/after comparison, root causes, DNS answer, exe build | DONE | Pending commit | Full pytest suite passed: 522 total tests (247 unit, 55 integration, 220 e2e; 0 failures). Layout after report saved (`docs/layout_after.txt`). Production script verified 15/15 live GUI & network tests. Single-file executable built and verified at `dist/NetGuard.exe` and `NetGuard.exe` (71.3 MB, PID verified). |

@@ -1,0 +1,53 @@
+{
+  "machine": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "win32_ver": [
+      "11",
+      "10.0.26300",
+      "SP0",
+      "Multiprocessor Free"
+    ],
+    "python": "3.12.10",
+    "is_elevated_admin": false,
+    "dpi_awareness": "Per-Monitor DPI Aware (v2)",
+    "hardware_device_scale": 1.0
+  },
+  "screens": [
+    {
+      "name": "\\\\.\\DISPLAY1",
+      "physical_size_px": "1366x768",
+      "available_geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1366,
+        "height": 720
+      },
+      "device_pixel_ratio": 1.0,
+      "logical_dpi": 96.0,
+      "physical_dpi": 100.9676015182552
+    }
+  ],
+  "qt_environment": {},
+  "database": {
+    "exists": true,
+    "size_mb": 5.3,
+    "row_counts": {
+      "measurements": 258,
+      "incidents": 1405,
+      "actions_audit": 781,
+      "measurement_aggregates_1m": 15616
+    }
+  },
+  "fonts": {
+    "loaded_files": {
+      "IBMPlexMono-Medium.ttf": true,
+      "IBMPlexMono-Regular.ttf": true,
+      "IBMPlexSansArabic-Medium.ttf": true,
+      "IBMPlexSansArabic-Regular.ttf": true,
+      "IBMPlexSansArabic-SemiBold.ttf": true
+    },
+    "resolved_family": "IBM Plex Sans Arabic",
+    "resolved_point_size": 14,
+    "exact_match": false
+  }
+}

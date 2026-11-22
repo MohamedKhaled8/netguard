@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import asyncio
+import os
 import signal
 import sys
 from app.application import create_application
@@ -117,15 +118,65 @@ def run_gui(app) -> None:
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
     os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
 
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("netguard.ai.sentinel.v1")
+        except Exception:
+            pass
+
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     from app.ui.main_window import MainWindow
 
+    # Enforce PassThrough rounding policy and high-performance attributes BEFORE creating QApplication
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    QApplication.setAttribute(Qt.AA_CompressHighFrequencyEvents, True)
+    QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings, True)
     qt_app = QApplication(sys.argv)
+
+    # Attach clean global excepthook for UI runtime
+    def _ui_excepthook(cls, exception, traceback):
+        import logging
+        logging.getLogger("netguard.crash").critical("Uncaught GUI exception", exc_info=(cls, exception, traceback))
+        sys.__excepthook__(cls, exception, traceback)
+
+    sys.excepthook = _ui_excepthook
+
+    from PySide6.QtGui import QIcon
+    icon_candidates = [
+        os.path.join(getattr(sys, "_MEIPASS", ""), "assets", "icon.ico"),
+        os.path.join(getattr(sys, "_MEIPASS", ""), "assets", "icon.png"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icon.ico"),
+        os.path.join(os.path.dirname(__file__), "..", "assets", "icon.png"),
+        "assets/icon.ico",
+        "assets/icon.png",
+    ]
+    for c in icon_candidates:
+        if c and os.path.exists(c):
+            icon = QIcon(c)
+            qt_app.setWindowIcon(icon)
+            break
+
+    def _cleanup_qos_on_exit() -> None:
+        try:
+            if hasattr(app, "traffic_controller") and app.traffic_controller:
+                app.traffic_controller.cleanup_all_policies()
+        except Exception:
+            pass
+
+    qt_app.aboutToQuit.connect(_cleanup_qos_on_exit)
+
     window = MainWindow(application=app)
+    if not window.windowIcon().isNull():
+        pass
+    elif 'icon' in locals():
+        window.setWindowIcon(icon)
     window.show()
 
     # Start core background loop in a separate worker thread or async runner
     loop = asyncio.new_event_loop()
+    app.async_loop = loop
 
     def _run_async_loop() -> None:
         asyncio.set_event_loop(loop)
@@ -137,33 +188,88 @@ def run_gui(app) -> None:
     t.start()
 
     exit_code = qt_app.exec()
+
+    # Perform clean synchronous shutdown of all background loops and threads
     try:
-        loop.call_soon_threadsafe(loop.stop)
+        from app.ui.animation_clock import AnimationMasterClock
+        AnimationMasterClock.get_instance().stop()
     except Exception:
         pass
-    sys.exit(exit_code)
+
+    try:
+        if loop.is_running():
+            stop_future = asyncio.run_coroutine_threadsafe(app.stop(), loop)
+            try:
+                stop_future.result(timeout=2.0)
+            except Exception:
+                pass
+            loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        pass
+
+    try:
+        t.join(timeout=2.0)
+    except Exception:
+        pass
+
+    # Clean up Qt objects explicitly before exit
+    try:
+        window.close()
+        del window
+    except Exception:
+        pass
+    try:
+        qt_app.quit()
+        del qt_app
+    except Exception:
+        pass
+
+    # Flush and close all logging handlers to release file locks
+    import logging
+    logging.shutdown()
+
+    # Force garbage collection to release any lingering file/DLL/socket handles
+    import gc
+    gc.collect()
+
+    if getattr(sys, "frozen", False):
+        import os
+        os._exit(exit_code)
+    else:
+        sys.exit(exit_code)
 
 
 def main() -> None:
     args = parse_args()
 
-    # Auto-elevate to Administrator mode on Windows startup for GUI
+    # Enforce Administrator mode on Windows startup (Unprivileged mode is prohibited)
     if (
         sys.platform == "win32"
-        and args.command == "gui"
         and "--no-elevate" not in sys.argv
-        and "pytest" not in sys.modules
+        and ("pytest" not in sys.modules or os.environ.get("NETGUARD_TEST_ELEVATION"))
     ):
         import ctypes
-        try:
-            if not ctypes.windll.shell32.IsUserAnAdmin():
-                script = sys.argv[0]
-                cmd_args = " ".join([f'"{a}"' for a in sys.argv[1:] if a != "--no-elevate"])
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            script = sys.argv[0]
+            cmd_args = " ".join([f'"{a}"' for a in sys.argv[1:] if a != "--no-elevate"])
+            try:
                 ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {cmd_args}', None, 1)
                 if ret > 32:
                     sys.exit(0)
-        except Exception:
-            pass
+                else:
+                    try:
+                        ctypes.windll.user32.MessageBoxW(
+                            0,
+                            "يتطلب تشغيل NetGuard AI صلاحيات مسؤول نظام Windows (Run as Administrator) مسبقاً لإدارة وتأمين محولات الشبكة وتطبيق المعالجة الذاتية.\n\nتم إلغاء طلب الصلاحيات، ولا يمكن تشغيل التطبيق في وضع المستخدم العادي. سيتم الإغلاق الآن.",
+                            "صلاحيات المسؤول مطلوبة | NetGuard AI",
+                            0x10 | 0x0,
+                        )
+                    except Exception:
+                        print("ERROR: NetGuard AI requires Administrator privileges to run.", file=sys.stderr)
+                    sys.exit(1)
+            except Exception as exc:
+                print(f"ERROR: Failed to elevate privileges: {exc}", file=sys.stderr)
+                sys.exit(1)
 
     app = create_application(config_path=args.config)
 

@@ -69,6 +69,7 @@ class NetGuardApplication:
             event_bus=self.ctx.event_bus,
             meeting_guard_check=self.traffic_controller.is_critical_meeting_active,
             user_settings=user_settings,
+            incident_repo=getattr(self.ctx, "incidents", None),
         )
 
         # 4. Intelligent Autonomous DNS Optimizer
@@ -77,6 +78,8 @@ class NetGuardApplication:
             platform_adapter=self.ctx.platform,
             event_bus=self.ctx.event_bus,
             orchestrator=self.orchestrator,
+            settings=user_settings,
+            session_tracker=self.traffic_controller,
         )
 
         # 5. User Settings Persistence & Dynamic Synchronization
@@ -87,6 +90,7 @@ class NetGuardApplication:
         self.settings.changed.connect(self._on_settings_changed)
 
         self._running = False
+        self.async_loop: Optional[asyncio.AbstractEventLoop] = None
         self._diagnostic_loop_task: Optional[asyncio.Task] = None
         self._daily_prune_task: Optional[asyncio.Task] = None
 
@@ -113,6 +117,10 @@ class NetGuardApplication:
         """Start the autonomous network guardian loops."""
         if self._running:
             return
+        try:
+            self.async_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
         self._running = True
         logger.info("Starting NetGuard AI Autonomous System (Mode: %s)...", self.orchestrator.mode.value)
 
@@ -153,6 +161,8 @@ class NetGuardApplication:
                 pass
 
         await self.observability.stop()
+        if hasattr(self, "traffic_controller") and self.traffic_controller:
+            self.traffic_controller.cleanup_all_policies()
         self.ctx.event_bus.shutdown()
         logger.info("NetGuard AI stopped cleanly.")
 
@@ -210,7 +220,7 @@ class NetGuardApplication:
                     retention_days=retention_days,
                     incident_repo=getattr(self.ctx, "incidents", None),
                     audit_repo=getattr(self.ctx, "actions_audit", None),
-                    vacuum_after=True,
+                    vacuum_after=False,
                 )
                 logger.info("Retention prune completed: %s", res)
             except Exception as exc:

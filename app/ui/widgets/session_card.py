@@ -37,8 +37,8 @@ class ActiveSessionCard(QFrame):
 
         self.setStyleSheet(f"""
             QFrame#ActiveSessionCard {{
-                background-color: {tokens.SURFACE};
-                border: 1px solid {tokens.LINE_THRESHOLD};
+                background-color: {tokens.SURFACE_INSET};
+                border: 1px solid rgba(0, 229, 153, 0.25);
                 border-radius: {tokens.RADIUS_INNER}px;
             }}
             QFrame#ActiveSessionCard QLabel {{
@@ -51,102 +51,109 @@ class ActiveSessionCard(QFrame):
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(10)
 
-        # Row 1: Live Dot + App Name ... [End Button]
+        # Row 1: Live Dot + App Name + Process Badge + Status Chip ... [End Button]
         top_row = QHBoxLayout()
         top_row.setSpacing(10)
 
         self.live_dot = QLabel()
-        self.live_dot.setFixedSize(8, 8)
-        self.live_dot.setStyleSheet(f"background-color: {tokens.STATUS_OK}; border-radius: 4px;")
+        self.live_dot.setFixedSize(9, 9)
+        self.live_dot.setStyleSheet(f"background-color: {tokens.STATUS_OK}; border-radius: 4.5px;")
         top_row.addWidget(self.live_dot)
 
-        self.lbl_title = QLabel(f"جلسة محمية: {session.app_name}")
+        self.lbl_title = QLabel(session.app_name)
         self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
-        self.lbl_title.setWordWrap(True)
         top_row.addWidget(self.lbl_title)
+
+        lbl_proc_tag = QLabel(f"{session.process_name} (PID {session.pid})")
+        lbl_proc_tag.setFont(tokens.get_mono_font(12, 400))
+        lbl_proc_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: {tokens.SURFACE}; padding: 2px 8px; border-radius: 4px;")
+        top_row.addWidget(lbl_proc_tag)
+
+        chip_active = Chip("محمي استباقياً ✓", variant="ok-soft")
+        top_row.addWidget(chip_active)
+
         top_row.addStretch()
 
-        self.btn_end = SecondaryButton("إنهاء الجلسة")
-        self.btn_end.setFixedHeight(36)
+        self.btn_end = SecondaryButton("إنهاء المراقبة")
+        self.btn_end.setFixedHeight(34)
         if on_close_callback:
             self.btn_end.clicked.connect(lambda: on_close_callback(session.process_name))
         top_row.addWidget(self.btn_end)
         layout.addLayout(top_row)
 
-        # Row 2: Status Chip & Process Details
-        proc_row = QHBoxLayout()
-        proc_row.setSpacing(10)
+        # Row 1.5: Proactive Early Warning Alert Box
+        self.warning_box = QFrame()
+        self.warning_box.setObjectName("EarlyWarningBox")
+        self.warning_box.setStyleSheet(f"""
+            QFrame#EarlyWarningBox {{
+                background-color: rgba(243, 156, 18, 0.12);
+                border: 1px solid rgba(243, 156, 18, 0.4);
+                border-radius: {tokens.RADIUS_INNER}px;
+                padding: 6px 12px;
+            }}
+            QFrame#EarlyWarningBox QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        wb_layout = QHBoxLayout(self.warning_box)
+        wb_layout.setContentsMargins(10, 8, 10, 8)
+        wb_layout.setSpacing(8)
 
-        chip_active = Chip("محمي استباقياً", variant="ok-soft")
-        proc_row.addWidget(chip_active)
+        lbl_warn_icon = QLabel("⚠️")
+        lbl_warn_icon.setFont(tokens.get_sans_font(13, 600))
+        wb_layout.addWidget(lbl_warn_icon)
 
-        self.lbl_proc = QLabel(f"{session.process_name} (معرف {session.pid}) · {session.resolution}")
-        self.lbl_proc.setFont(tokens.get_sans_font(12, 400))
-        self.lbl_proc.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_proc.setWordWrap(True)
-        proc_row.addWidget(self.lbl_proc)
-        proc_row.addStretch()
-        layout.addLayout(proc_row)
+        self.lbl_early_warning = QLabel(session.early_warning or "")
+        self.lbl_early_warning.setFont(tokens.get_sans_font(13, 500))
+        self.lbl_early_warning.setStyleSheet(f"color: {tokens.STATUS_WARN}; line-height: 1.4;")
+        self.lbl_early_warning.setWordWrap(True)
+        wb_layout.addWidget(self.lbl_early_warning, stretch=1)
 
-        # Row 3: Live Duration & Real-time QoS Telemetry
+        self.warning_box.setVisible(bool(session.early_warning))
+        layout.addWidget(self.warning_box)
+
+        # Row 2: Live Duration & Real-time QoS Telemetry (Clean horizontal metrics)
         telemetry_row = QHBoxLayout()
-        telemetry_row.setSpacing(10)
+        telemetry_row.setSpacing(16)
 
-        self.lbl_duration = QLabel(f"المدة الحالية: {self._format_duration(self.elapsed_seconds)}")
-        self.lbl_duration.setFont(tokens.get_mono_font(13, 500))
-        self.lbl_duration.setStyleSheet(f"color: {tokens.TEXT};")
+        def make_metric_label(icon_txt: str, val_txt: str, col: str = tokens.TEXT) -> QLabel:
+            lbl = QLabel(f"{icon_txt} {val_txt}")
+            lbl.setFont(tokens.get_mono_font(13, 500))
+            lbl.setStyleSheet(f"color: {col};")
+            return lbl
+
+        self.lbl_duration = make_metric_label("⏱️", f"المدة: {self._format_duration(self.elapsed_seconds)}")
         telemetry_row.addWidget(self.lbl_duration)
-
-        lbl_telemetry = QLabel(f"· {session.avg_bitrate_mbps:.1f} Mbps · {session.avg_latency_ms:.0f} ms · {session.packet_loss_pct:.1f}% فقدان")
-        lbl_telemetry.setFont(tokens.get_mono_font(12, 400))
-        lbl_telemetry.setStyleSheet(f"color: {tokens.STATUS_OK};")
-        telemetry_row.addWidget(lbl_telemetry)
+        telemetry_row.addWidget(make_metric_label("⚡", f"السرعة: {session.avg_bitrate_mbps:.1f} Mbps"))
+        telemetry_row.addWidget(make_metric_label("📶", f"الاستجابة: {session.avg_latency_ms:.0f} ms"))
+        telemetry_row.addWidget(make_metric_label("🛡️", f"فقدان الحزم: {session.packet_loss_pct:.1f}%", tokens.STATUS_OK))
         telemetry_row.addStretch()
         layout.addLayout(telemetry_row)
 
-        # Active Shields Strip (2x2 grid for responsive wrapping)
-        shields_frame = QFrame()
-        shields_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {tokens.SURFACE_INSET};
-                border: 1px solid {tokens.LINE};
-                border-radius: {tokens.RADIUS_BUTTON}px;
-            }}
-        """)
-        shields_layout = QGridLayout(shields_frame)
-        shields_layout.setContentsMargins(14, 10, 14, 10)
-        shields_layout.setHorizontalSpacing(16)
-        shields_layout.setVerticalSpacing(8)
+        # Row 3: Active Shields (Single clean horizontal summary row without ugly nested bordered boxes)
+        shields_row = QHBoxLayout()
+        shields_row.setSpacing(12)
 
-        is_elevated = False
-        try:
-            import ctypes
-            is_elevated = ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except Exception:
-            pass
+        lbl_shield_tag = QLabel("🛡️ دروع الحماية المطبقة:")
+        lbl_shield_tag.setFont(tokens.get_sans_font(12, 600))
+        lbl_shield_tag.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        shields_row.addWidget(lbl_shield_tag)
 
-        dscp_badge = (
-            ("✓ أولوية DSCP 46 للبث المباشر (NetQosPolicy)", tokens.STATUS_OK)
-            if is_elevated
-            else ("• أولوية DSCP 46 (تتطلب تشغيل كمسؤول)", tokens.TEXT_MUTED)
-        )
-        badges = [
-            dscp_badge,
-            ("✓ تقييد سرعة الرفع الصادر للعمليات الخلفية", tokens.STATUS_WARN),
-            ("✓ حماية المقابس ومراقبة الاتصال (Meeting Guard)", tokens.STATUS_OK),
-            ("✓ تعليق الإجراءات التي تسبب انقطاعاً لحظياً", tokens.STATUS_OK),
+        features = [
+            "أولوية DSCP 46 للبث الفوري",
+            "تقييد سرعة العمليات الخلفية",
+            "حماية المقابس ومنع التقطيع",
         ]
-        for idx, (text, color) in enumerate(badges):
-            b_lbl = QLabel(text)
-            b_lbl.setFont(tokens.get_sans_font(12, 400))
-            b_lbl.setStyleSheet(f"color: {color};")
-            b_lbl.setWordWrap(True)
-            r = idx // 2
-            c = idx % 2
-            shields_layout.addWidget(b_lbl, r, c)
+        for feat in features:
+            f_lbl = QLabel(f"✓ {feat}")
+            f_lbl.setFont(tokens.get_sans_font(12, 400))
+            f_lbl.setStyleSheet(f"color: {tokens.STATUS_OK}; background: rgba(0, 229, 153, 0.06); padding: 3px 8px; border-radius: 4px;")
+            shields_row.addWidget(f_lbl)
 
-        layout.addWidget(shields_frame)
+        shields_row.addStretch()
+        layout.addLayout(shields_row)
 
         # 1-second timer to update duration live
         self._timer = QTimer(self)
@@ -161,6 +168,13 @@ class ActiveSessionCard(QFrame):
     def _on_tick(self) -> None:
         self.elapsed_seconds += 1
         self.lbl_duration.setText(f"المدة الحالية: {self._format_duration(self.elapsed_seconds)}")
+
+    def update_early_warning(self, message: Optional[str]) -> None:
+        if message:
+            self.lbl_early_warning.setText(message)
+            self.warning_box.setVisible(True)
+        else:
+            self.warning_box.setVisible(False)
 
 
 class SessionReportCard(QFrame):
@@ -246,13 +260,13 @@ class SessionReportCard(QFrame):
         detail_layout.setContentsMargins(0, 8, 0, 0)
         detail_layout.setSpacing(14)
 
-        # Inset Box for telemetry & actions
+        # Inset Box for telemetry & actions (Clean, unbordered modern elevation)
         inset_box = QFrame()
         inset_box.setObjectName("SessionInsetBox")
         inset_box.setStyleSheet(f"""
             QFrame#SessionInsetBox {{
                 background-color: {tokens.SURFACE_INSET};
-                border: 1px solid {tokens.LINE};
+                border: none;
                 border-radius: {tokens.RADIUS_INNER}px;
             }}
             QFrame#SessionInsetBox QLabel {{
@@ -261,20 +275,20 @@ class SessionReportCard(QFrame):
             }}
         """)
         inset_layout = QVBoxLayout(inset_box)
-        inset_layout.setContentsMargins(18, 16, 18, 16)
-        inset_layout.setSpacing(16)
+        inset_layout.setContentsMargins(16, 14, 16, 14)
+        inset_layout.setSpacing(14)
 
-        # 1. Telemetry Stats Strip (2x2 grid for responsive display)
+        # 1. Telemetry Stats Strip (2x2 grid, clean soft pills without harsh border lines)
         stats_grid = QGridLayout()
-        stats_grid.setHorizontalSpacing(12)
-        stats_grid.setVerticalSpacing(10)
+        stats_grid.setHorizontalSpacing(10)
+        stats_grid.setVerticalSpacing(8)
 
         def make_stat_box(title: str, val: str, sub: str) -> QWidget:
             w = QWidget()
             col = QVBoxLayout(w)
-            col.setContentsMargins(10, 8, 10, 8)
+            col.setContentsMargins(12, 10, 12, 10)
             col.setSpacing(2)
-            w.setStyleSheet(f"background-color: {tokens.SURFACE}; border: 1px solid {tokens.LINE}; border-radius: 8px;")
+            w.setStyleSheet(f"background-color: {tokens.SURFACE}; border: none; border-radius: 8px;")
 
             t_lbl = QLabel(title)
             t_lbl.setFont(tokens.get_sans_font(12, 400))
@@ -283,12 +297,12 @@ class SessionReportCard(QFrame):
             col.addWidget(t_lbl)
 
             v_lbl = QLabel(val)
-            v_lbl.setFont(tokens.get_mono_font(17, 500))
+            v_lbl.setFont(tokens.get_mono_font(16, 600))
             v_lbl.setStyleSheet(f"color: {tokens.TEXT};")
             col.addWidget(v_lbl)
 
             s_lbl = QLabel(sub)
-            s_lbl.setFont(tokens.get_sans_font(12, 400))
+            s_lbl.setFont(tokens.get_sans_font(11, 400))
             s_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
             s_lbl.setWordWrap(True)
             col.addWidget(s_lbl)
@@ -343,8 +357,9 @@ class SessionReportCard(QFrame):
                 act_card.setStyleSheet(f"""
                     QFrame {{
                         background-color: {tokens.SURFACE};
-                        border: 1px solid {tokens.LINE};
-                        border-radius: 8px;
+                        border: none;
+                        border-right: 3px solid {tokens.ACCENT};
+                        border-radius: 6px;
                     }}
                 """)
                 act_layout = QVBoxLayout(act_card)

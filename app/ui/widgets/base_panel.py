@@ -1,7 +1,6 @@
 """Base Panel component for NetGuard AI.
 
-Clean flat graphite surface (#15181A), 1px hairline border (#25292C), 16px radius, 24px padding.
-Optional entrance animation: subtle 8px rise + fade-in (600ms ease) when enabled.
+Raised surface on the page background, 1px hairline, 16px radius, 24px padding.
 """
 
 from __future__ import annotations
@@ -34,11 +33,16 @@ class Panel(QFrame):
         self.padding = padding
         self._animated_already = False
 
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(f"""
             QFrame#BasePanel {{
                 background-color: {tokens.SURFACE};
                 border: 1px solid {tokens.LINE};
                 border-radius: {tokens.RADIUS_PANEL}px;
+            }}
+            QFrame#BasePanel QLabel {{
+                background: transparent;
+                border: 0px solid transparent;
             }}
         """)
 
@@ -56,14 +60,14 @@ class Panel(QFrame):
         self.title_col.setSpacing(4)
 
         self.lbl_title = QLabel(title)
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT}; background: transparent;")
-        self.lbl_title.setWordWrap(False)
+        self.lbl_title.setWordWrap(True)
         self.title_col.addWidget(self.lbl_title)
 
         if subtitle:
             self.lbl_subtitle = QLabel(subtitle)
-            self.lbl_subtitle.setFont(tokens.get_sans_font(13, 400))
+            self.lbl_subtitle.setFont(tokens.get_sans_font(12, 400))
             self.lbl_subtitle.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: transparent;")
             self.lbl_subtitle.setWordWrap(True)
             self.title_col.addWidget(self.lbl_subtitle)

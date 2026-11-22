@@ -16,13 +16,17 @@ from app.core.models.metrics import (
     ProbableCause,
     OperatingMode,
     RiskLevel,
+    ActionClassification,
     ActionExecutionRecord,
     ActionExecutionStatus,
+    IncidentLifecycleState,
+    IncidentResolutionType,
 )
 from app.platform.interfaces import IPlatformAdapter
 from app.remediation.registry import ActionRegistry, RemediationAction
 from app.remediation.safety import ActionSafetyManager
 from app.storage.repositories.audit_repo import AuditRepository
+from app.storage.repositories.incident_repo import IncidentRepository
 
 logger = logging.getLogger("netguard.remediation.orchestrator")
 
@@ -40,12 +44,15 @@ class RemediationOrchestrator:
         event_bus: EventBus,
         meeting_guard_check: Optional[Callable[[], bool]] = None,
         user_settings: Optional[Any] = None,
+        incident_repo: Optional[IncidentRepository] = None,
     ) -> None:
         self.config = config
         self.registry = registry
         self.safety = safety_manager
         self.platform = platform_adapter
         self.audit = audit_repo
+        self.audit_repo = audit_repo
+        self.incident_repo = incident_repo
         self.event_bus = event_bus
         self.meeting_guard_check = meeting_guard_check
         self.user_settings = user_settings
@@ -259,6 +266,12 @@ class RemediationOrchestrator:
         rollback_success = None
 
         logger.info("Executing recovery action: %s (%s)", action.name, action.action_id)
+        if diagnosis and diagnosis.id and self.incident_repo:
+            try:
+                self.incident_repo.transition_state(diagnosis.id, IncidentLifecycleState.REMEDIATING)
+            except Exception as e:
+                logger.debug("Failed transition to REMEDIATING: %s", e)
+
         await self.event_bus.publish(
             EventTopics.REMEDIATION_STARTED,
             {
@@ -276,6 +289,11 @@ class RemediationOrchestrator:
             )
             exec_duration_ms = (time.perf_counter() - exec_start) * 1000.0
             status = ActionExecutionStatus.VERIFYING
+            if diagnosis and diagnosis.id and self.incident_repo:
+                try:
+                    self.incident_repo.transition_state(diagnosis.id, IncidentLifecycleState.VERIFYING_RECOVERY)
+                except Exception as e:
+                    logger.debug("Failed transition to VERIFYING_RECOVERY: %s", e)
         except Exception as exc:
             exec_duration_ms = (time.perf_counter() - exec_start) * 1000.0
             error_msg = f"Execution failed: {exc}"
@@ -296,7 +314,18 @@ class RemediationOrchestrator:
                 verification_duration_ms=0.0,
                 error_message=error_msg,
                 rollback_performed=False,
+                action_classification=getattr(action, "action_classification", ActionClassification.CORRECTIVE_ACTION),
             )
+            if diagnosis and diagnosis.id and self.incident_repo:
+                try:
+                    self.incident_repo.transition_state(
+                        diagnosis.id,
+                        IncidentLifecycleState.REMEDIATION_FAILED,
+                        action_record_id=record.id,
+                        notes=error_msg or "فشل تنفيذ الإجراء."
+                    )
+                except Exception:
+                    pass
             await self._record_and_publish(record)
             return record
 
@@ -354,7 +383,29 @@ class RemediationOrchestrator:
             error_message=error_msg,
             rollback_performed=rollback_performed,
             rollback_success=rollback_success,
+            action_classification=getattr(action, "action_classification", ActionClassification.CORRECTIVE_ACTION),
         )
+
+        if diagnosis and diagnosis.id and self.incident_repo:
+            try:
+                if status == ActionExecutionStatus.SUCCEEDED:
+                    self.incident_repo.transition_state(
+                        diagnosis.id,
+                        IncidentLifecycleState.RESOLVED,
+                        resolution_type=IncidentResolutionType.AUTOMATICALLY_REPAIRED,
+                        action_record_id=record.id,
+                        notes="تم تطبيق الإجراء التصحيحي والتحقق بنجاح من عودة الاتصال.",
+                    )
+                else:
+                    self.incident_repo.transition_state(
+                        diagnosis.id,
+                        IncidentLifecycleState.REMEDIATION_FAILED,
+                        resolution_type=IncidentResolutionType.MANUAL_INTERVENTION_NEEDED,
+                        action_record_id=record.id,
+                        notes=error_msg or "فشل التحقق من الإجراء التصحيحي.",
+                    )
+            except Exception as e:
+                logger.debug("Failed transition to terminal state: %s", e)
 
         await self._record_and_publish(record)
         return record

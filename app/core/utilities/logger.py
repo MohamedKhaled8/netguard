@@ -56,10 +56,11 @@ def setup_logger(
     log_dir: Path | str = "logs",
     log_to_console: bool = True,
     log_to_file: bool = True,
-    max_bytes: int = 10 * 1024 * 1024,
-    backup_count: int = 5,
+    max_bytes: int = 2 * 1024 * 1024,
+    backup_count: int = 3,
 ) -> logging.Logger:
     """Configures and returns the central NetGuard logger."""
+    import os
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
@@ -74,7 +75,14 @@ def setup_logger(
         logger.addHandler(console_handler)
 
     if log_to_file:
-        p_log_dir = Path(log_dir)
+        if log_dir == "logs":
+            app_data = os.getenv("APPDATA")
+            if app_data:
+                p_log_dir = Path(app_data) / "NetGuard" / "logs"
+            else:
+                p_log_dir = Path("logs")
+        else:
+            p_log_dir = Path(log_dir)
         p_log_dir.mkdir(parents=True, exist_ok=True)
         file_path = p_log_dir / "netguard.log"
         file_handler = RotatingFileHandler(

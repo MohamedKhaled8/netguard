@@ -28,6 +28,7 @@ class MockPlatformAdapterForRemediation(IPlatformAdapter):
     def __init__(self):
         self.flushed = False
         self.current_dns = ["192.168.1.1"]
+        self.dns_mode: str = "static"
         self.renewed = False
         self.ping_ok = True
 
@@ -52,6 +53,9 @@ class MockPlatformAdapterForRemediation(IPlatformAdapter):
 
     def get_interface_dns_servers(self, interface_name: str):
         return list(self.current_dns)
+
+    def get_interface_dns_mode(self, interface_name: str) -> str:
+        return getattr(self, "dns_mode", "static" if self.current_dns else "dhcp")
 
     def set_interface_dns_servers(self, interface_name: str, servers):
         self.current_dns = list(servers)
@@ -237,6 +241,26 @@ async def test_switch_dns_action_and_rollback(tmp_path):
     ok, msg = await action.rollback(platform, {}, pre_state)
     assert ok is True
     assert platform.current_dns == ["192.168.1.1"]  # Original restored!
+
+
+@pytest.mark.asyncio
+async def test_switch_dns_action_and_rollback_dhcp(tmp_path):
+    platform = MockPlatformAdapterForRemediation()
+    platform.current_dns = ["192.168.1.1"]
+    platform.dns_mode = "dhcp"
+    action = SwitchDNSResolverAction(fallback_resolvers=["1.1.1.1", "8.8.8.8"])
+
+    # 1. Execute
+    pre_state = await action.execute(platform, {})
+    assert pre_state["original_servers"] == ["192.168.1.1"]
+    assert pre_state["is_dhcp"] is True
+    assert platform.current_dns == ["1.1.1.1", "8.8.8.8"]
+    assert platform.flushed is True
+
+    # 2. Rollback
+    ok, msg = await action.rollback(platform, {}, pre_state)
+    assert ok is True
+    assert platform.current_dns == []  # Rolled back to DHCP!
 
 
 @pytest.mark.asyncio

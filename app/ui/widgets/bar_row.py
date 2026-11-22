@@ -48,7 +48,7 @@ class HorizontalProgressBar(QWidget):
 
         # Background track #25292C
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(tokens.LINE)))
+        painter.setBrush(QBrush(QColor(tokens.BAR_FUTURE)))
         painter.drawRoundedRect(QRectF(0, 0, w, h), radius, radius)
 
         # Fill bar
@@ -117,6 +117,7 @@ class TrafficConsumersPanel(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("TrafficConsumersPanel")
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(f"""
             QFrame#TrafficConsumersPanel {{
                 background-color: {tokens.SURFACE};
@@ -124,8 +125,8 @@ class TrafficConsumersPanel(QFrame):
                 border-radius: {tokens.RADIUS_PANEL}px;
             }}
             QFrame#TrafficConsumersPanel QLabel {{
-                border: none;
                 background: transparent;
+                border: 0px solid transparent;
             }}
         """)
 
@@ -137,11 +138,11 @@ class TrafficConsumersPanel(QFrame):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         self.lbl_title = QLabel("من يستهلك الإنترنت الآن")
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.lbl_sub = QLabel("أكثر البرامج استهلاكاً للشبكة (حسب الاتصالات النشطة المقاسة - تقديري)")
-        self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         title_col.addWidget(self.lbl_title)
@@ -204,6 +205,7 @@ class DNSRecommendationPanel(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("DNSRecommendationPanel")
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(f"""
             QFrame#DNSRecommendationPanel {{
                 background-color: {tokens.SURFACE};
@@ -211,8 +213,8 @@ class DNSRecommendationPanel(QFrame):
                 border-radius: {tokens.RADIUS_PANEL}px;
             }}
             QFrame#DNSRecommendationPanel QLabel {{
-                border: none;
                 background: transparent;
+                border: 0px solid transparent;
             }}
         """)
         self.is_applied = False
@@ -235,12 +237,14 @@ class DNSRecommendationPanel(QFrame):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         self.lbl_title = QLabel("فحص وتسريع خوادم DNS")
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_title.setWordWrap(True)
 
         self.lbl_sub = QLabel("اضغط 'فحص خوادم DNS الآن' لقياس سرعة الخوادم مقارنة بالخادم الحالي.")
-        self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_sub.setWordWrap(True)
 
         title_col.addWidget(self.lbl_title)
         title_col.addWidget(self.lbl_sub)
@@ -254,20 +258,28 @@ class DNSRecommendationPanel(QFrame):
         curr_row = QVBoxLayout()
         curr_row.setSpacing(4)
         curr_top = QHBoxLayout()
-        self.lbl_curr_name = QLabel("DNS مزود الخدمة (الحالي)")
-        self.lbl_curr_name.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_curr_name = QLabel("خادم DNS المعتمد بجهازك حالياً")
+        self.lbl_curr_name.setFont(tokens.get_sans_font(13, 500))
         self.lbl_curr_name.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        self.lbl_curr_name.setWordWrap(True)
         self.lbl_curr_ms = QLabel("—")
         self.lbl_curr_ms.setFont(tokens.get_mono_font(13, 500))
         self.lbl_curr_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        curr_top.addWidget(self.lbl_curr_name)
-        curr_top.addStretch()
+        self.lbl_curr_ms.setFixedWidth(75)
+        curr_top.addWidget(self.lbl_curr_name, stretch=1)
         curr_top.addWidget(self.lbl_curr_ms)
         curr_row.addLayout(curr_top)
 
         self.bar_curr = HorizontalProgressBar(height=8, fill_color=tokens.TEXT_MUTED)
         self.bar_curr.set_fraction(0.0)
         curr_row.addWidget(self.bar_curr)
+
+        # Clear explanation note under Current DNS
+        self.lbl_curr_clarification = QLabel("هذا هو خادم DNS الذي يستخدمه جهازك حالياً، وليس مجرد خادم DNS مقترح.")
+        self.lbl_curr_clarification.setFont(tokens.get_sans_font(11, 400))
+        self.lbl_curr_clarification.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_curr_clarification.setWordWrap(True)
+        curr_row.addWidget(self.lbl_curr_clarification)
         bars_col.addLayout(curr_row)
 
         # Fastest DNS Row
@@ -279,11 +291,12 @@ class DNSRecommendationPanel(QFrame):
         self.lbl_fast_name = QLabel("—")
         self.lbl_fast_name.setFont(tokens.get_sans_font(13, 500))
         self.lbl_fast_name.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_fast_name.setWordWrap(True)
         self.lbl_fast_ms = QLabel("—")
         self.lbl_fast_ms.setFont(tokens.get_mono_font(13, 500))
         self.lbl_fast_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        fast_top.addWidget(self.lbl_fast_name)
-        fast_top.addStretch()
+        self.lbl_fast_ms.setFixedWidth(75)
+        fast_top.addWidget(self.lbl_fast_name, stretch=1)
         fast_top.addWidget(self.lbl_fast_ms)
         fast_row.addLayout(fast_top)
 
@@ -301,7 +314,8 @@ class DNSRecommendationPanel(QFrame):
         self.lbl_note = QLabel("يمكنك التراجع في أي وقت.")
         self.lbl_note.setFont(tokens.get_sans_font(12, 400))
         self.lbl_note.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        footer_row.addWidget(self.lbl_note)
+        self.lbl_note.setWordWrap(True)
+        footer_row.addWidget(self.lbl_note, stretch=1)
 
         footer_row.addStretch()
 
@@ -315,18 +329,56 @@ class DNSRecommendationPanel(QFrame):
     def update_dns_state(
         self,
         curr_name: str,
-        curr_ms: float,
+        curr_ms: Optional[float],
         best_name: str,
         best_ip: str,
         best_ms: float,
         is_optimal: bool,
         is_autonomous: bool = True,
+        auto_applied: bool = False,
     ) -> None:
         """Dynamically update recommendation panel to show real live status and autonomous healing."""
         self.is_optimal = is_optimal
         self.is_autonomous = is_autonomous
         self._target_best_ip = best_ip
         self._target_best_name = best_name
+
+        if auto_applied:
+            self.is_applied = True
+            diff = max(1, int(round(curr_ms)) - int(round(best_ms))) if (curr_ms and curr_ms > best_ms) else 0
+            self.lbl_tag.setText("تم الإصلاح الذاتي تلقائياً ✓")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            self.lbl_title.setText(f"تم اعتماد خادم {best_name} تلقائياً ({int(round(best_ms))} ms)")
+            diff_text = f" (تحسن +{diff} ms)" if diff > 0 else ""
+            self.lbl_sub.setText(f"تم التبديل الفوري بنجاح في وضع الحماية الذاتية{diff_text}.")
+            self.lbl_curr_name.setText(f"خادم DNS المعتمد ({best_name})")
+            self.lbl_curr_ms.setText(f"{int(round(best_ms))} ms")
+            self.lbl_curr_ms.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            self.bar_curr.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=tokens.STATUS_OK)
+            self.fast_row_container.setVisible(False)
+            self.lbl_note.setText("المراقبة الذاتية تعمل: تم اعتماد الخادم الأسرع بنجاح.")
+            self.btn_action.setText("تراجع عن التغيير")
+            self.btn_action.setEnabled(True)
+            return
+
+        if curr_ms is None or curr_ms < 1.0 or "جاري" in curr_name:
+            self.lbl_tag.setText("جاري الفحص والتقييم...")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            self.lbl_title.setText("جاري قياس استجابة خوادم DNS...")
+            self.lbl_sub.setText("يتم إرسال استعلامات فعلية للتحقق من سرعة الخادم الحالي والبدائل المتاحة.")
+            self.lbl_curr_name.setText(f"خادم DNS الحالي ({curr_name})")
+            self.lbl_curr_ms.setText("جاري القياس...")
+            self.lbl_curr_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            self.bar_curr.set_fraction(0.08, fill_color=tokens.TEXT_MUTED)
+            self.fast_row_container.setVisible(False)
+            self.lbl_note.setText("المراقبة الذاتية تعمل: جاري القياس الميداني.")
+            self.btn_action.setText("معتمد حالياً")
+            self.btn_action.setEnabled(False)
+            return
+
+        curr_ms_safe = max(0.0, curr_ms)
+        curr_color = tokens.STATUS_OK if curr_ms_safe <= 55.0 else (tokens.STATUS_WARN if curr_ms_safe <= 85.0 else tokens.STATUS_BAD)
+        fast_color = tokens.STATUS_OK if best_ms <= 55.0 else (tokens.STATUS_WARN if best_ms <= 85.0 else tokens.STATUS_BAD)
 
         if best_ms <= 55.0:
             ms_color = tokens.STATUS_OK
@@ -344,59 +396,86 @@ class DNSRecommendationPanel(QFrame):
             tag_color = tokens.STATUS_BAD
             note_text = f"الخادم يعاني من بطء في الاستجابة ({best_ms:.0f} ms). جاري المتابعة."
 
-        if is_optimal or (curr_ms - best_ms) <= 5.0:
-            self.lbl_tag.setText("الخادم الأسرع معتمد ✓")
+        if is_optimal:
+            self.lbl_tag.setText("الخادم الحالي هو الأسرع ✓ (مستقر وسريع)")
             self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_OK};")
-            self.lbl_title.setText("أنت تستخدم الخادم الأسرع حالياً — لا حاجة للتغيير")
-            self.lbl_sub.setText(f"الخادم المعتمد ({best_name}) يستجيب بسرعة فائقة ({best_ms:.0f} ms).")
-            self.lbl_curr_name.setText(f"خادم DNS النشط ({best_name} · {best_ip})")
-            self.lbl_curr_ms.setText(f"{best_ms:.0f} ms")
-            self.lbl_curr_ms.setStyleSheet(f"color: {ms_color};")
-            self.bar_curr.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=ms_color)
+            self.lbl_title.setText(f"خادم DNS الحالي ({curr_name}) هو الأسرع لجهازك حالياً")
+            self.lbl_sub.setText(f"يقدم خادم {curr_name} أعلى سرعة استجابة واستقرار تم قياسه ({curr_ms:.0f} ms).")
+            self.lbl_curr_name.setText(f"خادم DNS الحالي ({curr_name})")
+            self.lbl_curr_ms.setText(f"{curr_ms:.0f} ms")
+            self.lbl_curr_ms.setStyleSheet(f"color: {curr_color};")
+            self.bar_curr.set_fraction(max(0.12, min(1.0, curr_ms / 80.0)), fill_color=curr_color)
             self.fast_row_container.setVisible(False)
             self.lbl_note.setText(note_text)
             self.btn_action.setText("معتمد حالياً ✓")
             self.btn_action.setEnabled(False)
+            self.is_applied = False
         else:
-            diff = max(1, int(round(curr_ms - best_ms)))
-            curr_color = tokens.STATUS_OK if curr_ms <= 55.0 else (tokens.STATUS_WARN if curr_ms <= 85.0 else tokens.STATUS_BAD)
-            fast_color = tokens.STATUS_OK if best_ms <= 55.0 else (tokens.STATUS_WARN if best_ms <= 85.0 else tokens.STATUS_BAD)
+            diff = max(1, int(round(curr_ms)) - int(round(best_ms)))
 
             if is_autonomous:
-                self.lbl_tag.setText("معالجة ذاتية جارية")
+                self.lbl_tag.setText("جاري التحسين التلقائي...")
                 self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-                self.lbl_title.setText(f"الخادم الحالي: {curr_name} ({curr_ms:.0f} ms) — الأسرع: {best_name} ({best_ms:.0f} ms)")
-                self.lbl_sub.setText(f"الفارق: +{diff} ms لصالح {best_name}. يقوم NetGuard بالتحويل التلقائي الآمن.")
-                self.btn_action.setText("جاري التحسين…")
+                self.lbl_title.setText(f"جاري التبديل التلقائي إلى {best_name} ({int(round(best_ms))} ms)")
+                self.lbl_sub.setText(f"تم رصد فارق +{diff} ms لصالح {best_name}. جاري تطبيق التحسين الذاتي فوراً.")
+                self.btn_action.setText("جاري التحسين...")
                 self.btn_action.setEnabled(False)
             else:
-                self.lbl_tag.setText("توصية")
+                self.lbl_tag.setText("توصية بتحسين DNS")
                 self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-                self.lbl_title.setText(f"الخادم الحالي: {curr_name} ({curr_ms:.0f} ms) — الأسرع: {best_name} ({best_ms:.0f} ms)")
+                self.lbl_title.setText(f"الخادم الحالي: {curr_name} ({int(round(curr_ms))} ms) — الأسرع: {best_name} ({int(round(best_ms))} ms)")
                 self.lbl_sub.setText(f"الفارق: +{diff} ms لصالح {best_name}. يمكنك التبديل لتسريع فتح الروابط والمواقع.")
-                self.btn_action.setText("طبّق التغيير")
+                self.btn_action.setText("طبّق التغيير الآن")
                 self.btn_action.setEnabled(True)
+                self.is_applied = False
 
-            self.lbl_curr_name.setText(f"DNS الحالي ({curr_name})")
-            self.lbl_curr_ms.setText(f"{curr_ms:.0f} ms")
+            self.lbl_curr_name.setText(f"خادم DNS الحالي ({curr_name})")
+            self.lbl_curr_ms.setText(f"{int(round(curr_ms))} ms")
             self.lbl_curr_ms.setStyleSheet(f"color: {curr_color};")
             self.bar_curr.set_fraction(max(0.2, min(1.0, curr_ms / 80.0)), fill_color=curr_color)
 
             self.fast_row_container.setVisible(True)
-            self.lbl_fast_name.setText(f"{best_name} · {best_ip}")
-            self.lbl_fast_ms.setText(f"{best_ms:.0f} ms")
+            self.lbl_fast_name.setText(f"الخادم المقترح: {best_name} · {best_ip}")
+            self.lbl_fast_ms.setText(f"{int(round(best_ms))} ms")
             self.lbl_fast_ms.setStyleSheet(f"color: {fast_color};")
             self.bar_fast.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=fast_color)
-            self.lbl_note.setText("يمكنك التراجع في أي وقت.")
+            self.lbl_note.setText("يمكنك التراجع واستعادة إعدادات محول الشبكة الأصلية (DHCP) في أي وقت.")
+
+    def set_remediation_result(self, before_ms: float, after_ms: float, new_name: str, success: bool = True) -> None:
+        """Display verifiable before vs after evidence post-remediation."""
+        if success:
+            gain_ms = max(0.0, before_ms - after_ms)
+            pct = (gain_ms / before_ms * 100.0) if before_ms > 0 else 0.0
+            self.lbl_tag.setText("تم الإصلاح بنجاح ✓")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            self.lbl_title.setText(f"تم اعتماد خادم {new_name} بنجاح")
+            self.lbl_sub.setText(f"تم التحقق الفعلي: انخفض زمن الاستجابة من {before_ms:.0f} ms إلى {after_ms:.0f} ms (تحسن {pct:.0f}%).")
+            self.btn_action.setText("تراجع عن التغيير")
+            self.btn_action.setEnabled(True)
+            self.is_applied = True
+        else:
+            self.lbl_tag.setText("فشل التحقق — تم التراجع")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_BAD};")
+            self.lbl_title.setText("تعذر التحقق من الخادم الجديد")
+            self.lbl_sub.setText("لم يستجب الخادم الجديد بالشكل المطلوب، وتمت استعادة الإعدادات السابقة فوراً.")
+            self.btn_action.setText("طبّق التغيير")
+            self.btn_action.setEnabled(True)
+            self.is_applied = False
 
     def _on_action_clicked(self) -> None:
         if not self.is_applied:
-            self.is_applied = True
-            self.lbl_title.setText(f"تم تبديل DNS إلى {self._target_best_name}")
-            self.btn_action.setText("تراجع عن التغيير")
+            self.btn_action.setEnabled(False)
+            self.btn_action.setText("جاري التطبيق...")
+            self.lbl_tag.setText("جاري التطبيق والتحقق...")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+            self.lbl_title.setText(f"جاري تطبيق خادم {self._target_best_name} على بطاقة الشبكة...")
+            self.lbl_sub.setText("يتم إرسال الأمر بصلاحيات المدير والتأكد من تسجيل العناوين واختبار الترجمة.")
             self.apply_clicked.emit()
         else:
-            self.is_applied = False
-            self.lbl_title.setText("بدّل DNS لتفتح المواقع أسرع")
-            self.btn_action.setText("طبّق التغيير")
+            self.btn_action.setEnabled(False)
+            self.btn_action.setText("جاري الاستعادة...")
+            self.lbl_tag.setText("جاري استعادة الإعدادات...")
+            self.lbl_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            self.lbl_title.setText("جاري استعادة إعدادات DNS السابقة...")
+            self.lbl_sub.setText("يتم إرجاع خوادم DNS السابقة أو تفعيل التعيين التلقائي (DHCP).")
             self.revert_clicked.emit()

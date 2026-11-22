@@ -2,22 +2,37 @@
 
 from __future__ import annotations
 from typing import Optional
+import shiboken6
 from PySide6.QtCore import QObject, QEvent, Qt
 from PySide6.QtWidgets import QWidget, QScrollArea, QTableWidget
 
 
+def _is_valid(obj: Optional[QObject]) -> bool:
+    """Check if QObject reference and underlying C++ instance are both valid."""
+    try:
+        return obj is not None and shiboken6.isValid(obj)
+    except (RuntimeError, ReferenceError, Exception):
+        return False
+
+
 class WheelForwarder(QObject):
-    """Event filter that delegates wheel events to the enclosing page QScrollArea."""
+    """Event filter that delegates wheel events smoothly to the enclosing page vertical scrollbar."""
 
     def __init__(self, target_scroll: QScrollArea, parent: Optional[QObject] = None) -> None:
         super().__init__(parent or target_scroll)
         self.target_scroll = target_scroll
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Wheel:
-            # Forward wheel event directly to page scroll area
-            self.target_scroll.wheelEvent(event)
-            return True
+        try:
+            if not _is_valid(watched) or event is None:
+                return False
+            if event.type() == QEvent.Wheel:
+                target = getattr(self, "target_scroll", None)
+                if _is_valid(target):
+                    target.wheelEvent(event)
+                    return True
+        except (RuntimeError, ReferenceError, Exception):
+            pass
         return False
 
 

@@ -73,16 +73,95 @@ class ProbableCause(str, Enum):
     LOCAL_GATEWAY_UNREACHABLE = "local_gateway_unreachable"
     LOCAL_GATEWAY_HIGH_LATENCY = "local_gateway_high_latency"
     WI_FI_SIGNAL_DEGRADED = "wi_fi_signal_degraded"
+    WI_FI_DISCONNECTED = "wi_fi_disconnected"
     CELLULAR_SIGNAL_DEGRADED = "cellular_signal_degraded"
+    ADAPTER_ERROR = "adapter_error"
+    DHCP_LEASE_EXPIRED = "dhcp_lease_expired"
+    INCORRECT_ADAPTER_CONFIG = "incorrect_adapter_config"
     ISP_UPSTREAM_OUTAGE = "isp_upstream_outage"
     ISP_UPSTREAM_HIGH_LATENCY = "isp_upstream_high_latency"
+    HIGH_JITTER = "high_jitter"
+    PACKET_LOSS_SPIKE = "packet_loss_spike"
+    LATENCY_SPIKE = "latency_spike"
+    SUSTAINED_DEGRADATION = "sustained_degradation"
+    MTU_FRAGMENTATION_ISSUE = "mtu_fragmentation_issue"
     DNS_RESOLVER_UNRESPONSIVE = "dns_resolver_unresponsive"
     DNS_RESOLVER_HIGH_LATENCY = "dns_resolver_high_latency"
+    DNS_RESOLUTION_FAILURE = "dns_resolution_failure"
+    DNS_TIMEOUT = "dns_timeout"
+    DNS_RESOLVER_SLOW = "dns_resolver_slow"
+    DNS_CONFIGURATION_ERROR = "dns_configuration_error"
+    BETTER_DNS_AVAILABLE = "better_dns_available"
+    DNS_REMEDIATION_FAILED = "dns_remediation_failed"
+    HOP2_UNRESPONSIVE = "hop2_unresponsive"
+    ROUTE_MUTATION = "route_mutation"
     DESTINATION_SPECIFIC_OUTAGE = "destination_specific_outage"
     BUFFERBLOAT_UPLOAD = "bufferbloat_upload_congestion"
     BUFFERBLOAT_DOWNLOAD = "bufferbloat_download_congestion"
     BACKGROUND_APP_SATURATION = "background_app_saturation"
+    PROBE_EXECUTION_FAILURE = "probe_execution_failure"
+    REMEDIATION_EXECUTION_FAILED = "remediation_execution_failed"
+    POST_REMEDIATION_FAILED = "post_remediation_failed"
     UNKNOWN_ANOMALY = "unknown_anomaly"
+
+
+class IncidentLifecycleState(str, Enum):
+    """Unified incident lifecycle state machine (Item 3)."""
+    DETECTED = "detected"
+    INVESTIGATING = "investigating"
+    DIAGNOSED = "diagnosed"
+    AWAITING_APPROVAL = "awaiting_approval"
+    REMEDIATING = "remediating"
+    VERIFYING_RECOVERY = "verifying_recovery"
+    RESOLVED = "resolved"
+    NATURALLY_RECOVERED = "naturally_recovered"
+    UNRESOLVED = "unresolved"
+    REMEDIATION_FAILED = "remediation_failed"
+    CLOSED = "closed"
+
+
+class CauseClassification(str, Enum):
+    """Strength of empirical diagnosis backing the incident (Item 5)."""
+    CONFIRMED_CAUSE = "confirmed_cause"
+    PROBABLE_CAUSE = "probable_cause"
+    POSSIBLE_CAUSE = "possible_cause"
+    UNKNOWN_CAUSE = "unknown_cause"
+
+
+class IncidentResolutionType(str, Enum):
+    """Verified final resolution outcome of an incident (Item 11)."""
+    AUTOMATICALLY_REPAIRED = "automatically_repaired"
+    NATURALLY_RECOVERED = "naturally_recovered"
+    DIAGNOSED_ONLY = "diagnosed_only"
+    UNRESOLVED = "unresolved"
+    REMEDIATION_FAILED = "remediation_failed"
+    AWAITING_EXTERNAL_ACTION = "awaiting_external_action"
+
+
+class ActionClassification(str, Enum):
+    """Taxonomy of system actions distinguishing inspection from repair (Item 6)."""
+    DIAGNOSTIC_ONLY = "diagnostic_only"
+    CONFIGURATION_CHANGE = "configuration_change"
+    CORRECTIVE_ACTION = "corrective_action"
+    POST_REMEDIATION_VERIFICATION = "post_remediation_verification"
+    INFORMATION_ONLY = "information_only"
+
+
+class DnsOptimizationState(str, Enum):
+    """Dedicated granular state machine for automatic DNS failover & tuning (Item 7.9)."""
+    CURRENT_DNS_VALIDATING = "current_dns_validating"
+    ALTERNATIVES_BENCHMARKING = "alternatives_benchmarking"
+    BETTER_RESOLVER_IDENTIFIED = "better_resolver_identified"
+    AUTO_SWITCH_QUEUED = "auto_switch_queued"
+    APPLYING_DNS_CHANGE = "applying_dns_change"
+    FLUSHING_DNS_CACHE = "flushing_dns_cache"
+    VERIFYING_NEW_RESOLVER = "verifying_new_resolver"
+    OPTIMIZED_SUCCESSFULLY = "optimized_successfully"
+    NO_SIGNIFICANT_IMPROVEMENT = "no_significant_improvement"
+    SWITCH_BLOCKED = "switch_blocked"
+    ROLLBACK_IN_PROGRESS = "rollback_in_progress"
+    ROLLBACK_COMPLETED = "rollback_completed"
+    OPTIMIZATION_FAILED = "optimization_failed"
 
 
 class DiagnosisSeverity(str, Enum):
@@ -116,6 +195,18 @@ class Diagnosis(BaseModel):
     recommended_actions: List[str] = Field(default_factory=list)
     auto_remediation_permitted: bool = False
     explanation: str = ""
+
+    # Comprehensive incident lifecycle & deduplication fields (Items 3, 4, 11, 12)
+    fingerprint: str = ""
+    first_detected: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_observed: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    occurrence_count: int = 1
+    status: IncidentLifecycleState = IncidentLifecycleState.DIAGNOSED
+    resolution_type: IncidentResolutionType = IncidentResolutionType.DIAGNOSED_ONLY
+    affected_component: str = "network"
+    cause_classification: CauseClassification = CauseClassification.PROBABLE_CAUSE
+    action_record_id: Optional[str] = None
+    resolved_at: Optional[datetime] = None
 
 
 class RiskLevel(str, Enum):
@@ -183,3 +274,4 @@ class ActionExecutionRecord(BaseModel):
     error_message: Optional[str] = None
     rollback_performed: bool = False
     rollback_success: Optional[bool] = None
+    action_classification: ActionClassification = ActionClassification.CORRECTIVE_ACTION

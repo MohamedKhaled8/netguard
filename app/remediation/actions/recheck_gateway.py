@@ -3,7 +3,7 @@
 from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Tuple
-from app.core.models.metrics import RiskLevel
+from app.core.models.metrics import RiskLevel, ActionClassification
 from app.platform.interfaces import IPlatformAdapter
 from app.remediation.registry import RemediationAction
 
@@ -21,6 +21,7 @@ class RecheckGatewayAction(RemediationAction):
             timeout_sec=4.0,
             cooldown_sec=10.0,
             max_retries=3,
+            action_classification=ActionClassification.DIAGNOSTIC_ONLY,
         )
 
     def check_preconditions(self, platform: IPlatformAdapter, context: Dict[str, Any]) -> Tuple[bool, str]:

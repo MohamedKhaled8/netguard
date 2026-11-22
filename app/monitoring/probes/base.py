@@ -44,7 +44,7 @@ class BaseProbe(ABC):
             self._last_run_time = now
 
         try:
-            return await asyncio.wait_for(self.execute(), timeout=self.timeout_sec)
+            return await asyncio.wait_for(self.execute(), timeout=self.timeout_sec + 1.5)
         except asyncio.TimeoutError:
             logger.warning("Probe %s exceeded timeout of %.2fs", self.name, self.timeout_sec)
             return self._handle_timeout()

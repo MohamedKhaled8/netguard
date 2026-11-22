@@ -50,7 +50,8 @@ class ProcessTableCell(QWidget):
         lbl = QLabel(speed_str)
         lbl.setFont(tokens.get_mono_font(13, 500))
         lbl.setStyleSheet(f"color: {tokens.TEXT};")
-        lbl.setMinimumWidth(160)
+        lbl.setMinimumWidth(180)
+        lbl.setWordWrap(False)
         layout.addWidget(lbl)
 
         fill_color = tokens.STATUS_WARN if is_throttled else tokens.ACCENT
@@ -64,6 +65,7 @@ class TrafficView(QWidget):
 
     start_simulated_zoom_requested = Signal()
     close_simulated_zoom_requested = Signal()
+    qos_policy_done = Signal(bool, str)
 
     def __init__(
         self,
@@ -77,17 +79,26 @@ class TrafficView(QWidget):
         self.platform = platform or WindowsPlatformAdapter()
         self.user_settings = user_settings
         self._last_profiles_cache: List[Any] = []
+        self.report_cards: List[SessionReportCard] = []
+        self.btn_sim_zoom = SecondaryButton("محاكاة مكالمة Zoom")
+        self.btn_sim_zoom.setVisible(False)
+        self.btn_sim_zoom.clicked.connect(self._on_sim_zoom_clicked)
+        self.qos_policy_done.connect(self._on_qos_policy_done)
         self.setStyleSheet(f"background-color: {tokens.BG};")
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+        self.scroll = QScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+        self.scroll.viewport().setAutoFillBackground(True)
+        self.scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+        self.scroll.verticalScrollBar().setSingleStep(25)
 
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet(f"background-color: {tokens.BG};")
@@ -99,121 +110,60 @@ class TrafficView(QWidget):
         layout = self.content_layout
 
         # -------------------------------------------------------------
-        # 1. Header & Controls
+        # 1. Unified Clean Header & Meeting Guard Control Bar
         # -------------------------------------------------------------
-        header_panel = Panel(
+        self.header_panel = Panel(
             title="حركة البيانات وتأمين التطبيقات",
-            subtitle="مراقبة استهلاك البرامج للباندويث وحماية مكالمات الفيديو والبث الحي من أي تقطيع",
+            subtitle="مراقبة استهلاك البرامج للباندويث وحماية جودة المكالمات والبث المباشر استباقياً من أي تقطيع",
             parent=self,
         )
 
-        header_col = QVBoxLayout()
-        header_col.setSpacing(12)
+        header_top = QHBoxLayout()
+        header_top.setSpacing(16)
 
-        self.lbl_subtitle = QLabel(
-            "يتم رصد البرامج التي تستنزف سرعة الرفع والتنزيل لضمان استقرار جلسات Zoom و Google Meet دون تأخير."
-        )
-        self.lbl_subtitle.setFont(tokens.get_sans_font(13, 400))
-        self.lbl_subtitle.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_subtitle.setWordWrap(True)
-        header_col.addWidget(self.lbl_subtitle)
+        # Right side: Meeting Guard toggle & status
+        guard_box = QHBoxLayout()
+        guard_box.setSpacing(10)
 
-        btn_box = QHBoxLayout()
-        btn_box.setSpacing(10)
-
-        # Simulation button hidden in production per non-negotiable principle
-        self.btn_sim_zoom = SecondaryButton("محاكاة مكالمة Zoom")
-        self.btn_sim_zoom.setToolTip("تم إخفاء زر المحاكاة لضمان عدم إدراج بيانات وهمية في بيئة التشغيل الحقيقية")
-        self.btn_sim_zoom.setVisible(False)
-        self.btn_sim_zoom.clicked.connect(self._on_sim_zoom_clicked)
-
-        self.btn_refresh = PrimaryButton("فحص البرامج النشطة")
-        btn_box.addWidget(self.btn_refresh)
-        btn_box.addStretch()
-
-        header_col.addLayout(btn_box)
-        header_panel.main_layout.addLayout(header_col)
-        layout.addWidget(header_panel)
-
-        # -------------------------------------------------------------
-        # 2. Priority Protection & Active Session (Meeting Guard)
-        # -------------------------------------------------------------
-        self.guard_panel = Panel(
-            title="درع مكالمات الفيديو والبث المباشر - Meeting Guard",
-            subtitle="مراقبة جلسات مكالمات الفيديو وحماية استقرار الاتصال وتعليق الإجراءات التي تسبب انقطاعاً لحظياً",
-            parent=self,
-        )
-
-        # Top toggle row
-        guard_row = QHBoxLayout()
-        guard_row.setSpacing(16)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(4)
-
-        lbl_row = QHBoxLayout()
-        lbl_row.setSpacing(8)
         self.meeting_dot = QLabel()
-        self.meeting_dot.setFixedSize(7, 7)
-        self.meeting_dot.setStyleSheet(f"background-color: {tokens.TEXT_MUTED}; border-radius: 3.5px;")
-        lbl_row.addWidget(self.meeting_dot)
+        self.meeting_dot.setFixedSize(8, 8)
+        self.meeting_dot.setStyleSheet(f"background-color: {tokens.TEXT_MUTED}; border-radius: 4px;")
+        guard_box.addWidget(self.meeting_dot)
 
-        self.meeting_lbl = QLabel("وضع مكالمات الفيديو: مؤمن (لا توجد مكالمات Zoom / Teams جارية حالياً)")
-        self.meeting_lbl.setFont(tokens.get_sans_font(14, 500))
+        self.meeting_lbl = QLabel("درع مكالمات الفيديو: مؤمن (في وضع الاستعداد)")
+        self.meeting_lbl.setFont(tokens.get_sans_font(13, 500))
         self.meeting_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.meeting_lbl.setWordWrap(True)
-        lbl_row.addWidget(self.meeting_lbl, stretch=1)
-
-        text_col.addLayout(lbl_row)
-
-        lbl_guard_desc = QLabel("عند تفعيل هذا الخيار، يقوم درع الاجتماعات برصد مكالمات الفيديو وتعليق الإجراءات التي تسبب انقطاعاً لحظياً طوال مدة المكالمة.")
-        lbl_guard_desc.setFont(tokens.get_sans_font(12, 400))
-        lbl_guard_desc.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        lbl_guard_desc.setWordWrap(True)
-        text_col.addWidget(lbl_guard_desc)
-
-        guard_row.addLayout(text_col, stretch=1)
+        guard_box.addWidget(self.meeting_lbl)
 
         self.guard_toggle = ToggleSwitch(checked=True, parent=self)
-        guard_row.addWidget(self.guard_toggle)
+        guard_box.addWidget(self.guard_toggle)
+        header_top.addLayout(guard_box)
 
-        self.guard_panel.main_layout.addLayout(guard_row)
+        header_top.addStretch()
 
-        # Active Session Container
+        # Left side: Action button
+        self.btn_refresh = PrimaryButton("فحص البرامج النشطة")
+        self.btn_refresh.setFixedHeight(36)
+        header_top.addWidget(self.btn_refresh)
+
+        self.header_panel.main_layout.addLayout(header_top)
+
+        # Active Meeting Session Container (Dynamic: expands only when a meeting is active)
         self.active_session_container = QWidget()
         self.active_session_layout = QVBoxLayout(self.active_session_container)
-        self.active_session_layout.setContentsMargins(0, 10, 0, 0)
+        self.active_session_layout.setContentsMargins(0, 12, 0, 0)
         self.active_session_layout.setSpacing(10)
-        self.guard_panel.main_layout.addWidget(self.active_session_container)
+        self.active_session_container.setVisible(False)
+        self.header_panel.main_layout.addWidget(self.active_session_container)
 
-        layout.addWidget(self.guard_panel)
-
-        # -------------------------------------------------------------
-        # 3. Completed App Sessions & Post-Session Quality Reports
-        # -------------------------------------------------------------
-        self.reports_panel = Panel(
-            title="سجل جلسات البرامج وتقارير جودة البث - Session Reports",
-            subtitle="حساب مدة كل تطبيق تم فتحه وإغلاقه، والمشاكل التي حلها NetGuard لضمان أعلى جودة بدون تقطيع",
-            parent=self,
-        )
-
-        self.reports_list_container = QWidget()
-        self.reports_list_layout = QVBoxLayout(self.reports_list_container)
-        self.reports_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.reports_list_layout.setSpacing(12)
-
-        self.reports_panel.main_layout.addWidget(self.reports_list_container)
-        layout.addWidget(self.reports_panel)
-
-        # Populate initial historical session reports
-        self._populate_session_reports()
+        layout.addWidget(self.header_panel)
 
         # -------------------------------------------------------------
-        # 4. Expanded Process Consumers Table
+        # 2. Expanded Process Consumers Table
         # -------------------------------------------------------------
         table_panel = Panel(
             title="قائمة البرامج المتصلة بالإنترنت حالياً",
-            subtitle="مرتبة حسب عدد الاتصالات النشطة، مع إمكانية تقييد سرعة الرفع الصادر (Outbound Throttle) عبر Windows NetQosPolicy",
+            subtitle="مرتبة حسب الاتصالات النشطة، مع إمكانية تقييد سرعة الرفع الصادر (Outbound Throttle) عبر Windows NetQosPolicy",
             parent=self,
         )
 
@@ -227,26 +177,44 @@ class TrafficView(QWidget):
             "حالة سرعة الرفع (QoS)",
             "إجراء QoS",
         ])
+        self.table.horizontalHeader().setMinimumSectionSize(60)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
-        self.table.setColumnWidth(4, 185)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(5, 140)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(54)
+        self.table.verticalHeader().setDefaultSectionSize(56)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(False)
         self.table.setSortingEnabled(True)
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: transparent;
                 border: none;
-                gridline-color: {tokens.LINE};
+            }}
+            QHeaderView::section {{
+                background-color: {tokens.SURFACE_INSET};
+                color: {tokens.TEXT_SECONDARY};
+                font-size: 12px;
+                font-weight: 600;
+                border: none;
+                border-bottom: 1px solid {tokens.LINE};
+                padding: 10px 12px;
+                text-align: right;
             }}
             QTableWidget::item {{
+                border: none;
                 border-bottom: 1px solid {tokens.LINE};
-                padding: 8px 10px;
+                padding: 8px 12px;
+                color: {tokens.TEXT};
+            }}
+            QTableWidget::item:hover {{
+                background-color: {tokens.SURFACE_HOVER};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {tokens.SURFACE_SELECTED};
                 color: {tokens.TEXT};
             }}
         """)
@@ -254,12 +222,29 @@ class TrafficView(QWidget):
         table_panel.main_layout.addWidget(self.table)
         layout.addWidget(table_panel)
 
-        make_scroll_transparent(self.table, scroll)
+        # -------------------------------------------------------------
+        # 3. Completed App Sessions & Post-Session Quality Reports
+        # -------------------------------------------------------------
+        self.reports_panel = Panel(
+            title="سجل جلسات البرامج وتقارير جودة البث - Session Reports",
+            subtitle="حساب مدة كل تطبيق تم فتحه وإغلاقه، والمشاكل التي حلها NetGuard لضمان أعلى جودة بدون تقطيع",
+            parent=self,
+        )
+        self.reports_list_container = QWidget()
+        self.reports_list_layout = QVBoxLayout(self.reports_list_container)
+        self.reports_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.reports_list_layout.setSpacing(12)
+        self.reports_panel.main_layout.addWidget(self.reports_list_container)
+        self.reports_panel.setVisible(False)
+        layout.addWidget(self.reports_panel)
+
+        make_scroll_transparent(self.table, self.scroll)
 
         self._populate_default_processes()
+        self._populate_session_reports()
 
-        scroll.setWidget(self.content_widget)
-        root_layout.addWidget(scroll)
+        self.scroll.setWidget(self.content_widget)
+        root_layout.addWidget(self.scroll)
 
     def _on_sim_zoom_clicked(self) -> None:
         """Toggle a simulated Zoom meeting session to demonstrate real-time tracking & reports."""
@@ -301,9 +286,10 @@ class TrafficView(QWidget):
 
         active = self.session_tracker.get_active_sessions()
         if active:
-            self.meeting_dot.setStyleSheet(f"background-color: {tokens.STATUS_OK}; border-radius: 3.5px;")
-            self.meeting_lbl.setText("وضع مكالمات الفيديو: نشط ومحمي استباقياً (Zoom / Teams قيد التشغيل حالياً)")
+            self.meeting_dot.setStyleSheet(f"background-color: {tokens.STATUS_OK}; border-radius: 4px;")
+            self.meeting_lbl.setText("درع مكالمات الفيديو: نشط ومحمي استباقياً (Zoom / Teams / Meet قيد التشغيل حالياً)")
             self.meeting_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
+            self.active_session_container.setVisible(True)
             for session in active:
                 card = ActiveSessionCard(
                     session=session,
@@ -312,9 +298,10 @@ class TrafficView(QWidget):
                 )
                 self.active_session_layout.addWidget(card)
         else:
-            self.meeting_dot.setStyleSheet(f"background-color: {tokens.TEXT_MUTED}; border-radius: 3.5px;")
-            self.meeting_lbl.setText("وضع مكالمات الفيديو: مؤمن (لا توجد مكالمات Zoom / Teams جارية حالياً)")
+            self.meeting_dot.setStyleSheet(f"background-color: {tokens.TEXT_MUTED}; border-radius: 4px;")
+            self.meeting_lbl.setText("درع مكالمات الفيديو: مؤمن (في وضع الاستعداد)")
             self.meeting_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+            self.active_session_container.setVisible(False)
 
         # 2. Re-populate completed reports
         self._populate_session_reports()
@@ -335,8 +322,10 @@ class TrafficView(QWidget):
             empty_lbl.setAlignment(Qt.AlignCenter)
             empty_lbl.setWordWrap(True)
             self.reports_list_layout.addWidget(empty_lbl)
+            self.reports_panel.setVisible(False)
             return
 
+        self.reports_panel.setVisible(True)
         for session in completed:
             card = SessionReportCard(session=session, parent=self.reports_list_container)
             self.report_cards.append(card)
@@ -346,15 +335,22 @@ class TrafficView(QWidget):
         """Initialize empty process table awaiting user scan."""
         self.table.setRowCount(0)
 
-    def update_profiles(self, profiles: List[Any], conferencing_active: bool = False) -> None:
+    def update_profiles(
+        self,
+        profiles: List[Any],
+        conferencing_active: bool = False,
+        qos_policies: Optional[List[Any]] = None,
+    ) -> None:
         """Update live processes from traffic controller."""
         self._last_profiles_cache = list(profiles or [])
         self._refresh_sessions_ui()
         if not profiles:
             self.table.setRowCount(0)
+            self._profile_sig = None
+            self._qos_sig = None
             return
 
-        active_policies = self.platform.get_qos_policies() if self.platform else []
+        active_policies = list(qos_policies) if qos_policies is not None else []
         throttled_apps = {
             (p.get("app_name") or "").lower(): p.get("throttle_bps")
             for p in active_policies
@@ -367,18 +363,46 @@ class TrafficView(QWidget):
         }
 
         sorted_p = sorted(profiles, key=lambda p: getattr(p, "active_socket_count", 0), reverse=True)[:25]
+        profile_sig = tuple(
+            (
+                getattr(p, "name", ""),
+                getattr(p, "pid", 0),
+                getattr(p, "active_socket_count", 0),
+                round(float(getattr(p, "estimated_bandwidth_mbps", 0) or 0), 1),
+                str(getattr(p, "category", "")),
+                bool(getattr(p, "is_protected_system_process", False)),
+            )
+            for p in sorted_p
+        )
+        qos_sig = tuple(sorted(
+            (name, throttled_apps.get(name), dscp_apps.get(name))
+            for name in set(throttled_apps) | set(dscp_apps)
+        ))
+        if profile_sig == getattr(self, "_profile_sig", None) and qos_sig == getattr(self, "_qos_sig", None):
+            return
+        self._profile_sig = profile_sig
+        self._qos_sig = qos_sig
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(sorted_p))
         max_sockets = max((getattr(p, "active_socket_count", 1) for p in sorted_p), default=1)
 
         for r, p in enumerate(sorted_p):
+            self.table.setRowHeight(r, 56)
             pname = getattr(p, "name", "مجهول")
             pname_lower = pname.lower()
             pid_str = str(getattr(p, "pid", 0))
             sockets_cnt = getattr(p, "active_socket_count", 0)
             cat = str(getattr(p, "category", ""))
-            is_conf = "conferencing" in cat.lower() or "critical" in cat.lower()
+            is_conf = (
+                "conferencing" in cat.lower()
+                or "critical" in cat.lower()
+                or pname_lower in (
+                    "zoom.exe", "teams.exe", "ms-teams.exe", "obs64.exe", "obs32.exe",
+                    "webex.exe", "ciscowebexstart.exe", "webexmta.exe", "slack.exe", "discord.exe"
+                )
+            )
             is_sys = getattr(p, "is_protected_system_process", False) or pname_lower in ApplicationCatalog.PROTECTED_SYSTEM_NAMES
-            tag_text = "أولوية مكالمات" if is_conf else ("نظام أساسي" if is_sys else "طبيعي")
+            tag_text = "أولوية قصوى (اجتماع/تسجيل)" if is_conf else ("نظام أساسي" if is_sys else "طبيعي")
 
             is_throttled = pname_lower in throttled_apps
             is_dscp = pname_lower in dscp_apps
@@ -386,6 +410,7 @@ class TrafficView(QWidget):
             # 0. Name
             item_name = QTableWidgetItem(pname)
             item_name.setFont(tokens.get_sans_font(14, 500))
+            item_name.setToolTip(pname)
             self.table.setItem(r, 0, item_name)
 
             # 1. PID
@@ -440,32 +465,37 @@ class TrafficView(QWidget):
                 lbl_prot.setToolTip("عملية نظام محمية — لا يمكن تقييدها أو إيقافها لضمان استقرار نظام التشغيل")
                 self.table.setCellWidget(r, 5, lbl_prot)
             elif is_conf:
-                btn_dscp = SecondaryButton("إلغاء DSCP" if is_dscp else f"أولوية {tokens.bidi_isolate('DSCP')}")
-                btn_dscp.setFixedHeight(36)
-                btn_dscp.setFixedWidth(120)
-                btn_dscp.clicked.connect(lambda checked=False, pn=pname, en=not is_dscp: self._on_toggle_dscp(pn, en))
-                btn_box = QWidget()
-                btn_layout = QHBoxLayout(btn_box)
-                btn_layout.setContentsMargins(4, 4, 4, 4)
-                btn_layout.setAlignment(Qt.AlignCenter)
-                btn_layout.addWidget(btn_dscp)
-                self.table.setCellWidget(r, 5, btn_box)
+                lbl_prot = QLabel("محمي (أولوية قصوى)")
+                lbl_prot.setFont(tokens.get_sans_font(13, 600))
+                lbl_prot.setStyleSheet(f"color: {tokens.STATUS_OK}; padding: 4px 8px;")
+                lbl_prot.setAlignment(Qt.AlignCenter)
+                lbl_prot.setToolTip("تطبيق اجتماع/تسجيل محمي بأولوية قصوى — لا يتم تقييده مطلقاً للحفاظ على جودة الصوت والفيديو")
+                self.table.setCellWidget(r, 5, lbl_prot)
             else:
                 cfg_bps = 5_000_000
                 if self.user_settings and hasattr(self.user_settings, "get_qos_upload_throttle_bps"):
                     cfg_bps = self.user_settings.get_qos_upload_throttle_bps()
                 cfg_mbps = cfg_bps / 1_000_000.0
                 btn_th = SecondaryButton("إلغاء التقييد" if is_throttled else f"تقييد ({tokens.bidi_isolate(f'{cfg_mbps:.0f}M')})")
-                btn_th.setFixedHeight(36)
-                btn_th.setFixedWidth(120)
+                btn_th.setFixedHeight(34)
+                btn_th.setMinimumWidth(125)
+                btn_th.setStyleSheet(f"""
+                    QPushButton {{
+                        padding: 4px 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                    }}
+                """)
                 btn_th.clicked.connect(lambda checked=False, pn=pname, en=not is_throttled: self._on_toggle_throttle(pn, en))
                 btn_box = QWidget()
                 btn_layout = QHBoxLayout(btn_box)
-                btn_layout.setContentsMargins(4, 4, 4, 4)
+                btn_layout.setContentsMargins(6, 4, 6, 4)
                 btn_layout.setAlignment(Qt.AlignCenter)
                 btn_layout.addWidget(btn_th)
                 self.table.setCellWidget(r, 5, btn_box)
+                self.table.setCellWidget(r, 5, btn_box)
 
+        self.table.setSortingEnabled(True)
         fit_table_to_content(self.table)
 
     def _on_toggle_throttle(self, pname: str, enable: bool) -> None:
@@ -486,7 +516,7 @@ class TrafficView(QWidget):
                 ok, msg = self.platform.create_qos_throttle_policy(policy_name, pname, throttle_bps)
             else:
                 ok, msg = self.platform.remove_qos_policy(policy_name)
-            QTimer.singleShot(0, lambda o=ok, m=msg: self._on_qos_policy_done(o, m))
+            self.qos_policy_done.emit(ok, msg)
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
@@ -506,7 +536,7 @@ class TrafficView(QWidget):
                 ok, msg = self.platform.create_qos_dscp_policy(policy_name, pname, 46)
             else:
                 ok, msg = self.platform.remove_qos_policy(policy_name)
-            QTimer.singleShot(0, lambda o=ok, m=msg: self._on_qos_policy_done(o, m))
+            self.qos_policy_done.emit(ok, msg)
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
@@ -516,8 +546,19 @@ class TrafficView(QWidget):
             QMessageBox.warning(self, "سياسة QoS في ويندوز", msg)
         self.update_profiles(self._last_profiles_cache)
 
+    def _sync_content_width(self) -> None:
+        if hasattr(self, "scroll") and hasattr(self, "content_widget"):
+            vw = self.scroll.viewport().width()
+            if vw > 0:
+                self.content_widget.setFixedWidth(vw)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sync_content_width()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_content_width()
         w = self.width()
         if w < 700:
             self.content_layout.setContentsMargins(

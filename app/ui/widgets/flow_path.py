@@ -8,7 +8,7 @@ Panel 'مسار اتصالك':
 """
 
 from __future__ import annotations
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from PySide6.QtWidgets import (
     QFrame,
     QVBoxLayout,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, Signal
 from app.ui import tokens
+from app.ui.animation_clock import AnimationMasterClock
 
 
 class PathNodeButton(QFrame):
@@ -45,50 +46,53 @@ class PathNodeButton(QFrame):
         self.is_selected = False
 
         self.setMinimumWidth(85)
-        self.setFixedHeight(94)
+        self.setMinimumHeight(104)
         from PySide6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.setCursor(Qt.PointingHandCursor)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(3)
 
         # Top row: Mono index "01".."05" + 8px status dot
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_idx = QLabel(index_str)
-        self.lbl_idx.setFont(tokens.get_mono_font(12, 400))
+        self.lbl_idx.setFont(tokens.get_mono_font(11, 400))
         self.lbl_idx.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         top_row.addWidget(self.lbl_idx)
 
         top_row.addStretch()
 
         self.dot_widget = QLabel()
-        self.dot_widget.setFixedSize(8, 8)
+        self.dot_widget.setFixedSize(7, 7)
         top_row.addWidget(self.dot_widget)
         layout.addLayout(top_row)
 
-        # Name label (15px bold)
+        # Name label (13px semi-bold, clean, no wrapping)
         self.lbl_name = QLabel(name)
-        self.lbl_name.setFont(tokens.get_sans_font(15, 600))
+        self.lbl_name.setFont(tokens.get_sans_font(13, 600))
         self.lbl_name.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_name.setWordWrap(True)
         layout.addWidget(self.lbl_name)
 
-        # Latency row (LTR mono 20px + 12px ms)
+        # Latency row (LTR mono 18px + 11px ms)
         lat_container = QWidget(self)
+        lat_container.setAttribute(Qt.WA_TranslucentBackground, True)
+        lat_container.setStyleSheet("background: transparent; border: 0px solid transparent;")
         lat_container.setLayoutDirection(Qt.LeftToRight)
         lat_row = QHBoxLayout(lat_container)
         lat_row.setContentsMargins(0, 0, 0, 0)
-        lat_row.setSpacing(4)
+        lat_row.setSpacing(3)
 
         self.lbl_val = QLabel("—")
-        self.lbl_val.setFont(tokens.get_mono_font(20, 500))
+        self.lbl_val.setFont(tokens.get_mono_font(18, 500))
         self.lbl_val.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.lbl_unit = QLabel("ms")
-        self.lbl_unit.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_unit.setFont(tokens.get_sans_font(11, 400))
         self.lbl_unit.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         lat_row.addWidget(self.lbl_val)
@@ -103,12 +107,17 @@ class PathNodeButton(QFrame):
         self.update_state(self.latency_ms, self.status, selected)
 
     def update_state(self, latency_ms: Optional[float], status: str, selected: bool) -> None:
+        if (getattr(self, "latency_ms", None) == latency_ms and getattr(self, "status", None) == status and getattr(self, "is_selected", None) == selected):
+            return
         self.latency_ms = latency_ms
         self.status = status
         self.is_selected = selected
         if latency_ms is not None and latency_ms >= 0:
             self.lbl_val.setText(f"{int(round(latency_ms))}")
             self.lbl_unit.setText("ms")
+        elif status == "ok":
+            self.lbl_val.setText("نشط")
+            self.lbl_unit.setText("")
         else:
             self.lbl_val.setText("—")
             self.lbl_unit.setText("")
@@ -123,33 +132,19 @@ class PathNodeButton(QFrame):
             dot_col = tokens.TEXT_MUTED
         self.dot_widget.setStyleSheet(f"background-color: {dot_col}; border-radius: 4px;")
 
-        if selected:
-            self.setStyleSheet(f"""
-                QFrame#PathNodeButton {{
-                    background-color: {tokens.SURFACE_HOVER};
-                    border: 1px solid {tokens.ACCENT};
-                    border-radius: {tokens.RADIUS_INNER}px;
-                }}
-                QFrame#PathNodeButton QLabel {{
-                    border: none;
-                    background: transparent;
-                }}
-            """)
-        else:
-            self.setStyleSheet(f"""
-                QFrame#PathNodeButton {{
-                    background-color: {tokens.SURFACE_INSET};
-                    border: 1px solid {tokens.LINE};
-                    border-radius: {tokens.RADIUS_INNER}px;
-                }}
-                QFrame#PathNodeButton:hover {{
-                    background-color: {tokens.SURFACE_HOVER};
-                }}
-                QFrame#PathNodeButton QLabel {{
-                    border: none;
-                    background: transparent;
-                }}
-            """)
+        edge = tokens.ACCENT if selected else tokens.LINE
+        fill = tokens.SURFACE_SELECTED if selected else tokens.SURFACE_INSET
+        self.setStyleSheet(f"""
+            QFrame#PathNodeButton {{
+                background-color: {fill};
+                border: 1px solid {edge};
+                border-radius: {tokens.RADIUS_INNER}px;
+            }}
+            QFrame#PathNodeButton QLabel {{
+                border: 0px solid transparent;
+                background: transparent;
+            }}
+        """)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -216,11 +211,16 @@ class FlowPathPanel(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("FlowPathPanel")
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(f"""
             QFrame#FlowPathPanel {{
                 background-color: {tokens.SURFACE};
                 border: 1px solid {tokens.LINE};
                 border-radius: {tokens.RADIUS_PANEL}px;
+            }}
+            QFrame#FlowPathPanel QLabel {{
+                background: transparent;
+                border: 0px solid transparent;
             }}
         """)
 
@@ -232,11 +232,11 @@ class FlowPathPanel(QFrame):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         self.lbl_title = QLabel("مسار اتصالك")
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.lbl_sub = QLabel("رحلة بياناتك من جهازك إلى الإنترنت. اضغط على أي نقطة لتفاصيلها.")
-        self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         title_col.addWidget(self.lbl_title)
@@ -244,6 +244,8 @@ class FlowPathPanel(QFrame):
         layout.addLayout(title_col)
 
         self.path_container = QWidget()
+        self.path_container.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.path_container.setStyleSheet("background: transparent; border: 0px solid transparent;")
         path_layout = QHBoxLayout(self.path_container)
         path_layout.setContentsMargins(0, 0, 0, 0)
         path_layout.setSpacing(4)
@@ -320,7 +322,7 @@ class FlowPathPanel(QFrame):
                 border-radius: {tokens.RADIUS_INNER}px;
             }}
             QFrame#PathDetailBox QLabel {{
-                border: none;
+                border: 0px solid transparent;
                 background: transparent;
             }}
         """)
@@ -350,6 +352,8 @@ class FlowPathPanel(QFrame):
 
         def make_metric_col(title_txt: str) -> Tuple[QWidget, QLabel]:
             w = QWidget()
+            w.setAttribute(Qt.WA_TranslucentBackground, True)
+            w.setStyleSheet("background: transparent; border: 0px solid transparent;")
             col = QVBoxLayout(w)
             col.setContentsMargins(0, 0, 0, 0)
             col.setSpacing(2)
@@ -379,15 +383,23 @@ class FlowPathPanel(QFrame):
         # Default selection: start with node 0 (جهازك)
         self._select_node(0)
 
-        # Animation timer for connector travelling dots (2.4s linear loop)
+        # Master Animation Clock for connector travelling dots (2.4s linear loop)
         self._flow_phase = 0.0
+        self._is_paused = False
         if tokens.ANIMATIONS_ENABLED:
-            self._timer = QTimer(self)
-            self._timer.timeout.connect(self._on_flow_tick)
-            self._timer.start(33)  # ~30fps
+            AnimationMasterClock.get_instance().subscribe(self._on_flow_tick)
 
-    def _on_flow_tick(self) -> None:
-        self._flow_phase = (self._flow_phase + (33.0 / 2400.0)) % 1.0
+    def set_paused(self, paused: bool) -> None:
+        self._is_paused = paused
+        if paused:
+            AnimationMasterClock.get_instance().unsubscribe(self._on_flow_tick)
+        else:
+            AnimationMasterClock.get_instance().subscribe(self._on_flow_tick)
+
+    def _on_flow_tick(self, delta_ms: float = 50.0) -> None:
+        if getattr(self, "_is_paused", False):
+            return
+        self._flow_phase = (self._flow_phase + (delta_ms / 2400.0)) % 1.0
         for conn in self.connectors:
             conn.set_phase(self._flow_phase)
 
@@ -396,17 +408,19 @@ class FlowPathPanel(QFrame):
             n.set_selected(i == index)
 
         info = self.node_info[index]
+        st = info.get("status", "none")
         self.lbl_detail_name.setText(info["name"])
         self.lbl_detail_desc.setText(info["desc"])
         if info["latency"] is not None and info["latency"] >= 0:
             self.lbl_now.setText(f"{int(round(info['latency']))} ms")
+        elif st == "ok":
+            self.lbl_now.setText("نشط (يمرر البيانات)")
         else:
             self.lbl_now.setText("—")
         self.lbl_now.setStyleSheet(f"color: {tokens.TEXT};")
         self.lbl_typ.setText(info.get("typical", "—"))
         self.lbl_typ.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
-        st = info.get("status", "none")
         if st == "ok":
             self.lbl_st.setText("سليم")
             self.lbl_st.setStyleSheet(f"color: {tokens.STATUS_OK};")

@@ -1,11 +1,11 @@
 """Metric Cell and Metrics Strip for NetGuard AI.
 
-One container (radius 16, 1px line outline, cells separated by 1px line gaps):
-Each cell:
-- Top: 13px muted label
-- Value row: 38px mono value + 13px muted unit (LTR)
-- Sparkline: 32px high, 1.6px line width, status color
-- Footer: 7px status dot + 12px muted text
+Four separate cards. Each card:
+- 3px status rail (color is never the only cue; the footer repeats the state in text)
+- 13px muted label
+- Mono value + unit (LTR)
+- Sparkline
+- Footer: 7px status dot + 12px text
 """
 
 from __future__ import annotations
@@ -39,23 +39,33 @@ class MetricCell(QFrame):
         super().__init__(parent)
         self.status_color = status_color
         self.setObjectName("MetricCell")
-        self.setMinimumWidth(210)
-        self.setFixedHeight(180)
-
+        self.setFrameShape(QFrame.NoFrame)
+        self.setLineWidth(0)
+        self.setMinimumWidth(110)
         self.setStyleSheet(f"""
             QFrame#MetricCell {{
                 background-color: {tokens.SURFACE};
-                border: none;
+                border: 1px solid {tokens.LINE};
+                border-radius: {tokens.RADIUS_INNER}px;
+                outline: none;
             }}
             QFrame#MetricCell QLabel {{
-                border: none;
                 background: transparent;
+                border: 0px solid transparent;
+                padding: 0px;
             }}
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 14, 20, 14)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 12, 16, 14)
+        layout.setSpacing(8)
+
+        self.status_rail = QFrame(self)
+        self.status_rail.setFixedHeight(3)
+        self.status_rail.setStyleSheet(
+            f"background-color: {status_color}; border-radius: 2px; border: 0px solid transparent;"
+        )
+        layout.addWidget(self.status_rail)
 
         # 1. Muted Label (13px)
         self.title_lbl = QLabel(title)
@@ -63,23 +73,25 @@ class MetricCell(QFrame):
         self.title_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         layout.addWidget(self.title_lbl)
 
-        # 2. Value Row (LTR): 38px mono value + 13px muted unit
+        # 2. Value Row (LTR): 22px mono value + 13px muted unit
         val_container = QWidget(self)
+        val_container.setAttribute(Qt.WA_TranslucentBackground, True)
+        val_container.setStyleSheet("background: transparent; border: 0px solid transparent;")
         val_container.setLayoutDirection(Qt.LeftToRight)
-        val_container.setFixedHeight(48)
+        val_container.setMinimumHeight(34)
         val_row = QHBoxLayout(val_container)
         val_row.setContentsMargins(0, 0, 0, 0)
         val_row.setSpacing(6)
         val_row.setAlignment(Qt.AlignLeft)
 
         self.val_lbl = QLabel(initial_val)
-        self.val_lbl.setFont(tokens.get_mono_font(38, 500))
+        self.val_lbl.setFont(tokens.get_mono_font(26, 600))
         self.val_lbl.setStyleSheet(f"color: {tokens.TEXT};")
-        self.val_lbl.setFixedHeight(46)
+        self.val_lbl.setMinimumHeight(28)
 
         self.unit_lbl = QLabel(unit)
-        self.unit_lbl.setFont(tokens.get_sans_font(13, 400))
-        self.unit_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding-top: 14px;")
+        self.unit_lbl.setFont(tokens.get_sans_font(12, 400))
+        self.unit_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding-top: 6px;")
 
         val_row.addWidget(self.val_lbl)
         val_row.addWidget(self.unit_lbl)
@@ -92,6 +104,9 @@ class MetricCell(QFrame):
             color=status_color,
             parent=self,
         )
+        self.sparkline.setFixedHeight(40)
+        self.sparkline.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.sparkline.setStyleSheet("background: transparent; border: 0px solid transparent;")
         layout.addWidget(self.sparkline)
 
         # 4. Footer: 7px status dot + 12px muted text
@@ -120,8 +135,9 @@ class MetricCell(QFrame):
         samples: Optional[List[float]] = None,
         status_color: Optional[str] = None,
     ) -> None:
-        self.val_lbl.setText(val_str)
-        if footer_text:
+        if self.val_lbl.text() != val_str:
+            self.val_lbl.setText(val_str)
+        if footer_text and self.footer_lbl.text() != footer_text:
             self.footer_lbl.setText(footer_text)
 
         if status_color:
@@ -133,13 +149,18 @@ class MetricCell(QFrame):
         else:
             color = tokens.STATUS_OK
 
-        self.status_color = color
-        self.dot.setStyleSheet(f"background-color: {color}; border-radius: 3.5px;")
+        if self.status_color != color:
+            self.status_color = color
+            self.dot.setStyleSheet(f"background-color: {color}; border-radius: 3.5px;")
+            self.status_rail.setStyleSheet(
+                f"background-color: {color}; border-radius: 2px; border: 0px solid transparent;"
+            )
         if samples is not None:
             self.sparkline.set_data(samples, color)
         else:
-            self.sparkline.color = color
-            self.sparkline.update()
+            if getattr(self.sparkline, "color", None) != color:
+                self.sparkline.color = color
+                self.sparkline.update()
 
 
 class MetricsStrip(QFrame):
@@ -148,21 +169,23 @@ class MetricsStrip(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("MetricsStripContainer")
+        self.setFrameShape(QFrame.NoFrame)
+        self.setLineWidth(0)
         self.setStyleSheet(f"""
             QFrame#MetricsStripContainer {{
-                background-color: {tokens.LINE};
-                border: 1px solid {tokens.LINE};
-                border-radius: {tokens.RADIUS_PANEL}px;
+                background-color: transparent;
+                border: 0px solid transparent;
             }}
             QFrame#MetricsStripContainer QLabel {{
-                border: none;
+                border: 0px solid transparent;
                 background: transparent;
+                padding: 0px;
             }}
         """)
 
         self.grid_layout = QGridLayout(self)
-        self.grid_layout.setContentsMargins(1, 1, 1, 1)
-        self.grid_layout.setSpacing(1)
+        self.grid_layout.setContentsMargins(0, 0, 0, 0)
+        self.grid_layout.setSpacing(12)
 
         # 4 Cells:
         # In RTL: cell 0 (rightmost) is latency, cell 1 is jitter, cell 2 is loss, cell 3 is download

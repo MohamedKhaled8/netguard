@@ -1,0 +1,23 @@
+{
+  "duration_sec": 2,
+  "first_window_shown_ms": 4187.4,
+  "stalls_over_50ms_count": 2,
+  "stalls_over_100ms_count": 1,
+  "max_stall_ms": 122.22,
+  "top_stalls": [
+    {
+      "timestamp": 1795028428.2292926,
+      "lateness_ms": 122.22,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n"
+    },
+    {
+      "timestamp": 1795028428.1610415,
+      "lateness_ms": 53.9,
+      "stack": "  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 234, in <module>\n    run_benchmark(dur, lbl)\n  File \"E:\\Mt FlutterProject\\netguard\\scripts\\real\\perf_probe.py\", line 210, in run_benchmark\n    app.exec()\n"
+    }
+  ],
+  "subprocess_spawns_total": 7,
+  "subprocess_on_ui_thread": 4,
+  "database_queries_total": 14,
+  "database_queries_on_ui_thread": 14
+}

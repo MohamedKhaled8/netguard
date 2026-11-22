@@ -27,65 +27,141 @@ from app.ui.widgets.chip import Chip
 from app.ui.widgets.buttons import SecondaryButton, GhostButton
 
 
-class TimelineStepWidget(QWidget):
-    """Single step row showing mono time, bold title, and explanation."""
+class StepRailWidget(QWidget):
+    """Draws connected rail and pulsing/solid colored dot for a specific step."""
 
-    def __init__(self, time_str: str, title: str, desc: str, dot_color: str, parent=None) -> None:
+    def __init__(self, step_idx: int, total_steps: int, dot_color: str, parent=None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 8)
-        layout.setSpacing(3)
+        self.step_idx = step_idx
+        self.total_steps = total_steps
+        self.dot_color = dot_color
+        self.setFixedWidth(22)
 
-        self.lbl_time = QLabel(time_str)
-        self.lbl_time.setFont(tokens.get_mono_font(12, 400))
-        self.lbl_time.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-
-        self.lbl_title = QLabel(title)
-        self.lbl_title.setFont(tokens.get_sans_font(15, 600))
-        self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
-
-        self.lbl_desc = QLabel(desc)
-        self.lbl_desc.setFont(tokens.get_sans_font(13, 400))
-        self.lbl_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.6;")
-        self.lbl_desc.setWordWrap(True)
-
-        layout.addWidget(self.lbl_time)
-        layout.addWidget(self.lbl_title)
-        layout.addWidget(self.lbl_desc)
-
-
-class TimelineCanvas(QWidget):
-    """Paints the 10px dots and 1px vertical rail for 4 steps."""
-
-    def __init__(self, colors: List[str], step_widgets: List[QWidget], parent=None) -> None:
-        super().__init__(parent)
-        self.colors = colors
-        self.step_widgets = step_widgets
-        self.setFixedWidth(20)
+    def set_color(self, color_str: str) -> None:
+        self.dot_color = color_str
+        self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        if not self.step_widgets:
-            return
+        w = float(self.width())
+        h = float(self.height())
+        cx = w / 2.0
+        cy = 13.0  # Exactly centers with the 22px header row
 
-        centers = []
-        for w in self.step_widgets:
-            y = w.y() + 8.0  # Align with time label
-            centers.append(y)
+        # Draw 1.5px vertical connecting rail line
+        line_color = QColor(tokens.LINE_STRONG)
+        painter.setPen(QPen(line_color, 1.5))
 
-        # Draw 1px rail from first center to last center
-        if len(centers) >= 2:
-            painter.setPen(QPen(QColor(tokens.LINE_STRONG), 1.0))
-            painter.drawLine(QPointF(10.0, centers[0]), QPointF(10.0, centers[-1]))
+        if self.step_idx > 0:
+            painter.drawLine(QPointF(cx, 0.0), QPointF(cx, cy))
+        if self.step_idx < self.total_steps - 1:
+            painter.drawLine(QPointF(cx, cy), QPointF(cx, h))
 
-        # Draw 10px solid dots
+        # Draw dot with subtle outer glow ring and solid core
+        c = QColor(self.dot_color)
+
+        ring_col = QColor(c)
+        ring_col.setAlpha(40)
         painter.setPen(Qt.NoPen)
-        for i, y in enumerate(centers):
-            color = QColor(self.colors[i] if i < len(self.colors) else tokens.ACCENT)
-            painter.setBrush(QBrush(color))
-            painter.drawEllipse(QPointF(10.0, y), 5.0, 5.0)
+        painter.setBrush(QBrush(ring_col))
+        painter.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
+
+        painter.setBrush(QBrush(c))
+        painter.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
+
+
+class TimelineStepWidget(QFrame):
+    """Refined modern timeline step row with integrated rail and micro-pill time badge."""
+
+    def __init__(
+        self,
+        step_idx: int,
+        total_steps: int,
+        time_str: str,
+        title: str,
+        desc: str,
+        dot_color: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("TimelineStepItem")
+        self.setStyleSheet(f"""
+            QFrame#TimelineStepItem {{
+                background-color: transparent;
+                border-radius: {tokens.RADIUS_INNER}px;
+            }}
+            QFrame#TimelineStepItem:hover {{
+                background-color: rgba(255, 255, 255, 0.02);
+            }}
+            QFrame#TimelineStepItem QLabel {{
+                border: 0px solid transparent;
+                background: transparent;
+            }}
+        """)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setSpacing(10)
+
+        # 1. Rail & Dot (appears on Right in RTL)
+        self.rail = StepRailWidget(step_idx, total_steps, dot_color, self)
+        layout.addWidget(self.rail)
+
+        # 2. Content Column
+        content_col = QVBoxLayout()
+        content_col.setContentsMargins(0, 2, 0, 0)
+        content_col.setSpacing(3)
+
+        # Header: Title + Time Pill right next to it
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+
+        self.lbl_title = QLabel(title)
+        self.lbl_title.setFont(tokens.get_sans_font(13, 600))
+        self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
+        header_row.addWidget(self.lbl_title)
+
+        self.lbl_time = QLabel(time_str)
+        self.lbl_time.setFont(tokens.get_mono_font(11, 400))
+        self.lbl_time.setStyleSheet(f"""
+            color: {tokens.TEXT_MUTED};
+            background-color: rgba(255, 255, 255, 0.04);
+            border: none;
+            border-radius: 4px;
+            padding: 1px 6px;
+        """)
+        header_row.addWidget(self.lbl_time)
+        header_row.addStretch()
+
+        content_col.addLayout(header_row)
+
+        self.lbl_desc = QLabel(desc)
+        self.lbl_desc.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.45;")
+        self.lbl_desc.setWordWrap(True)
+        content_col.addWidget(self.lbl_desc)
+
+        layout.addLayout(content_col, stretch=1)
+
+    def set_step_data(self, time_str: str, title: str, desc: str, dot_color: str) -> None:
+        self.lbl_time.setText(time_str)
+        self.lbl_title.setText(title)
+        self.lbl_desc.setText(desc)
+        self.rail.set_color(dot_color)
+
+
+class TimelineCanvas(QWidget):
+    """Compatibility shim for legacy references."""
+
+    def __init__(self, colors: List[str], step_widgets: List[QWidget], parent=None) -> None:
+        super().__init__(parent)
+        self.colors = colors
+        self.step_widgets = step_widgets
+        self.setFixedWidth(0)
+        self.setVisible(False)
 
 
 class TimelinePanel(QFrame):
@@ -97,6 +173,9 @@ class TimelinePanel(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("TimelinePanel")
+        from PySide6.QtWidgets import QSizePolicy
+        self.setMinimumHeight(375)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
         self.setStyleSheet(f"""
             QFrame#TimelinePanel {{
                 background-color: {tokens.SURFACE};
@@ -104,27 +183,29 @@ class TimelinePanel(QFrame):
                 border-radius: {tokens.RADIUS_PANEL}px;
             }}
             QFrame#TimelinePanel QLabel {{
-                border: none;
+                border: 0px solid transparent;
                 background: transparent;
             }}
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(8)
 
         # Header: Title + Subtitle on Right, Chip on Left
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
 
         title_col = QVBoxLayout()
-        title_col.setSpacing(3)
+        title_col.setSpacing(2)
         self.lbl_title = QLabel("ما الذي حدث بالضبط؟")
-        self.lbl_title.setFont(tokens.get_sans_font(18, 600))
+        self.lbl_title.setFont(tokens.get_sans_font(16, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_title.setMinimumHeight(24)
 
         self.lbl_sub = QLabel("لا توجد أحداث مسجلة")
-        self.lbl_sub.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         title_col.addWidget(self.lbl_title)
@@ -139,13 +220,9 @@ class TimelinePanel(QFrame):
 
         # 4 Steps container
         self.steps_container = QWidget()
-        steps_layout = QHBoxLayout(self.steps_container)
-        steps_layout.setContentsMargins(0, 4, 0, 4)
-        steps_layout.setSpacing(12)
-
-        self.content_col = QVBoxLayout()
-        self.content_col.setContentsMargins(0, 0, 0, 0)
-        self.content_col.setSpacing(10)
+        steps_layout = QVBoxLayout(self.steps_container)
+        steps_layout.setContentsMargins(0, 2, 0, 2)
+        steps_layout.setSpacing(6)
 
         # Default idle state when no events exist
         self.step_data = [
@@ -156,28 +233,34 @@ class TimelinePanel(QFrame):
         ]
 
         self.step_widgets: List[TimelineStepWidget] = []
-        for t, title, desc, c in self.step_data:
-            w = TimelineStepWidget(t, title, desc, c)
+        total_steps = len(self.step_data)
+        for i, (t, title, desc, c) in enumerate(self.step_data):
+            w = TimelineStepWidget(i, total_steps, t, title, desc, c, self.steps_container)
             self.step_widgets.append(w)
-            self.content_col.addWidget(w)
+            steps_layout.addWidget(w)
 
         colors = [s[3] for s in self.step_data]
-        self.rail_canvas = TimelineCanvas(colors, self.step_widgets)
+        self.rail_canvas = TimelineCanvas(colors, self.step_widgets, self)
 
-        steps_layout.addWidget(self.rail_canvas)
-        steps_layout.addLayout(self.content_col)
         layout.addWidget(self.steps_container)
 
-        # Footer Buttons
+        # Footer Action Bar with subtle separator
+        footer_div = QFrame()
+        footer_div.setFrameShape(QFrame.HLine)
+        footer_div.setStyleSheet("background-color: rgba(255, 255, 255, 0.05); border: none; max-height: 1px;")
+        layout.addWidget(footer_div)
+
         footer_row = QHBoxLayout()
-        footer_row.setContentsMargins(0, 8, 0, 0)
+        footer_row.setContentsMargins(0, 4, 0, 0)
         footer_row.setSpacing(10)
 
         self.btn_evidence = SecondaryButton("عرض الأدلة")
+        self.btn_evidence.setFixedHeight(34)
         self.btn_evidence.clicked.connect(self.view_evidence_requested.emit)
         self.btn_evidence.setEnabled(False)
 
         self.btn_rollback = GhostButton("تراجع عن الإصلاح")
+        self.btn_rollback.setFixedHeight(34)
         self.btn_rollback.clicked.connect(self.rollback_requested.emit)
         self.btn_rollback.setVisible(True)
 
@@ -192,9 +275,7 @@ class TimelinePanel(QFrame):
         colors = []
         for i, (t, title, desc, col) in enumerate(steps):
             if i < len(self.step_widgets):
-                self.step_widgets[i].lbl_time.setText(t)
-                self.step_widgets[i].lbl_title.setText(title)
-                self.step_widgets[i].lbl_desc.setText(desc)
+                self.step_widgets[i].set_step_data(t, title, desc, col)
             colors.append(col)
         self.rail_canvas.colors = colors
         self.rail_canvas.update()
@@ -268,12 +349,37 @@ class TimelinePanel(QFrame):
             ts = incident.timestamp
             t_inc = ts.astimezone() if getattr(ts, "tzinfo", None) else ts
 
+        from datetime import date
+        today = date.today()
         anchor_dt = t_rec or t_inc or t_now
-        self.lbl_sub.setText(f"آخر حدث · اليوم {anchor_dt.strftime('%H:%M')}")
+
+        if not (audit_record or incident):
+            self.lbl_sub.setText("لا توجد أحداث مسجلة اليوم")
+            self.btn_evidence.setEnabled(False)
+            now_str = t_now.strftime("%H:%M:%S")
+            self.set_event(
+                t_now.strftime("%H:%M"),
+                [
+                    (now_str, "المراقبة الذاتية", "فحص دوري مستمر لمؤشرات الشبكة والراوتر."),
+                    (now_str, "تحليل الاستقرار", "كافة القياسات الميدانية مستقرة وضمن الحدود الطبيعية."),
+                    (now_str, "الإجراءات", "لا توجد تدخلات مطلوبة حالياً."),
+                    (now_str, "النتيجة", "الاتصال مستقر وسليم."),
+                ],
+                is_resolved=True,
+            )
+            return
+
+        if anchor_dt.date() == today:
+            self.lbl_sub.setText(f"آخر حدث · اليوم {anchor_dt.strftime('%H:%M')}")
+        elif anchor_dt.date() == (today - timedelta(days=1)):
+            self.lbl_sub.setText(f"آخر حدث · أمس {anchor_dt.strftime('%H:%M')}")
+        else:
+            self.lbl_sub.setText(f"آخر حدث · {anchor_dt.strftime('%Y-%m-%d %H:%M')}")
+
         self.btn_evidence.setEnabled(incident is not None)
 
         # 2. Step 1: Detect (اكتشاف المشكلة)
-        t_detect = (t_inc or (anchor_dt - timedelta(seconds=15))).strftime("%H:%M:%S")
+        t_detect = (t_inc or t_rec or anchor_dt).strftime("%H:%M:%S")
         detect_desc = ""
         evidence_list = getattr(incident, "supporting_evidence", []) if incident else []
         if evidence_list:
@@ -283,16 +389,16 @@ class TimelinePanel(QFrame):
             m_type_str = str(getattr(ev, "metric_type", "")).lower()
 
             if "rtt" in m_type_str or "latency" in m_type_str:
-                detect_desc = f"ارتفع زمن الاستجابة إلى {m_val:.1f}ms (الحد المسموح {th_val:.1f}ms)."
+                detect_desc = f"ارتفاع زمن الاستجابة إلى {m_val:.1f}ms متجاوزاً الحد الطبيعي {th_val:.1f}ms."
             elif "loss" in m_type_str or "packet" in m_type_str:
-                detect_desc = f"رصد فقدان حزم بنسبة {m_val:.1f}% (الحد الأقصى {th_val:.1f}%)."
+                detect_desc = f"رصد فقدان حزم بنسبة {m_val:.1f}% مقارنة بالحد الأقصى {th_val:.1f}%."
             elif "dns" in m_type_str:
-                detect_desc = f"ارتفع زمن استجابة DNS إلى {m_val:.1f}ms (الحد: {th_val:.1f}ms)."
+                detect_desc = f"ارتفاع زمن استجابة DNS إلى {m_val:.1f}ms مقارنة بالمعدل المعتاد {th_val:.1f}ms."
             elif "bufferbloat" in m_type_str:
-                detect_desc = f"رصد تأخير طوابير بافركلوت بمقدار +{m_val:.1f}ms تحت الحمل."
+                detect_desc = f"تأخير طوابير عند الراوتر بمقدار +{m_val:.1f}ms تحت الحمل."
             else:
                 m_name = getattr(ev.metric_type, "value", str(ev.metric_type))
-                detect_desc = f"رصد تجاوز في مؤشر {m_name} إلى {m_val:.1f} (الحد: {th_val:.1f})."
+                detect_desc = f"تجاوز في مؤشر {m_name} بقيمة {m_val:.1f} عن الحد {th_val:.1f}."
         elif incident and getattr(incident, "explanation", ""):
             detect_desc = incident.explanation
         elif audit_record and getattr(audit_record, "pre_remedy_metrics", None):
@@ -313,13 +419,17 @@ class TimelinePanel(QFrame):
 
         cause_map = {
             "local_wifi_congestion": "ازدحام أو تداخل في إشارة Wi-Fi المحلية.",
+            "local_gateway_high_latency": "ارتفاع زمن استجابة الراوتر المنزلي (البوابة الافتراضية).",
+            "local_gateway_unreachable": "تعذر الوصول إلى الراوتر المنزلي (البوابة الافتراضية).",
             "gateway_bufferbloat": "تكدس الحزم عند الراوتر (Bufferbloat) نتيجة استهلاك النطاق الترددي.",
             "bufferbloat_upload_congestion": "تكدس طوابير الرفع عند الراوتر (Bufferbloat) نتيجة ضغط حركة البيانات الصادرة.",
             "bufferbloat_download_congestion": "تكدس طوابير التحميل عند الراوتر (Bufferbloat) وتجاوز سعة الاستقبال للشبكة.",
             "dns_resolver_slow": "بطء خادم DNS المزود الحالي في معالجة طلبات الاستعلام.",
             "dns_resolver_high_latency": "ارتفاع كبير في زمن استجابة خادم DNS المعتمد.",
-            "destination_specific_outage": "انقطاع أو بطء خاص بالوجهة المستهدفة مع سلامة الشبكة المحلية.",
-            "background_app_saturation": "استهلاك مكثف للنطاق الترددي من عمليات وتطبيقات الخلفية.",
+            "dns_resolution_failure": "تعذر استجابة خادم DNS المعتمد في ترجمة العناوين.",
+            "destination_specific_outage": "انقطاع أو بطء خاص بالوجهة المستهدفة مع سلامة اتصالك المحلي.",
+            "external_network_unreachable": "تعذر الاتصال بالشبكة الخارجية للإنترنت.",
+            "background_app_saturation": "استهلاك مكثف للإنترنت من عمليات وتطبيقات الخلفية.",
             "unknown_anomaly": "تذبذب عابر غير نمطي في مسارات التوجيه الخارجية.",
         }
 
@@ -328,8 +438,8 @@ class TimelinePanel(QFrame):
             c_key = getattr(p_cause, "value", str(p_cause))
             c_text = cause_map.get(c_key, c_key)
             conf = getattr(incident, "confidence", 0.0)
-            conf_str = f" (مستوى الثقة: {int(conf * 100)}%)" if conf > 0 else ""
-            cause_desc = f"{c_text}{conf_str}."
+            conf_str = f" بمعدل ثقة {int(conf * 100)}%." if conf > 0 else "."
+            cause_desc = f"{c_text}{conf_str}"
         elif audit_record and "dns" in getattr(audit_record, "action_id", "").lower():
             cause_desc = "خادم DNS المعتمد يواجه تأخيراً في الاستجابة مقارنة بالبدائل المتاحة."
         elif audit_record and ("qos" in getattr(audit_record, "action_id", "").lower() or "throttle" in getattr(audit_record, "action_id", "").lower()):
@@ -351,19 +461,28 @@ class TimelinePanel(QFrame):
             if act_id == "switch_dns_resolver":
                 active_s = post_m.get("active_servers", [])
                 if active_s:
-                    fix_desc = f"تم تطبيق '{act_name}'. تحويل DNS إلى ({', '.join(active_s)}) وتفريغ كاش النظام."
+                    ipv4_servers = [s for s in active_s if ":" not in s]
+                    server_display = ", ".join(ipv4_servers[:2]) if ipv4_servers else (active_s[0] if active_s else "الخادم البديل")
+                    provider_name = ""
+                    if any("8.8.8.8" in s or "8.8.4.4" in s for s in active_s):
+                        provider_name = "Google DNS "
+                    elif any("1.1.1.1" in s or "1.0.0.1" in s for s in active_s):
+                        provider_name = "Cloudflare DNS "
+                    elif any("9.9.9.9" in s for s in active_s):
+                        provider_name = "Quad9 DNS "
+                    fix_desc = f"تحويل خادم DNS إلى {provider_name}({server_display}) وتحديث كاش النظام بنجاح."
                 else:
-                    fix_desc = f"تم تطبيق '{act_name}'. تحديث إعدادات DNS للنظام والتحقق من التفعيل."
+                    fix_desc = "تحديث إعدادات DNS للنظام والتأكد من سرعة الاستجابة."
             elif "throttle" in act_id or "qos" in act_id:
-                fix_desc = f"تم تطبيق '{act_name}'. تطبيق سياسة Windows NetQoS لتقييد الرفع الصادر."
+                fix_desc = f"تطبيق سياسة Windows NetQoS ({act_name}) للتحكم في استهلاك البرامج الخلفية."
             elif act_id == "flush_dns_cache":
-                fix_desc = f"تم تنفيذ '{act_name}' وتفريغ الذاكرة الوسيطة للعناوين بنجاح."
+                fix_desc = "تفريغ الذاكرة الوسيطة للعناوين (DNS Cache) وتحديث المسارات بنجاح."
             elif "renew" in act_id:
-                fix_desc = f"تم تنفيذ '{act_name}' وتجديد إيجار DHCP للمحول بنجاح."
+                fix_desc = "تجديد إيجار عنوان IP (DHCP) مع الراوتر المنزلي بنجاح."
+            elif "recheck_gateway" in act_id:
+                fix_desc = "إعادة فحص استجابة الراوتر وتأكيد سلامة المسار المحلي."
             else:
-                risk = getattr(audit_record, "risk_level", "")
-                r_val = getattr(risk, "value", str(risk))
-                fix_desc = f"تم تنفيذ إجراء: {act_name} (مستوى الأمان: {r_val})."
+                fix_desc = f"تم تنفيذ الإجراء التصحيحي ({act_name}) بنجاح."
         elif incident and getattr(incident, "recommended_actions", None):
             fix_desc = f"الإجراء الموصى به: {', '.join(incident.recommended_actions)}."
         else:

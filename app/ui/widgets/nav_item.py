@@ -1,7 +1,7 @@
 """Sidebar Navigation Item component for NetGuard AI.
 
 Clean monochrome line icon (18px, 1.6px stroke) + text label.
-Active: bg #1B1F22, text #ECEBE6, radius 10px.
+Active: raised surface, text #ECEBE6, 3px accent edge, radius 10px.
 Inactive: transparent, text #9AA0A6. Hover: text #ECEBE6.
 Strictly zero emoji, zero colored/filled icons.
 """
@@ -54,9 +54,10 @@ class NavItem(QPushButton):
         if self.isChecked():
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {tokens.SURFACE_HOVER};
+                    background-color: {tokens.SURFACE_SELECTED};
                     color: {tokens.TEXT};
                     border: none;
+                    border-right: 3px solid {tokens.ACCENT};
                     border-radius: {tokens.RADIUS_BUTTON}px;
                     padding-right: {pad_r};
                     padding-left: {pad_l};

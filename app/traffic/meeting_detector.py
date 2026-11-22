@@ -45,9 +45,19 @@ class MeetingDetector(QObject):
         "teams.exe": "Microsoft Teams",
         "ms-teams.exe": "Microsoft Teams",
         "webexmta.exe": "Cisco Webex",
+        "webex.exe": "Cisco Webex",
+        "ciscowebexstart.exe": "Cisco Webex",
+        "obs64.exe": "OBS Studio (تسجيل/بث)",
+        "obs32.exe": "OBS Studio",
         "slack.exe": "Slack Huddle",
         "discord.exe": "Discord",
     }
+
+    COMMON_VPN_KEYWORDS = [
+        "urban-vpn", "openvpn", "wireguard", "nordvpn", "protonvpn",
+        "warp-svc", "warp.exe", "tailscale", "cloudflared", "windscribe",
+        "expressvpn", "surfshark", "mullvad", "zerotier"
+    ]
 
     BROWSER_EXES = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"}
 
@@ -316,3 +326,124 @@ def generate_post_session_report(
         "verdict": verdict,
         "verdict_type": verdict_type,
     }
+
+
+class MeetingShield(QObject):
+    """Proactive early warning shield & 4-case fault attribution for active meetings/recording."""
+
+    early_warning_triggered = Signal(dict)  # Emits alert dict
+
+    COOLDOWN_SECONDS = 60.0
+
+    def __init__(self, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._last_alert_time: float = 0.0
+        self._last_alert_case: Optional[str] = None
+        self._last_wan_latency: float = 0.0
+
+    def reset_cooldown(self) -> None:
+        self._last_alert_time = 0.0
+        self._last_alert_case = None
+
+    def evaluate_telemetry(
+        self,
+        is_meeting_active: bool,
+        meeting_app_name: str = "",
+        meeting_process_name: str = "",
+        gateway_latency_ms: float = 0.0,
+        gateway_loss_ratio: float = 0.0,
+        wan_latency_ms: float = 0.0,
+        wan_loss_ratio: float = 0.0,
+        jitter_ms: float = 0.0,
+        active_processes: Optional[List[Any]] = None,
+        active_vpn_name: Optional[str] = None,
+        force_ignore_cooldown: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluates early instability BEFORE drop and attributes fault across 4 cases."""
+        if not is_meeting_active:
+            self._last_wan_latency = wan_latency_ms
+            return None
+
+        jump_ms = (wan_latency_ms - self._last_wan_latency) if self._last_wan_latency > 0 else 0.0
+        self._last_wan_latency = wan_latency_ms
+
+        has_latency_spike = wan_latency_ms > 120.0 or jump_ms > 60.0
+        has_jitter_spike = jitter_ms > 25.0
+        has_packet_loss = wan_loss_ratio >= 0.02 or gateway_loss_ratio > 0.0
+
+        # Check Case A: VPN interference
+        vpn_detected = active_vpn_name
+        if not vpn_detected and active_processes:
+            for p in active_processes:
+                pname = getattr(p, "name", "").lower()
+                for v_kw in MeetingDetector.COMMON_VPN_KEYWORDS:
+                    if v_kw in pname:
+                        vpn_detected = getattr(p, "name", pname)
+                        break
+                if vpn_detected:
+                    break
+
+        # Check Case B: Local bandwidth hog (> 5 Mbps)
+        hog_app = None
+        hog_bandwidth = 0.0
+        if active_processes:
+            meeting_lower = meeting_process_name.lower()
+            for p in active_processes:
+                pname = getattr(p, "name", "")
+                pname_lower = pname.lower()
+                if pname_lower == meeting_lower or getattr(p, "is_protected_system_process", False):
+                    continue
+                est_mb = float(getattr(p, "estimated_bandwidth_mbps", 0.0) or 0.0)
+                if est_mb >= 5.0 and est_mb > hog_bandwidth:
+                    hog_app = pname
+                    hog_bandwidth = est_mb
+
+        alert_case = None
+        message = ""
+        culprit = ""
+
+        # Attribution logic:
+        # Case A: Active VPN Interference
+        if vpn_detected:
+            alert_case = "A"
+            culprit = vpn_detected
+            message = f"تنبيه مبكر: يوجد برنامج VPN نشط على جهازك ({vpn_detected}) وقد يسبب بطء أو فصل الاجتماع/التسجيل — يُنصح بإيقافه أثناء المكالمة."
+
+        # Case B: Local Bandwidth Hog
+        elif hog_app and (has_latency_spike or has_jitter_spike or has_packet_loss or hog_bandwidth >= 8.0):
+            alert_case = "B"
+            culprit = hog_app
+            message = f"تنبيه قبل الانقطاع: برنامج ({hog_app}) على جهازك يستهلك سرعة الإنترنت حالياً مما قد يسبب تقطع الاجتماع أو التسجيل."
+
+        # Case C: User's Wi-Fi / Router (Gateway Loss/Spike)
+        elif (gateway_loss_ratio > 0.0 or gateway_latency_ms > 20.0) and (has_latency_spike or has_jitter_spike or has_packet_loss):
+            alert_case = "C"
+            culprit = "الراوتر / شبكة الواي فاي المحلية"
+            message = "تنبيه مبكر: عدم استقرار في شبكة الواي فاي أو الراوتر لديك — يُنصح بالاقتراب من الراوتر أو التوصيل بكابل LAN لتجنب فصل الاجتماع."
+
+        # Case D: User's ISP / Internet Line (Gateway OK, WAN Loss/Spike)
+        elif (gateway_latency_ms <= 15.0 and gateway_loss_ratio == 0.0) and (has_latency_spike or has_jitter_spike or has_packet_loss):
+            alert_case = "D"
+            culprit = "مزود الخدمة (ISP)"
+            message = "تنبيه مبكر: خط الإنترنت المحلي لديك (مزود الخدمة) يعاني من تذبذب/فقدان حزم حالياً وقد يتأثر الاجتماع أو التسجيل — التطبيق والنظام يعملان بشكل سليم والمشكلة من اتصال الإنترنت لديك."
+
+        if not alert_case:
+            return None
+
+        now_ts = time.time()
+        if not force_ignore_cooldown:
+            if (now_ts - self._last_alert_time) < self.COOLDOWN_SECONDS and self._last_alert_case == alert_case:
+                return None
+
+        self._last_alert_time = now_ts
+        self._last_alert_case = alert_case
+
+        alert_dict = {
+            "case": alert_case,
+            "message": message,
+            "culprit": culprit,
+            "timestamp": now_ts,
+            "meeting_app": meeting_app_name,
+        }
+        self.early_warning_triggered.emit(alert_dict)
+        return alert_dict

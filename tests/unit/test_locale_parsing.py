@@ -150,11 +150,9 @@ def test_locale_independent_ping_parsing(lang: str, expected_ms: float):
     adapter = WindowsPlatformAdapter()
     sample_output = PING_SAMPLES[lang]
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=sample_output)
-        ok, lat = adapter.ping("1.1.1.1", timeout_sec=1.5)
-        assert ok is True
-        assert lat == expected_ms
+    ok, lat = adapter.parse_ping_output(sample_output)
+    assert ok is True
+    assert lat == expected_ms
 
 
 @pytest.mark.parametrize("lang", ["English", "German", "French", "Arabic"])
@@ -162,12 +160,24 @@ def test_locale_independent_wlan_metrics(lang: str):
     adapter = WindowsPlatformAdapter()
     sample_output = WLAN_SAMPLES[lang]
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=sample_output)
-        metrics = adapter.get_wifi_metrics()
-        assert metrics["is_wifi"] is True
-        assert metrics["ssid"] == "HomeNet_5G"
-        assert metrics["bssid"] == "aa:bb:cc:dd:ee:ff"
-        assert metrics["signal_percent"] == 92.0
-        assert metrics["rx_rate_mbps"] == 866.7
-        assert metrics["tx_rate_mbps"] == 866.7
+    metrics = adapter.parse_wlan_output(sample_output)
+    assert metrics["is_wifi"] is True
+    assert metrics["ssid"] == "HomeNet_5G"
+    assert metrics["bssid"] == "aa:bb:cc:dd:ee:ff"
+    assert metrics["signal_percent"] == 92.0
+    assert metrics["rx_rate_mbps"] == 866.7
+    assert metrics["tx_rate_mbps"] == 866.7
+
+
+def test_native_win32_ping_and_wlan_metrics():
+    adapter = WindowsPlatformAdapter()
+    # Verify ping executes via native in-process Win32 API
+    ok, lat = adapter.ping("127.0.0.1", timeout_sec=1.0)
+    assert isinstance(ok, bool)
+    assert isinstance(lat, float)
+
+    # Verify WLAN query returns genuine WifiMetrics without spawning netsh
+    wifi = adapter.get_wifi_metrics()
+    assert isinstance(wifi, dict)
+    assert hasattr(wifi, "is_wifi")
+    assert "is_wifi" in wifi

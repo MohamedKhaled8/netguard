@@ -50,6 +50,8 @@ class AppSessionRecord(BaseModel):
     # Problems Detected & Autonomous Solutions Applied
     detected_issues: List[str] = Field(default_factory=list)
     preventive_actions: List[SessionPreventiveAction] = Field(default_factory=list)
+    early_warning: Optional[str] = None
+    early_warning_case: Optional[str] = None
 
     @property
     def duration_formatted(self) -> str:
@@ -150,6 +152,28 @@ class AppSessionTracker:
             self._active_sessions[key] = session.model_copy(
                 update={"preventive_actions": updated_actions}
             )
+
+    def set_early_warning(self, process_name: str, case: str, message: str) -> None:
+        """Sets early warning alert on an active session and records preventive action."""
+        key = process_name.lower()
+        if key in self._active_sessions:
+            session = self._active_sessions[key]
+            updated = session.model_copy(update={"early_warning": message, "early_warning_case": case})
+            self._active_sessions[key] = updated
+            self.add_preventive_action(
+                process_name=process_name,
+                title=f"درع الاجتماعات: رصد تنبيه مبكر (الحالة {case})",
+                detail=message,
+                impact="تنبيه استباقي لتفادي انقطاع الاتصال أو تأثر جودة الصوت والفيديو",
+            )
+
+    def clear_early_warning(self, process_name: str) -> None:
+        """Clears early warning alert when network stabilizes."""
+        key = process_name.lower()
+        if key in self._active_sessions:
+            session = self._active_sessions[key]
+            if session.early_warning:
+                self._active_sessions[key] = session.model_copy(update={"early_warning": None, "early_warning_case": None})
 
     def close_session(self, process_name: str) -> Optional[AppSessionRecord]:
         """Close an active session, compute final duration, and move to completed history."""

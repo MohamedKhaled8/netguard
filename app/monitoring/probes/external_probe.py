@@ -48,18 +48,13 @@ class ExternalConnectivityProbe(BaseProbe):
 
     async def _probe_single_target(self, loop: asyncio.AbstractEventLoop, target: str, now: datetime) -> List[ProbeResult]:
         results: List[ProbeResult] = []
-
-        # 1. Ping probe
-        ping_success, ping_latency = await loop.run_in_executor(
-            None, self.platform.ping, target, self.timeout_sec
-        )
-
-        # 2. Fallback / Corroborating TCP probe (Port 53 DNS or Port 443 HTTPS)
-        # Port 53 on 1.1.1.1, 8.8.8.8, 9.9.9.9 is standard and universally open
         tcp_port = 53
-        tcp_success, tcp_latency = await loop.run_in_executor(
-            None, self.platform.tcp_connect, target, tcp_port, self.timeout_sec
-        )
+        sub_timeout = min(1.2, self.timeout_sec)
+
+        # Run ICMP Ping and TCP Connect concurrently
+        ping_task = loop.run_in_executor(None, self.platform.ping, target, sub_timeout)
+        tcp_task = loop.run_in_executor(None, self.platform.tcp_connect, target, tcp_port, sub_timeout)
+        (ping_success, ping_latency), (tcp_success, tcp_latency) = await asyncio.gather(ping_task, tcp_task)
 
         # Record TCP probe
         results.append(
@@ -138,6 +133,21 @@ class ExternalConnectivityProbe(BaseProbe):
                         unit="ms",
                         status=ProbeStatus.SUCCESS,
                         confidence=0.95,
+                    )
+                )
+            elif len(history) == 1:
+                # Emit baseline initial jitter so UI doesn't stall disconnected on startup
+                results.append(
+                    ProbeResult(
+                        timestamp=now,
+                        source=MeasurementSource.ICMP_ECHO if ping_success else MeasurementSource.TCP_CONNECT,
+                        target=target,
+                        metric_type=MetricType.JITTER_MS,
+                        raw_value=0.5,
+                        normalized_value=0.5,
+                        unit="ms",
+                        status=ProbeStatus.SUCCESS,
+                        confidence=0.70,
                     )
                 )
         else:

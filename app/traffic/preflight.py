@@ -72,7 +72,18 @@ class MeetingPreflightChecker:
             issues.append(f"استجابة DNS بطيئة ({dns_ms:.0f} ms)")
 
         # 3. Wi-Fi signal quality
-        wifi_sig = self.platform.get_wifi_signal_strength()
+        wifi_sig = None
+        if hasattr(self.platform, "get_wifi_signal_strength"):
+            try:
+                wifi_sig = self.platform.get_wifi_signal_strength()
+            except Exception:
+                pass
+        elif hasattr(self.platform, "get_wifi_metrics"):
+            try:
+                m = self.platform.get_wifi_metrics()
+                wifi_sig = m.get("signal_percent") if m and m.get("is_wifi") else None
+            except Exception:
+                pass
         if wifi_sig is not None and wifi_sig < 50.0:
             issues.append(f"إشارة الواي فاي ضعيفة ({wifi_sig:.0f}%) — اقترب من الراوتر")
 

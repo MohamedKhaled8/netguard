@@ -1,0 +1,11 @@
+# NetGuard AI - Production Runtime Dependencies
+dnspython>=2.9.2
+numpy>=2.5.4
+psutil>=7.2.2
+pydantic>=2.14.3
+pyqtgraph>=0.14.0
+pyside6>=6.12.0
+pytest>=9.2.0
+pytest-asyncio>=1.5.0
+pyyaml>=6.0.3
+pyinstaller>=6.22.3

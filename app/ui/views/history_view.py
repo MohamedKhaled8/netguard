@@ -43,6 +43,15 @@ CAUSE_TITLES_AR: dict[Any, str] = {
     ProbableCause.UNKNOWN_ANOMALY: "رصد تذبذب غير معتاد في معايير الشبكة",
 }
 
+ACTION_NAMES_AR: dict[str, str] = {
+    "inspect_bufferbloat": "تدقيق طوابير حزم الراوتر والضغط المحلي",
+    "switch_dns_resolver": "تحويل خادم DNS إلى بديل أسرع ومستقر",
+    "flush_dns_cache": "تفريغ وتحديث كاش الـ DNS",
+    "renew_ip_lease": "تجديد عنوان IP / DHCP عبر الراوتر",
+    "recheck_gateway": "إعادة فحص استجابة البوابة المحلية (الراوتر)",
+    "inspect_cellular_signal": "فحص جودة واستقرار الإشارة اللاسلكية",
+}
+
 
 class HistoryEventItem(QFrame):
     """Single incident entry in the history log."""
@@ -62,7 +71,7 @@ class HistoryEventItem(QFrame):
         self.setStyleSheet(f"""
             QFrame#HistoryEventItem {{
                 background-color: {tokens.SURFACE_INSET};
-                border: 1px solid {tokens.LINE};
+                border: none;
                 border-radius: {tokens.RADIUS_INNER}px;
                 padding: 12px 16px;
             }}
@@ -141,6 +150,11 @@ class HistoryView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+        scroll.viewport().setAutoFillBackground(True)
+        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+        scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+        scroll.verticalScrollBar().setSingleStep(25)
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
@@ -279,33 +293,85 @@ class HistoryView(QWidget):
             self.events_list_layout.addWidget(empty_card)
             return
 
-        for inc in incidents[:30]:
-            if hasattr(inc, "timestamp"):
-                ts = inc.timestamp
-                time_str = ts.astimezone().strftime("%H:%M") if ts.tzinfo else ts.strftime("%H:%M")
-            else:
-                time_str = "—"
+        # Group and deduplicate consecutive / overlapping incidents
+        def _to_local_naive(d: Any) -> datetime:
+            if not isinstance(d, datetime):
+                return datetime.now()
+            if d.tzinfo is not None:
+                return d.astimezone().replace(tzinfo=None)
+            return d
 
+        grouped_incidents = []
+        for inc in incidents:
+            ts = getattr(inc, "timestamp", None)
+            if not ts:
+                continue
+            ts_local = _to_local_naive(ts)
             cause_enum = getattr(inc, "probable_cause", None)
-            title = CAUSE_TITLES_AR.get(cause_enum, "رصد عطل في الشبكة")
-            cause_str = getattr(inc, "explanation", "") or "تذبذب عابر في معايير الشبكة"
-            actions = getattr(inc, "recommended_actions", [])
-            if actions:
-                action_str = " · ".join(actions)
-            elif getattr(inc, "auto_remediation_permitted", False):
+            occ = getattr(inc, "occurrence_count", 1) or 1
+            f_det = getattr(inc, "first_detected", None)
+            l_obs = getattr(inc, "last_observed", None)
+            f_dt = _to_local_naive(f_det) if f_det else ts_local
+            l_dt = _to_local_naive(l_obs) if l_obs else ts_local
+
+            matched = False
+            for grp in grouped_incidents:
+                if grp["cause"] == cause_enum:
+                    if abs((ts_local - grp["last_dt"]).total_seconds()) <= 300:
+                        grp["count"] += occ
+                        grp["first_dt"] = min(grp["first_dt"], f_dt)
+                        grp["last_dt"] = max(grp["last_dt"], l_dt)
+                        if getattr(inc, "severity", None) == DiagnosisSeverity.CRITICAL:
+                            grp["is_resolved"] = False
+                        matched = True
+                        break
+            if not matched:
+                actions = getattr(inc, "recommended_actions", [])
+                auto_rem = getattr(inc, "auto_remediation_permitted", False)
+                sev = getattr(inc, "severity", None)
+                grouped_incidents.append({
+                    "cause": cause_enum,
+                    "first_dt": f_dt,
+                    "last_dt": l_dt,
+                    "count": occ,
+                    "explanation": getattr(inc, "explanation", "") or "تذبذب عابر في معايير الشبكة",
+                    "actions": actions,
+                    "auto_remediation": auto_rem,
+                    "is_resolved": (sev != DiagnosisSeverity.CRITICAL) if sev else True,
+                })
+
+        for grp in grouped_incidents[:30]:
+            f_str = grp["first_dt"].strftime("%H:%M")
+            l_str = grp["last_dt"].strftime("%H:%M")
+            time_str = f_str if f_str == l_str else f"{f_str} – {l_str}"
+
+            base_title = CAUSE_TITLES_AR.get(grp["cause"], "رصد عطل في الشبكة")
+            if grp["count"] > 1:
+                title = f"{base_title} (تكرر {grp['count']} مرات)"
+            else:
+                title = base_title
+
+            dur_sec = max(0.0, (grp["last_dt"] - grp["first_dt"]).total_seconds())
+            if dur_sec < 5:
+                duration_str = "لحظي (< 5 ثوانٍ)"
+            elif dur_sec < 60:
+                duration_str = f"{int(round(dur_sec))} ثانية"
+            else:
+                duration_str = f"{int(round(dur_sec / 60))} دقيقة"
+
+            if grp["actions"]:
+                action_str = " · ".join(ACTION_NAMES_AR.get(a, a) for a in grp["actions"])
+            elif grp["auto_remediation"]:
                 action_str = "تم تفعيل المعالجة التلقائية وحماية الاتصال"
             else:
-                action_str = "مراقبة مستمرة لتذبذب الجودة"
-
-            sev = getattr(inc, "severity", None)
-            is_resolved = (sev != DiagnosisSeverity.CRITICAL) if sev else True
+                action_str = "مراقبة مستمرة لتذبذب الجودة دون حاجة لتدخل"
 
             item = HistoryEventItem(
                 time_str,
                 title,
-                cause_str,
+                grp["explanation"],
                 action_str,
-                "لحظي",
-                is_resolved=is_resolved,
+                duration_str,
+                is_resolved=grp["is_resolved"],
             )
             self.events_list_layout.addWidget(item)

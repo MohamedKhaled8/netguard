@@ -11,7 +11,7 @@ from app.ui import tokens
 
 
 class PrimaryButton(QPushButton):
-    """Primary action button with solid accent (ivory) background and dark text."""
+    """Primary action. Orange fill, near-black label (white fails contrast)."""
 
     def __init__(self, text: str = "", parent=None) -> None:
         super().__init__(text, parent)
@@ -21,7 +21,7 @@ class PrimaryButton(QPushButton):
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {tokens.ACCENT};
-                color: {tokens.BG};
+                color: {tokens.ON_ACCENT};
                 border: 1px solid {tokens.ACCENT};
                 border-radius: {tokens.RADIUS_BUTTON}px;
                 padding: 0px 16px;
@@ -30,12 +30,12 @@ class PrimaryButton(QPushButton):
                 min-width: 104px;
             }}
             QPushButton:hover {{
-                background-color: #DCDBCF;
-                border-color: #DCDBCF;
+                background-color: {tokens.ACCENT_HOVER};
+                border-color: {tokens.ACCENT_HOVER};
             }}
             QPushButton:pressed {{
-                background-color: #C8C7BE;
-                border-color: #C8C7BE;
+                background-color: {tokens.ACCENT_PRESSED};
+                border-color: {tokens.ACCENT_PRESSED};
             }}
             QPushButton:disabled {{
                 background-color: {tokens.BAR_FUTURE};
