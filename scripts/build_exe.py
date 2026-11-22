@@ -36,6 +36,8 @@ def build():
         "--hidden-import=dns",
         "--hidden-import=yaml",
         "--hidden-import=sqlite3",
+        "--exclude-module=tools",
+        "--exclude-module=tools.publish_update",
     ]
 
     print("Running command:", " ".join(cmd))

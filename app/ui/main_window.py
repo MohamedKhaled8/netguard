@@ -1132,6 +1132,49 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
             elif curr_widget == self.view_remediation:
                 self._async_refresh_audit()
 
+            # Meeting Shield proactive early warning check (when meeting is active)
+            try:
+                tracker = getattr(self.traffic_controller, "session_tracker", None)
+                if tracker and tracker.has_active_conferencing():
+                    active_meetings = tracker.get_active_sessions()
+                    if active_meetings:
+                        m_sess = active_meetings[0]
+                        gw_lat_m = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
+                        gw_lat = gw_lat_m.raw_value if gw_lat_m and gw_lat_m.raw_value is not None else 0.0
+                        gw_loss_m = obs.get_latest_measurement(MetricType.GATEWAY_PACKET_LOSS)
+                        gw_loss = gw_loss_m.raw_value if gw_loss_m and gw_loss_m.raw_value is not None else 0.0
+
+                        wan_lat_m = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
+                        wan_lat = wan_lat_m.raw_value if wan_lat_m and wan_lat_m.raw_value is not None else 0.0
+                        wan_loss_m = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
+                        wan_loss = wan_loss_m.raw_value if wan_loss_m and wan_loss_m.raw_value is not None else 0.0
+
+                        jit_m = obs.get_latest_measurement(MetricType.JITTER_MS)
+                        jit = jit_m.raw_value if jit_m and jit_m.raw_value is not None else 0.0
+
+                        if not hasattr(self, "_meeting_shield"):
+                            from app.traffic.meeting_detector import MeetingShield
+                            self._meeting_shield = MeetingShield(self)
+
+                        procs = getattr(self.view_traffic, "_last_profiles_cache", [])
+                        alert = self._meeting_shield.evaluate_telemetry(
+                            is_meeting_active=True,
+                            meeting_app_name=m_sess.app_name,
+                            meeting_process_name=m_sess.process_name,
+                            gateway_latency_ms=gw_lat,
+                            gateway_loss_ratio=gw_loss,
+                            wan_latency_ms=wan_lat,
+                            wan_loss_ratio=wan_loss,
+                            jitter_ms=jit,
+                            active_processes=procs,
+                        )
+                        if alert:
+                            tracker.set_early_warning(m_sess.process_name, alert["case"], alert["message"])
+                            if hasattr(self, "view_traffic"):
+                                self.view_traffic._refresh_sessions_ui()
+            except Exception as e:
+                logger.debug("Meeting shield check non-fatal error: %s", e)
+
             # Refresh 48-slot day strip every 120 seconds
             self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
             if self.ticker_counter % 120 == 0:
