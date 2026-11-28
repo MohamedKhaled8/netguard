@@ -62,6 +62,7 @@ ALL_SEVEN_SCREENS = {
     "Traffic",
     "History",
     "Settings",
+    "WifiRouter",
 }
 
 
@@ -124,20 +125,32 @@ def resolve_control_widget(win: MainWindow, row: Dict[str, str]) -> Optional[QWi
     control = row.get("Control", "").strip()
 
     if screen == "Sidebar":
-        if "الرئيسية" in control:
+        if "الرئيسية" in control or "Dashboard" in control:
             return win.btn_dash
-        if "التشخيص" in control:
-            return win.btn_diag
+        if "حماية الاجتماعات" in control or "Meeting Guard" in control:
+            return win.btn_meeting_guard
+        if "التشخيص" in control or "Reports" in control or "التقارير" in control:
+            return win.btn_reports
         if "الإصلاح التلقائي" in control:
             return win.btn_rem
         if "DNS" in control:
             return win.btn_dns
-        if "حركة البيانات" in control:
+        if "مراقب الشبكة" in control or "حركة البيانات" in control:
             return win.btn_traffic
+        if "ذكاء الواي فاي" in control or "Wi-Fi Intelligence" in control:
+            return win.btn_wifi
+        if "إدارة الراوتر" in control or "Router Management" in control:
+            return win.btn_router
+        if "جودة الإنترنت" in control or "Internet Quality" in control:
+            return win.btn_quality
         if "السجل" in control:
             return win.btn_hist
         if "الإعدادات" in control:
             return win.btn_settings
+        if "حول البرنامج" in control or "About" in control:
+            return win.btn_about
+        if "الواي فاي والراوتر" in control:
+            return win.btn_wifi_router
         if "تلقائي" in control:
             return win.sidebar.opt_auto
         if "بموافقتي" in control:
@@ -162,8 +175,8 @@ def resolve_control_widget(win: MainWindow, row: Dict[str, str]) -> Optional[QWi
             return win.view_dashboard.timeline_panel.btn_evidence
         if "تراجع عن الإصلاح" in control:
             return win.view_dashboard.timeline_panel.btn_rollback
-        if "مسار اتصالك" in control:
-            return win.view_dashboard.flow_path
+        if "مسار اتصالك" in control or "طوبولوجيا" in control:
+            return win.view_dashboard.topology_widget
         if "من يستهلك" in control:
             return win.view_dashboard.consumers_panel
         if "اعتماد خادم" in control or "استعادة الافتراضي" in control:
@@ -232,6 +245,42 @@ def resolve_control_widget(win: MainWindow, row: Dict[str, str]) -> Optional[QWi
             return getattr(win.view_settings, "toggle_notif", None)
         if "حفظ الإعدادات" in control:
             return win.view_settings.apply_btn
+
+    elif screen == "WifiRouter":
+        if "تحديث قياسات الواي فاي" in control or "تحسين القناة" in control:
+            return win.view_wifi.btn_rf_refresh
+        if "التشخيص المتسلسل" in control:
+            return win.view_quality.btn_run_net_diag
+        if "مقارنة DNS" in control:
+            return win.view_dns.benchmark_btn
+        if "اختبار السرعة" in control:
+            return win.view_quality.btn_run_speed
+        if "Bufferbloat" in control:
+            return win.view_quality.btn_run_bufferbloat
+        if "اكتشاف البوابة" in control:
+            return win.view_router.btn_discover
+        if "فحص شامل لصحة" in control:
+            return win.view_reports.btn_run_full_investigation
+        if "محاولة اتصال" in control:
+            return win.view_router.btn_login_read
+        if "DOM" in control:
+            return win.view_router.btn_dom_inspect
+        if "مسح بيانات الاعتماد" in control:
+            return win.view_router.btn_forget
+        if "تصدير تقرير Markdown" in control:
+            return win.view_reports.btn_export_md
+
+    elif screen == "MeetingGuard":
+        if "Kill Switch" in control or "إيقاف فوري" in control:
+            return win.view_meeting_guard.btn_kill_switch
+        if "مصفوفة سياسات" in control:
+            return win.view_meeting_guard.qos_matrix
+        if "دورة حياة" in control:
+            return win.view_meeting_guard.lifecycle_stepper
+
+    elif screen == "About":
+        if "حالة الوحدات" in control or "الصلاحيات" in control:
+            return win.view_about.badge_elevated
 
     return None
 

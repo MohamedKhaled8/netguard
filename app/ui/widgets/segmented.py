@@ -37,7 +37,8 @@ class SegmentedControl(QFrame):
         layout.setSpacing(4)
 
         for i, opt in enumerate(options):
-            btn = QPushButton(opt)
+            btn = QPushButton(tokens.bidi_isolate(opt))
+            btn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
             btn.setFont(tokens.get_sans_font(13, 500))
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFixedHeight(36)

@@ -155,16 +155,27 @@ class RemediationOrchestrator:
                 )
                 return None
 
-        # Meeting Guard Safety Gate: Never drop active streaming/conferencing sockets
+        # Meeting Guard Safety Gate: Strictly freeze DNS cache flush, resolver switch, adapter resets, and DHCP renewals
         if self.meeting_guard_check and self.meeting_guard_check():
-            if selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE or selected_action.action_id in self.DRASTIC_ACTION_IDS:
+            frozen_actions = {
+                "flush_dns_cache",
+                "switch_dns_resolver",
+                "renew_ip_lease",
+                "reset_adapter",
+                "benchmark_dns",
+            }
+            if (
+                selected_action.action_id in frozen_actions
+                or selected_action.risk_level == RiskLevel.LEVEL_3_DISRUPTIVE
+                or selected_action.action_id in self.DRASTIC_ACTION_IDS
+            ):
                 logger.warning(
-                    "Meeting Guard Safety: Disruptive action '%s' blocked to protect active Zoom/Meet call",
+                    "Meeting Guard Safety Freeze: Network action '%s' blocked to protect active meeting",
                     selected_action.action_id,
                 )
                 await self.event_bus.publish(EventTopics.REMEDIATION_ACTION_SUPPRESSED, {
                     "action_id": selected_action.action_id,
-                    "reason": "حماية مكالمة الفيديو النشطة: تم تأجيل الإجراء المربك لضمان عدم انقطاع البث والصوت.",
+                    "reason": "حماية مكالمة الفيديو النشطة: تم تجميد تغييرات DNS وتجديد IP وإعادة تشغيل المحول أثناء الاجتماع.",
                 })
                 return None
 

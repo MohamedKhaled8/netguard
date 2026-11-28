@@ -60,13 +60,13 @@ class PathNodeButton(QFrame):
         top_row.setContentsMargins(0, 0, 0, 0)
 
         self.lbl_idx = QLabel(index_str)
-        self.lbl_idx.setFont(tokens.get_mono_font(11, 400))
+        self.lbl_idx.setFont(tokens.get_mono_font(12, 400))
         self.lbl_idx.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         top_row.addWidget(self.lbl_idx)
 
         top_row.addStretch()
 
-        self.dot_widget = QLabel()
+        self.dot_widget = QFrame()
         self.dot_widget.setFixedSize(7, 7)
         top_row.addWidget(self.dot_widget)
         layout.addLayout(top_row)
@@ -92,7 +92,7 @@ class PathNodeButton(QFrame):
         self.lbl_val.setStyleSheet(f"color: {tokens.TEXT};")
 
         self.lbl_unit = QLabel("ms")
-        self.lbl_unit.setFont(tokens.get_sans_font(11, 400))
+        self.lbl_unit.setFont(tokens.get_sans_font(12, 400))
         self.lbl_unit.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         lat_row.addWidget(self.lbl_val)

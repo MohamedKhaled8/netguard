@@ -49,16 +49,19 @@ def test_all_views_and_main_window(qapp):
     net_app = create_application()
     win = MainWindow(application=net_app)
     assert win is not None
-    assert win.stack.count() == 7
+    assert win.stack.count() == 10
 
     # Trigger UI tick
     win._on_ui_tick()
 
-    # Switch views
-    win._switch_view(1, win.btn_diag)
-    assert win.stack.currentIndex() == 1
+    # Switch views across canonical 10 sections
+    win._switch_view(7, win.btn_reports)
+    assert win.stack.currentIndex() == 7
     win._switch_view(0, win.btn_dash)
     assert win.stack.currentIndex() == 0
+    win.close()
+    win.deleteLater()
+    qapp.processEvents()
 
 
 def test_traffic_view_and_session_cards(qapp):
@@ -238,12 +241,16 @@ def test_dashboard_telemetry_speed_test_timestamp(qapp):
 def test_speed_test_scan_signal_and_window_integration(qapp):
     net_app = create_application()
     win = MainWindow(application=net_app)
-
-    assert win._last_speed_test_time is None
-    win._on_speed_test_done("18:00")
-    assert win._last_speed_test_time == "18:00"
-    assert win.view_dashboard._last_speed_test_time == "18:00"
-    assert "آخر فحص: 18:00" in win.view_dashboard.metrics_strip.cell_download.footer_lbl.text()
+    try:
+        assert win._last_speed_test_time is None
+        win._on_speed_test_done("18:00")
+        assert win._last_speed_test_time == "18:00"
+        assert win.view_dashboard._last_speed_test_time == "18:00"
+        assert "آخر فحص: 18:00" in win.view_dashboard.metrics_strip.cell_download.footer_lbl.text()
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
 
 
 def test_dashboard_telemetry_negative_bandwidth(qapp):

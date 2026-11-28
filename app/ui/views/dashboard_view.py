@@ -1,930 +1,984 @@
-"""Dashboard View for NetGuard AI.
+"""Redesigned Network Engineering Overview Dashboard for NetGuard AI.
 
-100% pixel-faithful reproduction of the approved reference design:
-- Header Row: Live scan status + 'تصدير تقرير' (Secondary) & 'افحص الآن' (Primary)
-- Hero: Big Arabic title + explanatory paragraph + 48-bar DayStrip (00:00 -> 24:00)
-- Metrics Strip: 4 hairline-separated cells (زمن الاستجابة, التذبذب, فقدان الحزم, سرعة التنزيل)
-- Row A: 240px LatencyChart (Flex 2) + 4-step TimelinePanel (Flex 1)
-- مسار اتصالك: 5-node interactive network flow path with traveling dots & detail card
-- Row B: Bandwidth Consumers list + DNS Recommendation with comparison bars
-- Footer note: Centered graphite caption
-Full responsive reflow across >=1100px, 700-1099px, and <700px breakpoints.
+Presents genuine real-time network health, performance telemetry, live traffic
+throughput, interactive hop topology, Meeting Guard/QoS state, Wi-Fi & Router
+summary, DNS health, actionable recommendations, and recent diagnostic events.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 import math
-import time
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QFrame,
     QScrollArea,
-    QGridLayout,
     QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QTimer, Signal
 
+from app.core.models.metrics import Diagnosis, DiagnosisSeverity, MetricType, ProbableCause
+from app.core.network_state import GlobalNetworkStateStore, normalize_network_identity_payload
 from app.core.thresholds import DEFAULT_THRESHOLDS
 from app.ui import tokens
-from app.ui.widgets.buttons import PrimaryButton, SecondaryButton
-from app.ui.widgets.day_strip import DayStrip
-from app.ui.widgets.metric_cell import MetricsStrip, MetricCell
-from app.ui.widgets.latency_chart import LatencyChart
-from app.ui.widgets.timeline import TimelinePanel
-from app.ui.widgets.flow_path import FlowPathPanel
-from app.ui.widgets.bar_row import TrafficConsumersPanel, DNSRecommendationPanel
-from app.ui.widgets.network_info_strip import NetworkInfoStrip
-from app.ui.widgets.scroll_forwarder import make_scroll_transparent
-from app.core.models.metrics import MetricType, Diagnosis, ProbableCause, ProbeStatus
-from app.dns.state import DnsStateManager
 from app.ui.animation_clock import AnimationMasterClock
+from app.ui.i18n import get_language, language_manager, tr
+from app.ui.icons import create_icon
+from app.ui.widgets.bar_row import DNSRecommendationPanel, TrafficConsumersPanel
+from app.ui.widgets.base_panel import Panel
+from app.ui.widgets.buttons import GhostButton, PrimaryButton, SecondaryButton
+from app.ui.widgets.chip import Chip
+from app.ui.widgets.circular_gauge import CircularGauge
+from app.ui.widgets.day_strip import DayStrip
+from app.ui.widgets.flow_path import FlowPathPanel
+from app.ui.widgets.latency_chart import LatencyChart
+from app.ui.widgets.metric_cell import MetricsStrip
+from app.ui.widgets.network_info_strip import NetworkInfoStrip
+from app.ui.widgets.status_badge import StatusBadge
+from app.ui.widgets.timeline import TimelinePanel
+from app.ui.widgets.topology_widget import NetworkTopologyWidget
+from app.ui.widgets.traffic_chart import TrafficThroughputChart
+
+
+def compute_genuine_health_score(
+    *,
+    gw_ms: Optional[float] = None,
+    ext_ms: Optional[float] = None,
+    loss_pct: Optional[float] = None,
+    jitter_ms: Optional[float] = None,
+    dns_ms: Optional[float] = None,
+    wifi_pct: Optional[float] = None,
+    internet_available: Optional[bool] = None,
+    gateway_reachable: Optional[bool] = None,
+) -> Tuple[Optional[int], str, str]:
+    """Compute a documented, deterministic network health score (0-100).
+
+    Returns ``(score_or_none, status_enum, reason_summary)``.
+    Never invents a default high score when no real probes exist or internet is unreachable.
+    """
+    if gw_ms is None and ext_ms is None and dns_ms is None and wifi_pct is None:
+        if gateway_reachable is False:
+            return 20, tokens.SystemStatus.FAILED, tr("dash.note_gw_high")
+        if internet_available is False:
+            return 35, tokens.SystemStatus.FAILED, tr("dash.note_ext_high")
+        return None, tokens.SystemStatus.WAITING, tr("dash.awaiting_probes")
+
+    if gateway_reachable is False:
+        return 25, tokens.SystemStatus.FAILED, tr("dash.note_gw_high")
+
+    if internet_available is False or (loss_pct is not None and loss_pct >= 99.0):
+        return 35, tokens.SystemStatus.FAILED, tr("dash.note_packet_loss")
+
+    score = 100.0
+    notes: List[str] = []
+
+    if gw_ms is not None and gw_ms > 15.0:
+        penalty = min(22.0, (gw_ms - 15.0) * 0.5)
+        score -= penalty
+        if gw_ms >= 35.0:
+            notes.append(tr("dash.note_gw_high"))
+
+    if ext_ms is not None:
+        warn_ms = float(DEFAULT_THRESHOLDS.latency.external_warning_ms)
+        if ext_ms > warn_ms:
+            penalty = min(30.0, (ext_ms - warn_ms) * 0.25)
+            score -= penalty
+            notes.append(tr("dash.note_ext_high"))
+
+    if loss_pct is not None and loss_pct > 0.0:
+        penalty = min(45.0, loss_pct * 9.0)
+        score -= penalty
+        notes.append(tr("dash.note_packet_loss"))
+
+    if jitter_ms is not None and jitter_ms > 15.0:
+        penalty = min(15.0, (jitter_ms - 15.0) * 0.5)
+        score -= penalty
+
+    if dns_ms is not None and dns_ms > 45.0:
+        penalty = min(14.0, (dns_ms - 45.0) * 0.12)
+        score -= penalty
+        if dns_ms >= 80.0:
+            notes.append(tr("dash.note_dns_slow"))
+
+    if wifi_pct is not None and wifi_pct < 60.0:
+        penalty = min(18.0, (60.0 - wifi_pct) * 0.45)
+        score -= penalty
+        notes.append(tr("dash.note_wifi_weak"))
+
+    final = max(0, min(100, int(round(score))))
+    if final >= 80:
+        status = tokens.SystemStatus.HEALTHY
+        summary = tr("dash.health_good")
+    elif final >= 55:
+        status = tokens.SystemStatus.WARNING
+        summary = " · ".join(notes[:2]) if notes else tr("dash.health_degraded")
+    else:
+        status = tokens.SystemStatus.FAILED
+        summary = " · ".join(notes[:2]) if notes else tr("dash.health_critical")
+    return final, status, summary
 
 
 class StatusIndicatorDot(QWidget):
-    """8px dot with continuous pulsing ring, reflecting active health/warning state."""
+    """Pulsing live connection dot."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._pulse_phase = 0.0
-        self._status_color = tokens.STATUS_OK
-        self._is_paused = False
+        self.setFixedSize(16, 16)
+        self.color_str = tokens.STATUS_OK
+        self._status_color = self.color_str
+        self._phase = 0.0
+        self._paused = False
         if tokens.ANIMATIONS_ENABLED:
             AnimationMasterClock.get_instance().subscribe(self._tick)
 
     def set_status(self, color: str = tokens.STATUS_OK) -> None:
-        if self._status_color != color:
+        if self.color_str != color or self._status_color != color:
+            self.color_str = color
             self._status_color = color
             self.update()
 
     def set_paused(self, paused: bool) -> None:
-        self._is_paused = paused
+        self._paused = paused
         if paused:
             AnimationMasterClock.get_instance().unsubscribe(self._tick)
         else:
             AnimationMasterClock.get_instance().subscribe(self._tick)
 
     def _tick(self, delta_ms: float = 50.0) -> None:
-        if getattr(self, "_is_paused", False):
+        if self._paused or AnimationMasterClock.get_instance().is_low_resource_mode:
             return
-        clock = AnimationMasterClock.get_instance()
-        if clock.is_low_resource_mode:
-            return
-        increment = 0.028 * (delta_ms / 50.0)
-        self._pulse_phase = (self._pulse_phase + increment) % 1.0
+        self._phase = (self._phase + 0.04 * (delta_ms / 50.0)) % 1.0
         self.update()
 
     def paintEvent(self, event) -> None:
-        from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+        from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-
-        center_x = 9.0
-        center_y = 9.0
-
-        if tokens.ANIMATIONS_ENABLED:
-            ring_radius = 4.0 + self._pulse_phase * 4.5
-            ring_alpha = int(255 * (0.6 * (1.0 - self._pulse_phase)))
-            ring_col = QColor(self._status_color)
-            ring_col.setAlpha(max(0, min(255, ring_alpha)))
-            painter.setPen(QPen(ring_col, 1.2))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(center_x - ring_radius, center_y - ring_radius, ring_radius * 2, ring_radius * 2)
-
+        c = QColor(self.color_str)
+        ring = QColor(self.color_str)
+        ring.setAlpha(int(120 * (1.0 - self._phase)))
+        painter.setPen(QPen(ring, 1.2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(self.rect().center(), 4.5 + self._phase * 3.5, 4.5 + self._phase * 3.5)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(self._status_color)))
-        painter.drawEllipse(center_x - 4.0, center_y - 4.0, 8.0, 8.0)
+        painter.setBrush(QBrush(c))
+        painter.drawEllipse(self.rect().center(), 4.5, 4.5)
 
 
 class DashboardView(QWidget):
-    """Main Dashboard View matching the reference specification."""
+    """Redesigned Dashboard Overview."""
 
     quick_scan_requested = Signal()
-    export_report_requested = Signal()
     meeting_preflight_requested = Signal()
+    export_report_requested = Signal()
+    navigate_requested = Signal(int)
 
     def set_animations_paused(self, paused: bool) -> None:
-        if hasattr(self, "status_dot") and hasattr(self.status_dot, "set_paused"):
-            self.status_dot.set_paused(paused)
-        if hasattr(self, "flow_path") and hasattr(self.flow_path, "set_paused"):
-            self.flow_path.set_paused(paused)
-        if hasattr(self, "latency_chart") and hasattr(self.latency_chart, "set_paused"):
+        if hasattr(self, "latency_chart"):
             self.latency_chart.set_paused(paused)
+        if hasattr(self, "flow_path"):
+            self.flow_path.set_paused(paused)
+        if hasattr(self, "hero_dot"):
+            self.hero_dot.set_paused(paused)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._last_scan_seconds = 0
-        self._last_speed_test_time: Optional[str] = None
-        self._current_layout_mode = "desktop"
+        self._outer_v = QVBoxLayout(self)
+        self._outer_v.setContentsMargins(0, 0, 0, 0)
+        self._outer_v.setSpacing(0)
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        # Scroll area for vertical content with hardware blitting optimization
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.horizontalScrollBar().setEnabled(False)
-        self.scroll.horizontalScrollBar().setMaximum(0)
         self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
-        self.scroll.viewport().setAutoFillBackground(True)
-        self.scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
-        self.scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
-        self.scroll.verticalScrollBar().setSingleStep(25)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet("background: transparent; border: none;")
+        self._outer_v.addWidget(self.scroll)
 
-        self.content_widget = QWidget()
-        self.content_widget.setStyleSheet(f"background-color: {tokens.BG};")
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(
-            20, 20, 20, 24
+        self._last_speed_test_time: Optional[str] = None
+        self._last_speed_test_dt: Optional[datetime] = None
+        self._last_obs: Any = None
+        self._last_diag: Optional[Diagnosis] = None
+        self._last_net_info: Dict[str, Any] = {}
+        self._network_info: Dict[str, Any] = {}
+        self._last_dns_ms: Optional[float] = None
+        self._last_dns_ip: str = "—"
+        self._last_dns_name: str = "—"
+        self._last_gw_ms: Optional[float] = None
+        self._last_ext_ms: Optional[float] = None
+        self._last_wifi_pct: Optional[float] = None
+        self._last_connected_devices: Optional[int] = None
+        self._layout_mode: str = "desktop"
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        self.container_widget = container
+
+        outer_layout = QHBoxLayout(container)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setAlignment(Qt.AlignHCenter)
+
+        self.content_holder = QWidget()
+        self.content_holder.setMaximumWidth(tokens.MAX_CONTENT_WIDTH)
+        self.content_holder.setStyleSheet("background: transparent;")
+
+        self.root_layout = QVBoxLayout(self.content_holder)
+        self.root_layout.setContentsMargins(24, 20, 24, 32)
+        self.root_layout.setSpacing(16)
+
+        outer_layout.addWidget(self.content_holder)
+        self.scroll.setWidget(container)
+
+        # ------------------------------------------------------------------
+        # 1. Hero Overview Panel (Health Gauge + Live Network Summary + Actions)
+        # ------------------------------------------------------------------
+        hero_card = QFrame()
+        hero_card.setObjectName("DashHeroCard")
+        hero_card.setStyleSheet(
+            f"""
+            QFrame#DashHeroCard {{
+                background-color: {tokens.SURFACE};
+                border: 1px solid {tokens.LINE};
+                border-radius: {tokens.RADIUS_PANEL}px;
+            }}
+            """
         )
-        self.content_layout.setSpacing(16)
+        # Make hero responsive so collapsed 820px view wraps hero controls gracefully
+        self.hero_lay = QHBoxLayout(hero_card)
+        self.hero_lay.setContentsMargins(20, 16, 20, 16)
+        self.hero_lay.setSpacing(16)
+        hero_lay = self.hero_lay
 
-        # -------------------------------------------------------------
-        # 3.1 Header Row
-        # -------------------------------------------------------------
-        self.header_row = QHBoxLayout()
-        self.header_row.setContentsMargins(0, 0, 0, 0)
-        self.header_row.setSpacing(12)
+        self.health_gauge = CircularGauge(
+            title=tr("dash.health_gauge"),
+            unit="%",
+            size=122,
+            semicircular=False,
+        )
+        self.health_gauge.set_value(None, subtitle=tr("status.waiting"))
+        hero_lay.addWidget(self.health_gauge, alignment=Qt.AlignVCenter)
 
-        status_box = QHBoxLayout()
-        status_box.setSpacing(8)
-        self.status_dot = StatusIndicatorDot(self)
-        status_box.addWidget(self.status_dot)
+        hero_mid = QVBoxLayout()
+        hero_mid.setSpacing(6)
 
-        self.lbl_status_line = QLabel("")
-        self.lbl_status_line.setFont(tokens.get_sans_font(13, 400))
-        self.lbl_status_line.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        status_box.addWidget(self.lbl_status_line)
-        self.header_row.addLayout(status_box)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        self.hero_dot = StatusIndicatorDot()
+        self.status_dot = self.hero_dot
+        self.hero_dot.set_status(tokens.TEXT_MUTED)
+        self.lbl_hero_title = QLabel(tr("dash.hero_initializing"))
+        self.lbl_hero_title.setFont(tokens.get_sans_font(20, 700))
+        self.lbl_hero_title.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_hero_title.setWordWrap(True)
 
-        self.header_row.addStretch()
+        self.badge_hero_status = StatusBadge(tokens.SystemStatus.WAITING, tr("status.waiting"))
+        title_row.addWidget(self.hero_dot)
+        title_row.addWidget(self.lbl_hero_title, 1)
+        title_row.addWidget(self.badge_hero_status)
+        hero_mid.addLayout(title_row)
 
-        buttons_box = QHBoxLayout()
-        buttons_box.setSpacing(10)
+        self.lbl_hero_desc = QLabel(tr("dash.hero_desc_init"))
+        self.lbl_hero_desc.setFont(tokens.get_sans_font(13, 400))
+        self.lbl_hero_desc.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_hero_desc.setWordWrap(True)
+        hero_mid.addWidget(self.lbl_hero_desc)
 
-        self.btn_export = SecondaryButton("تصدير تقرير")
-        self.btn_export.clicked.connect(self.export_report_requested.emit)
+        self.probe_alert_banner = QFrame()
+        self.probe_alert_bar = self.probe_alert_banner
+        self.probe_alert_banner.setVisible(False)
+        self.probe_alert_banner.setStyleSheet(
+            f"background-color: {tokens.WARN_SOFT_BG}; border: 1px solid {tokens.WARN_BORDER}; border-radius: 6px;"
+        )
+        alert_lay = QHBoxLayout(self.probe_alert_banner)
+        alert_lay.setContentsMargins(10, 6, 10, 6)
+        self.lbl_probe_alert = QLabel("")
+        self.lbl_probe_alert_msg = self.lbl_probe_alert
+        self.lbl_probe_alert.setFont(tokens.get_sans_font(12, 500))
+        self.lbl_probe_alert.setStyleSheet(f"color: {tokens.STATUS_WARN}; border: none; background: transparent;")
+        self.lbl_probe_alert.setWordWrap(True)
+        alert_lay.addWidget(self.lbl_probe_alert)
+        hero_mid.addWidget(self.probe_alert_banner)
 
-        self.btn_preflight = SecondaryButton("جهّز لاجتماع")
-        self.btn_preflight.clicked.connect(self.meeting_preflight_requested.emit)
+        meta_chips_row = QHBoxLayout()
+        meta_chips_row.setSpacing(8)
+        self.chip_conn_summary = Chip(tr("dash.adapter_pending"), variant="neutral", font_size=12)
+        self.chip_guard_summary = Chip(tr("dash.guard_idle"), variant="info", font_size=12)
+        self.chip_speed_timestamp = Chip(tr("dash.no_speed_test"), variant="neutral", font_size=12)
+        meta_chips_row.addWidget(self.chip_conn_summary)
+        meta_chips_row.addWidget(self.chip_guard_summary)
+        meta_chips_row.addWidget(self.chip_speed_timestamp)
+        meta_chips_row.addStretch()
+        hero_mid.addLayout(meta_chips_row)
 
-        self.btn_scan = PrimaryButton("افحص الآن")
+        hero_lay.addLayout(hero_mid, 1)
+
+        actions_col = QVBoxLayout()
+        actions_col.setSpacing(8)
+        self.btn_scan = PrimaryButton(tr("dash.btn_quick_scan"))
+        self.btn_scan.setIcon(create_icon("internet_quality", tokens.ON_ACCENT, 15))
         self.btn_scan.clicked.connect(self._on_scan_clicked)
 
-        buttons_box.addWidget(self.btn_export)
-        buttons_box.addWidget(self.btn_preflight)
-        buttons_box.addWidget(self.btn_scan)
-        self.header_row.addLayout(buttons_box)
+        self.btn_preflight = SecondaryButton(tr("dash.btn_preflight"))
+        self.btn_preflight.setIcon(create_icon("meeting_guard", tokens.TEXT, 15))
+        self.btn_preflight.clicked.connect(self.meeting_preflight_requested.emit)
 
-        self.content_layout.addLayout(self.header_row)
+        self.btn_export = GhostButton(tr("dash.btn_export"))
+        self.btn_export.setIcon(create_icon("reports", tokens.TEXT_MUTED, 15))
+        self.btn_export.clicked.connect(self.export_report_requested.emit)
 
-        # -------------------------------------------------------------
-        # 3.1.5 Non-intrusive Persistent Probe Status Alert Bar
-        # -------------------------------------------------------------
-        self.probe_alert_bar = QFrame(self)
-        self.probe_alert_bar.setObjectName("ProbeAlertBar")
-        self.probe_alert_bar.setFixedHeight(38)
-        self.probe_alert_bar.setStyleSheet(f"""
-            QFrame#ProbeAlertBar {{
-                background: transparent;
-                border: none;
-            }}
-        """)
-        alert_layout = QHBoxLayout(self.probe_alert_bar)
-        alert_layout.setContentsMargins(14, 0, 14, 0)
-        alert_layout.setSpacing(10)
+        actions_col.addWidget(self.btn_scan)
+        actions_col.addWidget(self.btn_preflight)
+        actions_col.addWidget(self.btn_export)
+        hero_lay.addLayout(actions_col)
+        self.root_layout.addWidget(hero_card)
 
-        self.lbl_probe_alert_icon = QLabel("تنبيه:", self.probe_alert_bar)
-        self.lbl_probe_alert_icon.setFont(tokens.get_sans_font(12, 600))
-        self.lbl_probe_alert_icon.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-        alert_layout.addWidget(self.lbl_probe_alert_icon)
+        # ------------------------------------------------------------------
+        # 2. Primary Telemetry Metrics Strip
+        # ------------------------------------------------------------------
+        self.metrics_strip = MetricsStrip()
+        self.root_layout.addWidget(self.metrics_strip)
 
-        self.lbl_probe_alert_msg = QLabel("", self.probe_alert_bar)
-        self.lbl_probe_alert_msg.setFont(tokens.get_sans_font(12, 500))
-        self.lbl_probe_alert_msg.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-        alert_layout.addWidget(self.lbl_probe_alert_msg)
+        # ------------------------------------------------------------------
+        # 3. Real-Time Charts & Live Network Topology
+        # ------------------------------------------------------------------
+        self.charts_grid = QGridLayout()
+        self.charts_grid.setSpacing(14)
 
-        alert_layout.addStretch()
+        self.latency_chart = LatencyChart()
+        self.traffic_chart = TrafficThroughputChart(title=tr("dash.live_traffic"))
+        self.topology_widget = NetworkTopologyWidget()
 
-        self.lbl_probe_alert_tag = QLabel("تنبيه جودة المراقبة", self.probe_alert_bar)
-        self.lbl_probe_alert_tag.setFont(tokens.get_sans_font(12, 400))
-        self.lbl_probe_alert_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        alert_layout.addWidget(self.lbl_probe_alert_tag)
+        self.charts_grid.addWidget(self.latency_chart, 0, 0)
+        self.charts_grid.addWidget(self.traffic_chart, 0, 1)
+        self.root_layout.addLayout(self.charts_grid)
+        self.root_layout.addWidget(self.topology_widget)
 
-        self.probe_alert_bar.setVisible(False)
-        self.content_layout.addWidget(self.probe_alert_bar)
+        # Keep FlowPathPanel hidden/syncable for legacy MainWindow/test compatibility
+        self.flow_path = FlowPathPanel()
+        self.flow_path.setVisible(False)
+        self.root_layout.addWidget(self.flow_path)
 
-        # -------------------------------------------------------------
-        # 3.1.8 Network Information Identity Strip (SSID, ISP, Local/Public IP)
-        # -------------------------------------------------------------
-        self.network_strip = NetworkInfoStrip(self)
-        self.content_layout.addWidget(self.network_strip)
+        # ------------------------------------------------------------------
+        # 4. Operational Domain Summaries (Meeting/QoS, Wi-Fi/Router, DNS/Recs)
+        # ------------------------------------------------------------------
+        self.summary_grid = QGridLayout()
+        self.summary_grid.setSpacing(14)
 
-        # -------------------------------------------------------------
-        # 3.2 Hero Section (Two columns that wrap via QGridLayout)
-        # -------------------------------------------------------------
-        self.hero_container = QWidget()
-        self.hero_grid = QGridLayout(self.hero_container)
-        self.hero_grid.setContentsMargins(0, 0, 0, 0)
-        self.hero_grid.setHorizontalSpacing(24)
-        self.hero_grid.setVerticalSpacing(16)
-
-        self.hero_text_widget = QWidget()
-        self.hero_text_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.hero_text_col = QVBoxLayout(self.hero_text_widget)
-        self.hero_text_col.setContentsMargins(0, 0, 0, 0)
-        self.hero_text_col.setSpacing(8)
-
-        self.lbl_hero_caption = QLabel("جاري الفحص...")
-        self.lbl_hero_caption.setFont(tokens.get_sans_font(12, 500))
-        self.lbl_hero_caption.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.hero_text_col.addWidget(self.lbl_hero_caption)
-
-        self.lbl_hero_title = QLabel("جاري تقييم الشبكة...")
-        self.lbl_hero_title.setFont(tokens.get_sans_font(28, 600))
-        self.lbl_hero_title.setStyleSheet(f"color: {tokens.TEXT}; line-height: 1.2;")
-        self.lbl_hero_title.setWordWrap(True)
-        self.lbl_hero_title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.hero_text_col.addWidget(self.lbl_hero_title)
-
-        self.lbl_hero_desc = QLabel(
-            "يتم الآن فحص استجابة الراوتر المحلي، والاتصال بالإنترنت، وخوادم DNS..."
+        # 4a. Meeting Guard & QoS Summary
+        self.panel_guard = Panel(
+            title=tr("dash.guard_panel_title"),
+            subtitle=tr("dash.guard_panel_sub"),
+            padding=18,
         )
-        self.lbl_hero_desc.setFont(tokens.get_sans_font(13, 400))
-        self.lbl_hero_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.6;")
-        self.lbl_hero_desc.setWordWrap(True)
-        self.hero_text_col.addWidget(self.lbl_hero_desc)
+        self.btn_goto_guard = GhostButton(tr("dash.open_section"))
+        self.btn_goto_guard.clicked.connect(lambda: self.navigate_requested.emit(1))
+        self.panel_guard.set_header_widget(self.btn_goto_guard)
 
-        self.day_strip = DayStrip(self)
+        self.badge_guard_card = StatusBadge(tokens.SystemStatus.WAITING, tr("status.waiting"))
+        self.lbl_guard_details = QLabel(tr("dash.guard_idle_detail"))
+        self.lbl_guard_details.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_guard_details.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_guard_details.setWordWrap(True)
+        self.lbl_qos_rules_summary = QLabel(tr("dash.qos_pending"))
+        self.lbl_qos_rules_summary.setFont(tokens.get_mono_font(12, 500))
+        self.lbl_qos_rules_summary.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_qos_rules_summary.setWordWrap(True)
 
-        self.content_layout.addWidget(self.hero_container)
+        self.panel_guard.main_layout.addWidget(self.badge_guard_card, alignment=Qt.AlignLeft)
+        self.panel_guard.main_layout.addWidget(self.lbl_guard_details)
+        self.panel_guard.main_layout.addWidget(self.lbl_qos_rules_summary)
+        self.panel_guard.main_layout.addStretch()
 
-        # -------------------------------------------------------------
-        # 3.3 Metrics Strip (4 equal cells in one container)
-        # -------------------------------------------------------------
-        self.metrics_strip = MetricsStrip(self)
-        self.content_layout.addWidget(self.metrics_strip)
+        # 4b. Wi-Fi & Router Summary
+        self.panel_wifi_router = Panel(
+            title=tr("dash.wifi_router_title"),
+            subtitle=tr("dash.wifi_router_sub"),
+            padding=18,
+        )
+        wifi_btn_row = QHBoxLayout()
+        self.btn_goto_wifi = GhostButton(tr("nav.wifi_intelligence"))
+        self.btn_goto_wifi.clicked.connect(lambda: self.navigate_requested.emit(4))
+        self.btn_goto_router = GhostButton(tr("nav.router_management"))
+        self.btn_goto_router.clicked.connect(lambda: self.navigate_requested.emit(5))
+        wifi_btn_row.addWidget(self.btn_goto_wifi)
+        wifi_btn_row.addWidget(self.btn_goto_router)
+        wr_btn_wrap = QWidget()
+        wr_btn_wrap.setLayout(wifi_btn_row)
+        self.panel_wifi_router.set_header_widget(wr_btn_wrap)
 
-        # -------------------------------------------------------------
-        # 3.4 Row A (Latency Chart + Timeline Panel)
-        # -------------------------------------------------------------
-        self.row_a_container = QWidget()
-        self.row_a_grid = QGridLayout(self.row_a_container)
-        self.row_a_grid.setContentsMargins(0, 0, 0, 0)
-        self.row_a_grid.setHorizontalSpacing(tokens.PANEL_GAP)
-        self.row_a_grid.setVerticalSpacing(tokens.PANEL_GAP)
+        wr_body = QHBoxLayout()
+        wr_body.setSpacing(14)
+        self.wifi_mini_gauge = CircularGauge(
+            title=tr("dash.wifi_quality"),
+            unit="%",
+            size=96,
+            semicircular=True,
+        )
+        self.wifi_mini_gauge.set_value(None, subtitle=tr("status.unavailable"))
+        wr_body.addWidget(self.wifi_mini_gauge)
 
-        self.latency_chart = LatencyChart(self)
-        self.timeline_panel = TimelinePanel(self)
+        wr_lines = QVBoxLayout()
+        wr_lines.setSpacing(4)
+        self.lbl_wifi_summary = QLabel(tr("dash.wifi_unmeasured"))
+        self.lbl_wifi_summary.setFont(tokens.get_sans_font(12, 500))
+        self.lbl_wifi_summary.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_wifi_summary.setWordWrap(True)
+        self.lbl_router_summary = QLabel(tr("dash.router_unconfigured"))
+        self.lbl_router_summary.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_router_summary.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_router_summary.setWordWrap(True)
+        wr_lines.addWidget(self.lbl_wifi_summary)
+        wr_lines.addWidget(self.lbl_router_summary)
+        wr_lines.addStretch()
+        wr_body.addLayout(wr_lines, 1)
+        self.panel_wifi_router.main_layout.addLayout(wr_body)
 
-        make_scroll_transparent(self.latency_chart, self.scroll)
+        # 4c. Recommendations Card
+        self.panel_recs = Panel(
+            title=tr("dash.recs_title"),
+            subtitle=tr("dash.recs_sub"),
+            padding=18,
+        )
+        self.lbl_recs_body = QLabel(tr("dash.recs_empty"))
+        self.lbl_recs_body.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_recs_body.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_recs_body.setWordWrap(True)
+        self.panel_recs.main_layout.addWidget(self.lbl_recs_body)
+        self.panel_recs.main_layout.addStretch()
 
-        self.content_layout.addWidget(self.row_a_container)
+        self.summary_grid.addWidget(self.panel_guard, 0, 0)
+        self.summary_grid.addWidget(self.panel_wifi_router, 0, 1)
+        self.summary_grid.addWidget(self.panel_recs, 0, 2)
+        self.root_layout.addLayout(self.summary_grid)
 
-        # -------------------------------------------------------------
-        # 3.5 مسار اتصالك (Full Width Panel)
-        # -------------------------------------------------------------
-        self.flow_path = FlowPathPanel(self)
-        make_scroll_transparent(self.flow_path, self.scroll)
-        self.content_layout.addWidget(self.flow_path)
+        # ------------------------------------------------------------------
+        # 5. Consumers + DNS Panel + Diagnostic Timeline + Day Strip
+        # ------------------------------------------------------------------
+        self.bottom_grid = QGridLayout()
+        self.bottom_grid.setSpacing(14)
 
-        # -------------------------------------------------------------
-        # 3.6 Row B (Traffic Consumers + DNS Recommendation)
-        # -------------------------------------------------------------
-        self.row_b_container = QWidget()
-        self.row_b_grid = QGridLayout(self.row_b_container)
-        self.row_b_grid.setContentsMargins(0, 0, 0, 0)
-        self.row_b_grid.setHorizontalSpacing(tokens.PANEL_GAP)
-        self.row_b_grid.setVerticalSpacing(tokens.PANEL_GAP)
+        self.consumers_panel = TrafficConsumersPanel()
+        self.dns_panel = DNSRecommendationPanel()
+        self.bottom_grid.addWidget(self.consumers_panel, 0, 0)
+        self.bottom_grid.addWidget(self.dns_panel, 0, 1)
+        self.root_layout.addLayout(self.bottom_grid)
 
-        self.consumers_panel = TrafficConsumersPanel(self)
-        self.dns_panel = DNSRecommendationPanel(self)
+        self.timeline_panel = TimelinePanel()
+        self.root_layout.addWidget(self.timeline_panel)
 
-        self.content_layout.addWidget(self.row_b_container)
+        self.day_strip = DayStrip()
+        self.root_layout.addWidget(self.day_strip)
 
-        # -------------------------------------------------------------
-        # Footer Note
-        # -------------------------------------------------------------
-        self.lbl_footer = QLabel("NetGuard الذكي · مراقبة حية وإصلاح ذاتي تلقائي للشبكة")
-        self.lbl_footer.setFont(tokens.get_sans_font(12, 400))
-        self.lbl_footer.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_footer.setAlignment(Qt.AlignCenter)
-        self.content_layout.addWidget(self.lbl_footer)
+        self.network_strip = NetworkInfoStrip()
+        self.root_layout.addWidget(self.network_strip)
 
-        self.scroll.setWidget(self.content_widget)
-        root_layout.addWidget(self.scroll)
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setInterval(5000)
+        self._tick_timer.timeout.connect(self._on_second_tick)
+        self._tick_timer.start()
 
-        # Set initial layout structure
-        self._apply_layout_mode("desktop")
+        language_manager().language_changed.connect(self.retranslate)
 
-        # Secondary counter timer (live seconds since scan)
-        self._timer_counter = QTimer(self)
-        self._timer_counter.timeout.connect(self._on_second_tick)
-        self._timer_counter.start(1000)
-        self._on_second_tick()
-
-        # Backward compatibility aliases for existing callers
-        self.card_gateway = self.metrics_strip.cell_latency
-        self.card_external = self.metrics_strip.cell_latency
-        self.card_dns = self.metrics_strip.cell_jitter
-        self.card_loss = self.metrics_strip.cell_loss
-        self.card_download = self.metrics_strip.cell_download
-        self.pipeline = self.flow_path
-        self.wave_chart = self.latency_chart
-        self.shield = self
-        self.solutions_card = self.dns_panel
-
-    def _apply_layout_mode(self, mode: str) -> None:
-        self._current_layout_mode = mode
-        if hasattr(self, "network_strip"):
-            self.network_strip.set_responsive_mode(mode)
-
-        # Clear Hero
-        self.hero_grid.removeWidget(self.hero_text_widget)
-        self.hero_grid.removeWidget(self.day_strip)
-
-        # Clear Row A
-        self.row_a_grid.removeWidget(self.latency_chart)
-        self.row_a_grid.removeWidget(self.timeline_panel)
-
-        # Clear Row B
-        self.row_b_grid.removeWidget(self.consumers_panel)
-        self.row_b_grid.removeWidget(self.dns_panel)
-
-        if mode == "desktop":
-            self.content_layout.setContentsMargins(20, 20, 20, 24)
-            self.lbl_hero_title.setFont(tokens.get_sans_font(28, 600))
-            self.metrics_strip.set_responsive_columns(4)
-
-            # Status uses the full width. The day strip sits underneath
-            # so the title is never squeezed into a clipped fragment.
-            self.hero_grid.setColumnStretch(0, 1)
-            self.hero_grid.setColumnStretch(1, 0)
-            self.hero_grid.addWidget(self.hero_text_widget, 0, 0)
-            self.hero_grid.addWidget(self.day_strip, 1, 0)
-
-            # Row A: Latency (flex 3), Timeline (flex 2)
-            self.row_a_grid.setColumnStretch(0, 3)
-            self.row_a_grid.setColumnStretch(1, 2)
-            self.row_a_grid.addWidget(self.latency_chart, 0, 0)
-            self.row_a_grid.addWidget(self.timeline_panel, 0, 1)
-
-            # Row B: Consumers (flex 1), DNS (flex 1)
-            self.row_b_grid.setColumnStretch(0, 1)
-            self.row_b_grid.setColumnStretch(1, 1)
-            self.row_b_grid.addWidget(self.consumers_panel, 0, 0)
-            self.row_b_grid.addWidget(self.dns_panel, 0, 1)
-
-        elif mode == "tablet":
-            self.content_layout.setContentsMargins(16, 16, 16, 20)
-            self.lbl_hero_title.setFont(tokens.get_sans_font(24, 600))
-            self.metrics_strip.set_responsive_columns(2)
-
-            # Stacked
-            self.hero_grid.addWidget(self.hero_text_widget, 0, 0)
-            self.hero_grid.addWidget(self.day_strip, 1, 0)
-
-            self.row_a_grid.addWidget(self.latency_chart, 0, 0)
-            self.row_a_grid.addWidget(self.timeline_panel, 1, 0)
-
-            self.row_b_grid.addWidget(self.consumers_panel, 0, 0)
-            self.row_b_grid.addWidget(self.dns_panel, 1, 0)
-
-        else:  # "mobile"
-            self.content_layout.setContentsMargins(12, 12, 12, 16)
-            self.lbl_hero_title.setFont(tokens.get_sans_font(18, 600))
-            self.metrics_strip.set_responsive_columns(1)
-
-            self.hero_grid.addWidget(self.hero_text_widget, 0, 0)
-            self.hero_grid.addWidget(self.day_strip, 1, 0)
-
-            self.row_a_grid.addWidget(self.latency_chart, 0, 0)
-            self.row_a_grid.addWidget(self.timeline_panel, 1, 0)
-
-            self.row_b_grid.addWidget(self.consumers_panel, 0, 0)
-            self.row_b_grid.addWidget(self.dns_panel, 1, 0)
+    def retranslate(self) -> None:
+        self.btn_scan.setText(tr("dash.btn_quick_scan"))
+        self.btn_preflight.setText(tr("dash.btn_preflight"))
+        self.btn_export.setText(tr("dash.btn_export"))
+        self.panel_guard.set_titles(tr("dash.guard_panel_title"), tr("dash.guard_panel_sub"))
+        self.panel_wifi_router.set_titles(tr("dash.wifi_router_title"), tr("dash.wifi_router_sub"))
+        self.panel_recs.set_titles(tr("dash.recs_title"), tr("dash.recs_sub"))
+        self.btn_goto_guard.setText(tr("dash.open_section"))
+        self.btn_goto_wifi.setText(tr("nav.wifi_intelligence"))
+        self.btn_goto_router.setText(tr("nav.router_management"))
+        is_en = get_language() == "en"
+        if hasattr(self, "metrics_strip"):
+            self.metrics_strip.cell_latency.title_lbl.setText("Latency" if is_en else "زمن الاستجابة")
+            self.metrics_strip.cell_jitter.title_lbl.setText("Jitter" if is_en else "التذبذب")
+            self.metrics_strip.cell_loss.title_lbl.setText("Packet Loss" if is_en else "فقدان الحزم")
+            self.metrics_strip.cell_download.title_lbl.setText("Download Rate" if is_en else "سرعة التنزيل")
+        if hasattr(self, "latency_chart"):
+            self.latency_chart.lbl_title.setText("Latency" if is_en else "زمن الاستجابة")
+            self.latency_chart.lbl_sub.setText(
+                "Round-trip internet latency. Lower is better."
+                if is_en
+                else "الوقت اللازم لوصول بياناتك إلى الإنترنت والعودة. الأقل أفضل."
+            )
+            self.latency_chart.canvas.update()
+        if hasattr(self, "traffic_chart"):
+            self.traffic_chart.lbl_title.setText(tr("dash.live_traffic"))
+        if self._last_obs is not None:
+            self.update_telemetry(self._last_obs, self._last_diag)
+        else:
+            self.lbl_hero_title.setText(tr("dash.hero_initializing"))
+            self.lbl_hero_desc.setText(tr("dash.hero_desc_init"))
+            self.badge_hero_status.set_status(tokens.SystemStatus.WAITING, tr("status.waiting"))
+            self.health_gauge.set_value(None, subtitle=tr("status.waiting"))
 
     def _on_second_tick(self) -> None:
-        self._last_scan_seconds += 1
-        now = datetime.now()
-        days_ar = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
-        months_ar = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
-        day_name = days_ar[now.weekday()]
-        month_name = months_ar[now.month - 1]
-        time_str = now.strftime("%H:%M")
-        scan_ago = "الآن" if self._last_scan_seconds <= 1 else f"قبل {self._last_scan_seconds} ث"
-        self.lbl_status_line.setText(
-            f"{day_name} {now.day} {month_name} · {time_str} · آخر فحص {scan_ago}"
-        )
+        if not self.isVisible():
+            return
+        if self._last_speed_test_dt:
+            elapsed = max(0, int((datetime.now() - self._last_speed_test_dt).total_seconds()))
+            if elapsed < 60:
+                txt = tr("dash.speed_ago_sec", val=elapsed)
+            else:
+                txt = tr("dash.speed_ago_min", val=elapsed // 60)
+            self.chip_speed_timestamp.setText(txt)
 
     def set_last_speed_test_time(self, time_str: str) -> None:
-        self._last_speed_test_time = time_str
-        self._last_scan_seconds = 0
-        self._on_second_tick()
+        self._last_speed_test_time = str(time_str)
+        self._last_speed_test_dt = datetime.now()
+        self.chip_speed_timestamp.setText(tokens.bidi_isolate_mixed(f"آخر فحص: {time_str}"))
+        self.chip_speed_timestamp.set_variant("ok-soft")
+        self.metrics_strip.cell_download.footer_lbl.setText(f"آخر فحص: {time_str}")
 
     def _on_scan_clicked(self) -> None:
-        self.btn_scan.setText("جارٍ الفحص…")
+        self.btn_scan.setText(tr("dash.scanning"))
         self.btn_scan.setEnabled(False)
-        self._last_scan_seconds = 0
         self.quick_scan_requested.emit()
 
     def _on_scan_completed(self) -> None:
-        self.btn_scan.setText("افحص الآن")
+        self.btn_scan.setText(tr("dash.btn_quick_scan"))
         self.btn_scan.setEnabled(True)
 
     def update_shield(self, is_healthy: Any, title: str = "", desc: str = "", **kwargs) -> None:
-        if is_healthy is True or is_healthy == "healthy":
-            self.lbl_hero_caption.setText("الحالة الآن")
-            self.lbl_hero_caption.setStyleSheet(f"color: {tokens.STATUS_OK};")
-            self.lbl_hero_title.setText(title or "الشبكة سليمة")
-            self.status_dot.set_status(tokens.STATUS_OK)
-        elif is_healthy == "offline" or is_healthy == "outage":
-            self.lbl_hero_caption.setText("انقطاع")
-            self.lbl_hero_caption.setStyleSheet(f"color: {tokens.STATUS_BAD};")
-            self.lbl_hero_title.setText(title or "انقطاع الاتصال")
-            self.status_dot.set_status(tokens.STATUS_BAD)
-        elif is_healthy == "inconclusive" or is_healthy == "checking":
-            self.lbl_hero_caption.setText("جاري الفحص")
-            self.lbl_hero_caption.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-            self.lbl_hero_title.setText(title or "جاري تقييم الشبكة...")
-            self.status_dot.set_status(tokens.TEXT_MUTED)
+        if is_healthy is True:
+            self.badge_hero_status.set_status(tokens.SystemStatus.HEALTHY, tr("status.healthy"))
+            self.hero_dot.set_status(tokens.STATUS_OK)
+        elif is_healthy is False:
+            self.badge_hero_status.set_status(tokens.SystemStatus.FAILED, tr("status.failed"))
+            self.hero_dot.set_status(tokens.STATUS_BAD)
         else:
-            self.lbl_hero_caption.setText("تنبيه")
-            self.lbl_hero_caption.setStyleSheet(f"color: {tokens.STATUS_WARN};")
-            self.lbl_hero_title.setText(title or "الشبكة بطيئة")
-            self.status_dot.set_status(tokens.STATUS_WARN)
+            self.badge_hero_status.set_status(tokens.SystemStatus.WARNING, tr("status.warning"))
+            self.hero_dot.set_status(tokens.STATUS_WARN)
+        if title:
+            self.lbl_hero_title.setText(title)
         if desc:
             self.lbl_hero_desc.setText(desc)
 
     def update_daily_incident_summary(self, interventions_count: int, avg_duration_sec: Optional[float] = None) -> None:
-        """Update hero description based on real database query of today's interventions (Item C3)."""
-        if interventions_count == 0:
-            self.lbl_hero_desc.setText("الاتصال مستقر وقريب من معدلاته المعتادة — لا توجد تدخلات مطلوبة اليوم.")
-        elif interventions_count == 1:
-            dur_str = f" خلال {int(round(avg_duration_sec))} ثانية" if avg_duration_sec else ""
-            self.lbl_hero_desc.setText(f"رصد NetGuard مشكلة واحدة اليوم وأصلحها تلقائياً{dur_str} دون انقطاع اتصالك.")
-        else:
-            dur_str = f" في متوسط {int(round(avg_duration_sec))} ثانية" if avg_duration_sec else ""
-            self.lbl_hero_desc.setText(f"أصلح NetGuard تلقائياً {interventions_count} تدخلات اليوم{dur_str} لضمان ثبات واستقرار الاتصال.")
+        if interventions_count > 0:
+            dur = f"{avg_duration_sec:.1f}s" if avg_duration_sec else "—"
+            self.chip_guard_summary.setText(
+                tokens.bidi_isolate_mixed(f"{tr('dash.interventions')}: {interventions_count} ({dur})")
+            )
 
     def set_probe_status_alert(self, error_message: Optional[str]) -> None:
-        """Updates the non-intrusive persistent probe failure alert bar."""
-        if error_message and isinstance(error_message, str):
-            self.lbl_probe_alert_msg.setText(error_message)
-            self.probe_alert_bar.setVisible(True)
-            self.status_dot.set_status(tokens.STATUS_WARN)
+        has_err = bool(error_message and error_message.strip())
+        self.probe_alert_banner.setVisible(has_err)
+        if has_err:
+            self.lbl_probe_alert.setText(tokens.bidi_isolate_mixed(error_message or ""))
+            self.hero_dot.set_status(tokens.STATUS_WARN)
         else:
-            self.probe_alert_bar.setVisible(False)
-            self.status_dot.set_status(tokens.STATUS_OK)
+            self.hero_dot.set_status(tokens.STATUS_OK)
 
     def update_network_identity(self, info: Dict[str, Any]) -> None:
-        self._network_info = info
-        if hasattr(self, "network_strip"):
-            self.network_strip.update_info(info)
+        norm = normalize_network_identity_payload(info)
+        self._last_net_info = norm
+        self._network_info = self._last_net_info
+        self.network_strip.update_info(self._last_net_info)
 
-        if hasattr(self, "flow_path") and info:
-            isp_name = info.get("isp_company") or "مزود الخدمة"
-            if "WE" in isp_name or "المصرية" in isp_name:
-                isp_node_label = "مزود الخدمة (WE)"
-            elif "Orange" in isp_name or "أورنج" in isp_name:
-                isp_node_label = "مزود الخدمة (Orange)"
-            elif "Vodafone" in isp_name or "فودافون" in isp_name:
-                isp_node_label = "مزود الخدمة (Vodafone)"
-            elif "Etisalat" in isp_name or "e&" in isp_name:
-                isp_node_label = "مزود الخدمة (e&)"
-            else:
-                isp_node_label = isp_name[:18] if len(isp_name) > 18 else isp_name
+        adapter = str(norm.get("interface_name") or norm.get("iface") or "—")
+        conn_type = str(norm.get("connection_type") or norm.get("medium") or "")
+        gw_ip = str(norm.get("gateway_ip") or norm.get("gateway") or "—")
+        ssid = str(norm.get("ssid") or "")
+        if ssid.lower() in ("غير متصل", "—", "-"):
+            ssid = ""
+        label_parts: List[str] = []
+        seen_lp: set[str] = set()
+        for p in (conn_type, ssid, adapter):
+            if p and p != "—" and p.strip().lower() not in seen_lp:
+                seen_lp.add(p.strip().lower())
+                label_parts.append(p)
+        summary_txt = " · ".join(label_parts) if label_parts else tr("dash.adapter_pending")
+        self.chip_conn_summary.setText(tokens.bidi_isolate_mixed(summary_txt))
 
-            if len(self.flow_path.node_info) > 2:
-                self.flow_path.node_info[2]["name"] = isp_node_label
-                self.flow_path.nodes[2].lbl_name.setText(isp_node_label)
+        dns_servers = norm.get("dns_servers") or []
+        if dns_servers:
+            self._last_dns_ip = str(dns_servers[0])
 
-                hop2_diag = info.get("hop2_diag") or {}
-                if hop2_diag:
-                    h2_cls = hop2_diag.get("classification")
-                    h2_lat = hop2_diag.get("latency_ms")
-                    if h2_lat is not None and h2_lat >= 0:
-                        st = "ok" if h2_lat < 50.0 else "warn"
-                        self.flow_path.update_node_latency(
-                            2,
-                            h2_lat,
-                            status=st,
-                            desc=f"المحطة الثانية تستجيب بنجاح ({int(round(h2_lat))} ms) عبر {hop2_diag.get('protocol', 'ICMP')} · {isp_name}.",
-                        )
-                    elif h2_cls in ("PATH_CONTINUES", "INTERMEDIATE_FILTERING_SUSPECTED"):
-                        self.flow_path.update_node_latency(
-                            2,
-                            None,
-                            status="ok",
-                            desc=f"المحطة الثانية (Hop 02) لا تستجيب لحزم الاستطلاع المباشرة، مع استمرار حركة البيانات ووصولها للمحطات اللاحقة بنجاح (Path Continues · {isp_name}).",
-                        )
+        self._refresh_topology_widget(gw_ip=gw_ip or "—", info=norm)
+
+    def update_wifi_and_router_summary(
+        self,
+        *,
+        ssid: Optional[str] = None,
+        band: Optional[str] = None,
+        channel: Optional[int] = None,
+        rssi_dbm: Optional[int] = None,
+        wifi_quality_pct: Optional[float] = None,
+        router_model: Optional[str] = None,
+        router_ip: Optional[str] = None,
+        connected_devices_count: Optional[int] = None,
+    ) -> None:
+        """Update real Wi-Fi & Router card metrics without fabricating unknown data."""
+        self._last_wifi_pct = wifi_quality_pct
+        self._last_connected_devices = connected_devices_count
+
+        if wifi_quality_pct is not None:
+            color = (
+                tokens.STATUS_OK
+                if wifi_quality_pct >= 70
+                else (tokens.STATUS_WARN if wifi_quality_pct >= 45 else tokens.STATUS_BAD)
+            )
+            self.wifi_mini_gauge.set_value(
+                wifi_quality_pct,
+                subtitle=f"{rssi_dbm} dBm" if rssi_dbm is not None else tr("status.active"),
+                color=color,
+            )
+            wifi_bits = [b for b in (ssid, band, f"CH {channel}" if channel else None) if b]
+            self.lbl_wifi_summary.setText(
+                tokens.bidi_isolate_mixed(" · ".join(wifi_bits) if wifi_bits else tr("status.active"))
+            )
+        else:
+            self.wifi_mini_gauge.set_value(None, subtitle=tr("status.unavailable"))
+
+        if router_model or router_ip:
+            dev_part = (
+                f" · {tr('dash.devices_count', n=connected_devices_count)}"
+                if connected_devices_count is not None
+                else ""
+            )
+            r_txt = f"{router_model or tr('nav.router_management')} ({router_ip or '—'}){dev_part}"
+            self.lbl_router_summary.setText(tokens.bidi_isolate_mixed(r_txt))
+
+        self._refresh_topology_widget(
+            gw_ip=router_ip or str(self._last_net_info.get("gateway_ip") or "—"),
+            info=self._last_net_info,
+        )
+
+    def update_meeting_guard_summary(
+        self,
+        *,
+        meeting_active: bool,
+        app_name: Optional[str] = None,
+        verified_rules: int = 0,
+        configured_rules: int = 0,
+        lifecycle_stage: str = "idle",
+    ) -> None:
+        if meeting_active:
+            self.badge_guard_card.set_status(tokens.SystemStatus.ACTIVE, tr("status.active"))
+            self.chip_guard_summary.setText(
+                tokens.bidi_isolate_mixed(f"{tr('dash.guard_protecting')}: {app_name or 'Meeting'}")
+            )
+            self.chip_guard_summary.set_variant("ok-soft")
+            self.lbl_guard_details.setText(
+                tokens.bidi_isolate_mixed(
+                    tr("dash.guard_active_detail", app=app_name or "Meeting", stage=lifecycle_stage)
+                )
+            )
+        else:
+            self.badge_guard_card.set_status(tokens.SystemStatus.RUNNING, tr("status.running"))
+            self.chip_guard_summary.setText(tr("dash.guard_idle"))
+            self.chip_guard_summary.set_variant("info")
+            self.lbl_guard_details.setText(tr("dash.guard_idle_detail"))
+
+        if configured_rules > 0:
+            self.lbl_qos_rules_summary.setText(
+                tokens.bidi_isolate_mixed(
+                    tr("dash.qos_verified_count", verified=verified_rules, total=configured_rules)
+                )
+            )
+        else:
+            self.lbl_qos_rules_summary.setText(tr("dash.qos_pending"))
+
+    def _refresh_topology_widget(self, *, gw_ip: str, info: Dict[str, Any]) -> None:
+        adapter_name = str(info.get("interface_name") or info.get("adapter_name") or tr("dash.local_adapter"))
+        conn_type = str(info.get("connection_type") or info.get("medium") or "LAN/Wi-Fi")
+        router_label = str(info.get("router_model") or tr("dash.router_node"))
+        public_ip = info.get("public_ip")
+        self.topology_widget.set_topology(
+            adapter_name=adapter_name,
+            adapter_type=conn_type,
+            router_label=router_label,
+            gateway_ip=gw_ip,
+            gateway_ms=self._last_gw_ms,
+            dns_ip=self._last_dns_ip,
+            dns_ms=self._last_dns_ms,
+            internet_ms=self._last_ext_ms,
+            connected_devices_count=self._last_connected_devices,
+            public_ip=str(public_ip) if public_ip else None,
+        )
+
+    @staticmethod
+    def _safe_sliding_window(obs: Any, mt: MetricType, count: int = 20) -> List[Any]:
+        if obs is None or not hasattr(obs, "get_sliding_window"):
+            return []
+        try:
+            return list(obs.get_sliding_window(mt, count) or [])
+        except TypeError:
+            try:
+                return list(obs.get_sliding_window(mt) or [])[-count:]
+            except Exception:
+                return []
+
+    @staticmethod
+    def _valid_num(val: Any) -> Optional[float]:
+        if val is None:
+            return None
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(f) or f < 0.0:
+            return None
+        return f
 
     def update_telemetry(self, obs, last_diag: Optional[Diagnosis]) -> None:
-        self._last_scan_seconds = 0
+        self._last_obs = obs
+        self._last_diag = last_diag
+
         if obs is None:
-            self.set_probe_status_alert("محرك المراقبة غير متصل (Monitoring engine unavailable)")
-            for cell in (self.metrics_strip.cell_latency, self.metrics_strip.cell_jitter, self.metrics_strip.cell_loss):
-                cell.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
-            dl_footer = f"غير متصل · آخر فحص: {self._last_speed_test_time}" if self._last_speed_test_time else "غير متصل"
-            self.metrics_strip.cell_download.update_metric(" — ", footer_text=dl_footer, is_warning=False, samples=[])
-            self.latency_chart.update_telemetry(samples=[], avg_ms=0.0, max_ms=0.0, duration_str="—")
-            if hasattr(self, "flow_path"):
-                self.flow_path.update_node_latency(0, None, status="bad", desc="محول الشبكة غير متصل.")
-                self.flow_path.update_node_latency(1, None, status="bad", desc="تعذر الوصول للراوتر.")
-                self.flow_path.update_node_latency(2, None, status="bad", desc="مسار مزود الخدمة غير متاح.")
-                self.flow_path.update_node_latency(3, None, status="none", desc="خادم DNS غير متوفر.")
-                self.flow_path.update_node_latency(4, None, status="bad", desc="الاتصال بالإنترنت منقطع.")
+            dl_footer = f"آخر فحص: {self._last_speed_test_time}" if self._last_speed_test_time else "غير متصل"
+            self.metrics_strip.cell_latency.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
+            self.metrics_strip.cell_jitter.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
+            self.metrics_strip.cell_loss.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
+            self.metrics_strip.cell_download.update_metric(" — ", dl_footer, samples=[], status_color=tokens.TEXT_MUTED)
+            self.traffic_chart.set_series([], [], [])
+            self.latency_chart.update_telemetry([])
+            self.health_gauge.set_value(None, subtitle=tr("status.waiting"))
             return
 
-        # Check for persistent probe failures to display non-intrusively
+        err_msg = None
         if hasattr(obs, "get_primary_probe_error_message"):
-            probe_err = obs.get_primary_probe_error_message()
-            self.set_probe_status_alert(probe_err)
-        else:
-            self.set_probe_status_alert(None)
+            err_msg = obs.get_primary_probe_error_message()
+        self.set_probe_status_alert(err_msg)
 
-        gw = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
-        ext = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
-        jit = obs.get_latest_measurement(MetricType.JITTER_MS)
-        loss = obs.get_latest_measurement(MetricType.GATEWAY_PACKET_LOSS)
-        ext_loss = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
-        rx = obs.get_latest_measurement(MetricType.BANDWIDTH_RX_BYTES_PER_SEC)
-        tx = obs.get_latest_measurement(MetricType.BANDWIDTH_TX_BYTES_PER_SEC)
+        # Latest metrics (guarding NaN/negative values strictly)
+        m_ext = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
+        m_gw = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
+        m_jitter = obs.get_latest_measurement(MetricType.JITTER_MS)
+        m_loss = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
+        if m_loss is None:
+            m_loss = obs.get_latest_measurement(MetricType.GATEWAY_PACKET_LOSS)
+        m_dns = obs.get_latest_measurement(MetricType.DNS_LATENCY)
+        m_wifi = obs.get_latest_measurement(MetricType.WIFI_SIGNAL_PERCENT)
+        m_rx = obs.get_latest_measurement(MetricType.BANDWIDTH_RX_BYTES_PER_SEC)
+        m_tx = obs.get_latest_measurement(MetricType.BANDWIDTH_TX_BYTES_PER_SEC)
 
-        # 1. Latency Tile
-        is_ext_valid = (
-            ext is not None
-            and ext.raw_value is not None
-            and math.isfinite(ext.raw_value)
-            and ext.raw_value >= 0.0
-            and getattr(ext, "status", None) != ProbeStatus.FAILED
-        )
-        if is_ext_valid:
-            lat_val = ext.raw_value
-            is_warn = lat_val >= DEFAULT_THRESHOLDS.latency.external_warning_ms
-            ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY) or []
-            ext_samples = [
-                s.raw_value for s in ext_window
-                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
-            ] if ext_window else []
+        ext_val = self._valid_num(getattr(m_ext, "normalized_value", None))
+        gw_val = self._valid_num(getattr(m_gw, "normalized_value", None))
+        jit_val = self._valid_num(getattr(m_jitter, "normalized_value", None))
+        loss_val = self._valid_num(getattr(m_loss, "normalized_value", None))
+        dns_val = self._valid_num(getattr(m_dns, "normalized_value", None))
+        wifi_raw = self._valid_num(getattr(m_wifi, "normalized_value", None))
+        wifi_val = wifi_raw if wifi_raw is not None else self._last_wifi_pct
+        rx_bps = self._valid_num(getattr(m_rx, "normalized_value", None))
+        tx_bps = self._valid_num(getattr(m_tx, "normalized_value", None))
+
+        self._last_gw_ms = gw_val
+        self._last_ext_ms = ext_val
+        if dns_val is not None:
+            self._last_dns_ms = dns_val
+        if wifi_val is not None:
+            self._last_wifi_pct = wifi_val
+
+        # Metric Strip updates
+        ext_window = self._safe_sliding_window(obs, MetricType.EXTERNAL_LATENCY, 20)
+        ext_samples = [v for v in (self._valid_num(getattr(m, "normalized_value", None)) for m in ext_window) if v is not None]
+        if ext_val is not None:
+            is_warn = ext_val >= float(DEFAULT_THRESHOLDS.latency.external_warning_ms)
             self.metrics_strip.cell_latency.update_metric(
-                f"{int(round(lat_val))}",
-                footer_text="تحذير · استجابة بطيئة" if is_warn else "ممتاز · مستقر",
+                f"{ext_val:.0f}",
+                tr("dash.status_warn") if is_warn else tr("dash.status_stable"),
                 is_warning=is_warn,
                 samples=ext_samples,
             )
         else:
-            self.metrics_strip.cell_latency.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
+            self.metrics_strip.cell_latency.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
 
-        # 2. Jitter Tile
-        is_jit_valid = (
-            jit is not None
-            and jit.raw_value is not None
-            and math.isfinite(jit.raw_value)
-            and jit.raw_value >= 0.0
-            and getattr(jit, "status", None) != ProbeStatus.FAILED
-        )
-        if is_jit_valid:
-            jit_val = jit.raw_value
+        jit_window = self._safe_sliding_window(obs, MetricType.JITTER_MS, 20)
+        jit_samples = [v for v in (self._valid_num(getattr(m, "normalized_value", None)) for m in jit_window) if v is not None]
+        if jit_val is not None:
             if jit_val < 10.0:
-                footer_txt = "ممتاز • مثالي للمكالمات"
-                is_warn = False
-                color = tokens.STATUS_OK
+                jit_footer, jit_col, jit_warn = tr("dash.jitter_good"), tokens.STATUS_OK, False
             elif jit_val < 30.0:
-                footer_txt = "جيد • مناسب للمكالمات"
-                is_warn = False
-                color = tokens.STATUS_OK
+                jit_footer, jit_col, jit_warn = "جيد • مناسب للمكالمات", tokens.STATUS_OK, False
             elif jit_val <= 50.0:
-                footer_txt = "متوسط • قد يؤثر على المكالمات"
-                is_warn = True
-                color = tokens.STATUS_WARN
+                jit_footer, jit_col, jit_warn = "متوسط • قد يؤثر على المكالمات", tokens.STATUS_WARN, True
             else:
-                footer_txt = "مرتفع • يؤثر بشدة على المكالمات"
-                is_warn = True
-                color = tokens.STATUS_BAD
-
-            jit_window = obs.get_sliding_window(MetricType.JITTER_MS) or []
-            jit_samples = [
-                s.raw_value for s in jit_window
-                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
-            ] if jit_window else []
+                jit_footer, jit_col, jit_warn = "مرتفع • يؤثر بشدة على المكالمات", tokens.STATUS_BAD, True
             self.metrics_strip.cell_jitter.update_metric(
                 f"{jit_val:.1f}",
-                footer_text=footer_txt,
-                is_warning=is_warn,
+                jit_footer,
+                is_warning=jit_warn,
                 samples=jit_samples,
-                status_color=color,
+                status_color=jit_col,
             )
         else:
-            self.metrics_strip.cell_jitter.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
+            self.metrics_strip.cell_jitter.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
 
-        # 3. Packet Loss Tile (Unified WAN + Gateway Sliding Window)
-        def _calc_loss(window: List[Any], latest: Optional[Any]) -> Tuple[Optional[float], List[float]]:
-            items = list(window) if window else ([latest] if latest is not None else [])
-            if not items:
-                return None, []
-            valid_vals: List[float] = []
-            for s in items:
-                st = getattr(s, "status", None)
-                if st in (ProbeStatus.FAILED, ProbeStatus.TIMEOUT):
-                    valid_vals.append(1.0)
-                elif s.raw_value is not None and math.isfinite(s.raw_value):
-                    if s.raw_value >= 0.0:
-                        valid_vals.append(max(0.0, min(1.0, float(s.raw_value))))
-            if not valid_vals:
-                return None, []
-            pct = (sum(valid_vals) / float(len(valid_vals))) * 100.0
-            return pct, [v * 100.0 for v in valid_vals]
-
-        ext_loss_win = obs.get_sliding_window(MetricType.EXTERNAL_PACKET_LOSS) or []
-        gw_loss_win = obs.get_sliding_window(MetricType.GATEWAY_PACKET_LOSS) or []
-        ext_loss_val, ext_loss_samples = _calc_loss(ext_loss_win, ext_loss)
-        gw_loss_val, gw_loss_samples = _calc_loss(gw_loss_win, loss)
-
-        if ext_loss_val is not None or gw_loss_val is not None:
-            if ext_loss_val is not None and gw_loss_val is not None:
-                loss_val = max(ext_loss_val, gw_loss_val)
-                loss_samples = ext_loss_samples if ext_loss_val >= gw_loss_val else gw_loss_samples
-            elif ext_loss_val is not None:
-                loss_val = ext_loss_val
-                loss_samples = ext_loss_samples
-            else:
-                loss_val = gw_loss_val
-                loss_samples = gw_loss_samples
-
-            is_warn = loss_val > DEFAULT_THRESHOLDS.loss.dashboard_warning_pct
-            if loss_val >= 99.9:
-                footer_txt = "انقطاع كامل في الحزم"
+        loss_window = self._safe_sliding_window(obs, MetricType.EXTERNAL_PACKET_LOSS, 20)
+        if not loss_window:
+            loss_window = self._safe_sliding_window(obs, MetricType.GATEWAY_PACKET_LOSS, 20)
+        loss_unit = str(getattr(m_loss, "unit", "") or "").lower()
+        loss_pct = (loss_val * 100.0) if (loss_val is not None and loss_unit == "ratio") else loss_val
+        loss_samples = [
+            (v * 100.0 if str(getattr(m, "unit", "") or "").lower() == "ratio" else v)
+            for m in loss_window
+            for v in (self._valid_num(getattr(m, "normalized_value", None)),)
+            if v is not None
+        ]
+        if loss_pct is not None:
+            is_warn = loss_pct > 0.5
+            if loss_pct >= 99.9:
+                loss_footer = "انقطاع كامل في الحزم"
+                loss_col = tokens.STATUS_BAD
             elif is_warn:
-                footer_txt = "فقدان حزم ملحوظ"
+                loss_footer = tr("dash.loss_detected")
+                loss_col = tokens.STATUS_BAD if loss_pct >= 5.0 else tokens.STATUS_WARN
             else:
-                footer_txt = "ممتاز · لا حزم ضائعة"
-
+                loss_footer = tr("dash.loss_zero")
+                loss_col = tokens.STATUS_OK
             self.metrics_strip.cell_loss.update_metric(
-                f"{loss_val:.1f}",
-                footer_text=footer_txt,
+                f"{loss_pct:.1f}",
+                loss_footer,
                 is_warning=is_warn,
                 samples=loss_samples,
+                status_color=loss_col,
             )
         else:
-            self.metrics_strip.cell_loss.update_metric(" — ", footer_text="غير متصل", is_warning=False, samples=[])
+            self.metrics_strip.cell_loss.update_metric(" — ", "غير متصل", samples=[], status_color=tokens.TEXT_MUTED)
 
-        # 4. Download / Throughput Tile (Item 1.1)
-        is_rx_valid = (
-            rx is not None
-            and rx.raw_value is not None
-            and math.isfinite(rx.raw_value)
-            and rx.raw_value >= 0.0
-            and getattr(rx, "status", None) != ProbeStatus.FAILED
+        # Download & Upload throughput windows
+        rx_win = self._safe_sliding_window(obs, MetricType.BANDWIDTH_RX_BYTES_PER_SEC, 40)
+        tx_win = self._safe_sliding_window(obs, MetricType.BANDWIDTH_TX_BYTES_PER_SEC, 40)
+        dl_mbps_list = [round(v * 8.0 / 1_000_000.0, 2) for v in (self._valid_num(getattr(m, "normalized_value", None)) for m in rx_win) if v is not None]
+        ul_mbps_list = [round(v * 8.0 / 1_000_000.0, 2) for v in (self._valid_num(getattr(m, "normalized_value", None)) for m in tx_win) if v is not None]
+        ts_list = [m.timestamp.strftime("%H:%M:%S") for m in rx_win if getattr(m, "timestamp", None)]
+        self.traffic_chart.set_series(dl_mbps_list, ul_mbps_list, ts_list)
+
+        if rx_bps is not None:
+            latest_dl = rx_bps * 8.0 / 1_000_000.0
+            latest_ul = (tx_bps * 8.0 / 1_000_000.0) if tx_bps is not None else None
+            dl_txt = f"{latest_dl:.0f}" if latest_dl >= 10.0 else f"{latest_dl:.1f}"
+            ul_txt = f"{latest_ul:.1f}" if (latest_ul is not None and latest_ul > 0.0) else f"{0.0:.2f}"
+            footer_dl = f"الرفع {ul_txt} Mbps"
+            if self._last_speed_test_time:
+                footer_dl = f"{footer_dl} · آخر فحص: {self._last_speed_test_time}"
+            dl_samples = dl_mbps_list[-20:] if dl_mbps_list else [round(latest_dl, 2)]
+            self.metrics_strip.cell_download.update_metric(
+                dl_txt,
+                footer_dl,
+                samples=dl_samples,
+                status_color=tokens.SECONDARY_CYAN,
+            )
+        else:
+            dl_footer = f"آخر فحص: {self._last_speed_test_time}" if self._last_speed_test_time else "غير متصل"
+            self.metrics_strip.cell_download.update_metric(" — ", dl_footer, samples=[], status_color=tokens.TEXT_MUTED)
+
+        # Latency chart
+        lat_win = self._safe_sliding_window(obs, MetricType.EXTERNAL_LATENCY, 60)
+        lat_vals = [v for v in (self._valid_num(getattr(m, "normalized_value", None)) for m in lat_win) if v is not None]
+        if lat_vals:
+            avg_ms = sum(lat_vals) / len(lat_vals)
+            max_ms = max(lat_vals)
+            self.latency_chart.update_telemetry(lat_vals, avg_ms=avg_ms, max_ms=max_ms, duration_str="—")
+        else:
+            self.latency_chart.update_telemetry([])
+
+        # Flow path sync
+        self.flow_path.update_node_latency(1, gw_val, "warn" if (gw_val or 0) >= 35 else "ok")
+        self.flow_path.update_node_latency(2, ext_val, "warn" if (ext_val or 0) >= 80 else "ok")
+        if dns_val is not None:
+            self.flow_path.update_node_latency(3, dns_val, "warn" if dns_val >= 80 else "ok")
+
+        # Update global authoritative multi-layer network state from measured probes
+        gw_loss_m = obs.get_latest_measurement(MetricType.GATEWAY_PACKET_LOSS)
+        gw_loss_raw = self._valid_num(getattr(gw_loss_m, "normalized_value", None))
+        gw_loss_pct = (
+            (gw_loss_raw * 100.0)
+            if (gw_loss_raw is not None and str(getattr(gw_loss_m, "unit", "") or "").lower() == "ratio")
+            else gw_loss_raw
         )
-        if is_rx_valid:
-            rx_mbps = (rx.raw_value * 8.0) / 1_000_000.0
-            is_tx_valid = (
-                tx is not None
-                and tx.raw_value is not None
-                and math.isfinite(tx.raw_value)
-                and tx.raw_value >= 0.0
-                and getattr(tx, "status", None) != ProbeStatus.FAILED
-            )
-            tx_mbps = ((tx.raw_value * 8.0) / 1_000_000.0) if is_tx_valid else 0.0
+        ext_loss_m = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
+        ext_loss_raw = self._valid_num(getattr(ext_loss_m, "normalized_value", None))
+        ext_loss_pct = (
+            (ext_loss_raw * 100.0)
+            if (ext_loss_raw is not None and str(getattr(ext_loss_m, "unit", "") or "").lower() == "ratio")
+            else ext_loss_raw
+        )
+        g_state = GlobalNetworkStateStore.get_instance().update_from_measurements(
+            gw_ms=gw_val,
+            gw_loss_pct=gw_loss_pct,
+            ext_ms=ext_val,
+            ext_loss_pct=ext_loss_pct,
+            jitter_ms=jit_val,
+            dns_ms=dns_val,
+            probe_error=err_msg,
+        )
 
-            if rx_mbps >= 100.0:
-                val_str = f"{rx_mbps:.0f}"
-            elif rx_mbps >= 1.0:
-                val_str = f"{rx_mbps:.1f}"
-            else:
-                val_str = f"{rx_mbps:.2f}"
+        # Health Score calculation using normalized loss % and internet/gateway availability
+        score, health_status, summary_text = compute_genuine_health_score(
+            gw_ms=gw_val,
+            ext_ms=ext_val,
+            loss_pct=loss_pct,
+            jitter_ms=jit_val,
+            dns_ms=dns_val,
+            wifi_pct=wifi_val,
+            internet_available=g_state.internet_available,
+            gateway_reachable=g_state.gateway_reachable,
+        )
+        status_key = f"status.{health_status.value if hasattr(health_status, 'value') else health_status}"
+        self.health_gauge.set_value(score, subtitle=tr(status_key) if score is not None else tr("status.waiting"))
+        self.badge_hero_status.set_status(health_status, tr(status_key))
 
-            upload_str = f"الرفع {tx_mbps:.1f} Mbps" if tx_mbps >= 1.0 else f"الرفع {tx_mbps:.2f} Mbps"
-            if self._last_speed_test_time:
-                footer_text = f"{upload_str} · آخر فحص: {self._last_speed_test_time}"
-            else:
-                footer_text = upload_str
-
-            rx_window = obs.get_sliding_window(MetricType.BANDWIDTH_RX_BYTES_PER_SEC) or []
-            rx_samples = [
-                (s.raw_value * 8.0) / 1_000_000.0
-                for s in rx_window
-                if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
-            ] if rx_window else []
-
-            self.metrics_strip.cell_download.update_metric(
-                val_str=val_str,
-                footer_text=footer_text,
-                is_warning=False,
-                samples=rx_samples,
-            )
+        if health_status == tokens.SystemStatus.HEALTHY:
+            self.hero_dot.set_status(tokens.STATUS_OK)
+            self.lbl_hero_title.setText(tr("dash.hero_title_healthy"))
+        elif health_status == tokens.SystemStatus.WARNING:
+            self.hero_dot.set_status(tokens.STATUS_WARN)
+            self.lbl_hero_title.setText(tr("dash.hero_title_warning"))
+        elif health_status == tokens.SystemStatus.FAILED:
+            self.hero_dot.set_status(tokens.STATUS_BAD)
+            self.lbl_hero_title.setText(tr("dash.hero_title_critical"))
         else:
-            footer_text = "غير متصل"
-            if self._last_speed_test_time:
-                footer_text = f"غير متصل · آخر فحص: {self._last_speed_test_time}"
-            self.metrics_strip.cell_download.update_metric(
-                val_str=" — ",
-                footer_text=footer_text,
-                is_warning=False,
-                samples=[],
-            )
+            self.hero_dot.set_status(tokens.TEXT_MUTED)
+            self.lbl_hero_title.setText(tr("dash.hero_initializing"))
 
-        # 5. Latency Chart Sliding Window
-        ext_window = obs.get_sliding_window(MetricType.EXTERNAL_LATENCY) or []
-        valid_chart_samples = [
-            s.raw_value for s in ext_window
-            if s.raw_value is not None and math.isfinite(s.raw_value) and s.raw_value >= 0.0
-        ] if ext_window else []
-        if valid_chart_samples:
-            self.latency_chart.update_telemetry(
-                samples=valid_chart_samples,
-                avg_ms=sum(valid_chart_samples) / len(valid_chart_samples),
-                max_ms=max(valid_chart_samples),
-                duration_str=f"{len(valid_chart_samples)} ث",
-            )
+        self.lbl_hero_desc.setText(summary_text)
+        self._update_recommendations_from_diag(last_diag, gw_val=gw_val, ext_val=ext_val, loss_val=loss_pct, dns_val=dns_val, wifi_val=wifi_val)
+
+        gw_ip = str(self._last_net_info.get("gateway_ip") or self._last_net_info.get("gateway") or self._last_net_info.get("default_gateway") or "—")
+        self._refresh_topology_widget(gw_ip=gw_ip, info=self._last_net_info)
+
+    def _update_recommendations_from_diag(
+        self,
+        diag: Optional[Diagnosis],
+        *,
+        gw_val: Optional[float],
+        ext_val: Optional[float],
+        loss_val: Optional[float],
+        dns_val: Optional[float],
+        wifi_val: Optional[float],
+    ) -> None:
+        recs: List[str] = []
+        if diag and diag.recommended_actions:
+            for act in diag.recommended_actions[:3]:
+                recs.append(f"• {act}")
+        if dns_val is not None and dns_val >= 80.0:
+            recs.append(f"• {tr('dash.rec_dns')}")
+        if wifi_val is not None and wifi_val < 55.0:
+            recs.append(f"• {tr('dash.rec_wifi')}")
+        if loss_val is not None and loss_val >= 2.0:
+            recs.append(f"• {tr('dash.rec_loss')}")
+        if gw_val is not None and gw_val >= 35.0:
+            recs.append(f"• {tr('dash.rec_gw')}")
+
+        if recs:
+            self.lbl_recs_body.setText(tokens.bidi_isolate_mixed("\n".join(recs[:4])))
+            self.lbl_recs_body.setStyleSheet(f"color: {tokens.STATUS_WARN};")
+        elif ext_val is not None:
+            self.lbl_recs_body.setText(tr("dash.recs_all_good"))
+            self.lbl_recs_body.setStyleSheet(f"color: {tokens.STATUS_OK};")
         else:
-            self.latency_chart.update_telemetry(
-                samples=[],
-                avg_ms=0.0,
-                max_ms=0.0,
-                duration_str="—",
-            )
-
-        # 6. 5-Node Flow Path Live Updates (Item 1.3)
-        if hasattr(self, "flow_path"):
-            # Node 01: Device (local processing / adapter state)
-            is_gw_valid = (
-                gw is not None
-                and gw.raw_value is not None
-                and math.isfinite(gw.raw_value)
-                and gw.raw_value >= 0.0
-                and getattr(gw, "status", None) != ProbeStatus.FAILED
-            )
-            if is_gw_valid:
-                self.flow_path.update_node_latency(
-                    0, 0.5, status="ok", desc="بطاقة الشبكة وجهاز الكمبيوتر يعملان بكفاءة تامة دون أي تأخير داخلي."
-                )
-            else:
-                self.flow_path.update_node_latency(
-                    0, None, status="bad", desc="محول الشبكة غير متصل بالراوتر أو معطل."
-                )
-
-            # Node 02: Router (Gateway latency)
-            if is_gw_valid:
-                gw_ms = gw.raw_value
-                if gw_ms < DEFAULT_THRESHOLDS.latency.gateway_warning_ms:
-                    gw_st = "ok"
-                    gw_desc = f"الاتصال بالراوتر المنزلي مستقر للغاية ({int(round(gw_ms))} ms)."
-                elif gw_ms < DEFAULT_THRESHOLDS.latency.gateway_critical_ms:
-                    gw_st = "warn"
-                    gw_desc = f"زمن الاستجابة للراوتر مرتفع نسبياً ({int(round(gw_ms))} ms). قد يكون هناك تداخل لاسلكي."
-                else:
-                    gw_st = "bad"
-                    gw_desc = f"بطء شديد أو فقدان حزم في الاتصال بالراوتر ({int(round(gw_ms))} ms)."
-                self.flow_path.update_node_latency(1, gw_ms, status=gw_st, desc=gw_desc)
-            else:
-                self.flow_path.update_node_latency(1, None, status="bad", desc="تعذر الوصول للراوتر (البوابة الافتراضية).")
-
-            # Node 03: Hop 02 / Next-Hop Provider Network
-            net_info = getattr(self, "_network_info", {}) or {}
-            isp_name = net_info.get("isp_company") or "مزود الخدمة"
-            if "WE" in isp_name or "المصرية" in isp_name:
-                isp_node_label = "مزود الخدمة (WE)"
-            elif "Orange" in isp_name or "أورنج" in isp_name:
-                isp_node_label = "مزود الخدمة (Orange)"
-            elif "Vodafone" in isp_name or "فودافون" in isp_name:
-                isp_node_label = "مزود الخدمة (Vodafone)"
-            elif "Etisalat" in isp_name or "e&" in isp_name:
-                isp_node_label = "مزود الخدمة (e&)"
-            else:
-                isp_node_label = isp_name[:20] if len(isp_name) > 20 else isp_name
-
-            if len(self.flow_path.node_info) > 2 and isp_node_label not in ("مزود الخدمة", "جاري التحقق من مزود الخدمة..."):
-                self.flow_path.node_info[2]["name"] = isp_node_label
-                self.flow_path.nodes[2].lbl_name.setText(isp_node_label)
-
-            hop2_diag = net_info.get("hop2_diag", {}) or {}
-            isp_edge_hop = net_info.get("isp_gateway_ip") or hop2_diag.get("ip")
-            h2_cls = hop2_diag.get("classification")
-            h2_lat = hop2_diag.get("latency_ms") or net_info.get("isp_gateway_latency_ms")
-            if h2_lat is None:
-                try:
-                    from app.platform.windows.network_info import _cached_hop2_info, _cached_isp_gateway
-                    if _cached_hop2_info:
-                        h2_lat = _cached_hop2_info.get("latency_ms")
-                        h2_cls = h2_cls or _cached_hop2_info.get("classification")
-                        isp_edge_hop = isp_edge_hop or _cached_isp_gateway or _cached_hop2_info.get("ip")
-                except Exception:
-                    pass
-
-            if not is_ext_valid and not is_gw_valid:
-                self.flow_path.update_node_latency(
-                    2, None, status="bad", desc=f"انقطاع الاتصال بمزود خدمة الإنترنت ({isp_name})."
-                )
-            elif h2_lat is not None and h2_lat >= 0:
-                st = "ok" if h2_lat < 50.0 else "warn"
-                h2_proto = hop2_diag.get("protocol", "ICMP")
-                self.flow_path.update_node_latency(
-                    2,
-                    h2_lat,
-                    status=st,
-                    desc=f"المحطة الثانية ({isp_edge_hop} · {isp_name}) تستجيب بنجاح ({int(round(h2_lat))} ms) عبر بروتوكول {h2_proto}.",
-                )
-            elif h2_cls in ("PATH_CONTINUES", "INTERMEDIATE_FILTERING_SUSPECTED") or (is_ext_valid and not isp_edge_hop):
-                # CASE 1 & CASE 2: Hop 2 silent, but packets progressed and external connectivity is verified!
-                self.flow_path.update_node_latency(
-                    2,
-                    None,
-                    status="ok",
-                    desc=f"المحطة الثانية (Hop 02) لا تستجيب لحزم الاستطلاع المباشرة، مع استمرار حركة البيانات ووصولها للمحطات اللاحقة بنجاح (Path Continues · {isp_name}).",
-                )
-            elif is_ext_valid:
-                self.flow_path.update_node_latency(
-                    2,
-                    None,
-                    status="ok",
-                    desc=f"مسار {isp_name} نشط ويمرر البيانات للمحطات الخارجية، مع حجب استجابات الاستطلاع الوسيطة.",
-                )
-            else:
-                self.flow_path.update_node_latency(
-                    2, None, status="bad", desc=f"انقطاع الاتصال أو تعذر الاستجابة في مسار {isp_name}."
-                )
-
-            # Node 04: DNS Server (from single source of truth DnsStateManager)
-            dns_state = DnsStateManager.get_instance().current
-            if dns_state.last_measured_ms is not None and dns_state.last_measured_ms > 0:
-                dns_ms = dns_state.last_measured_ms
-                dns_name = dns_state.detected_provider or (dns_state.active_servers[0] if dns_state.active_servers else "DNS")
-                active_ip = dns_state.active_servers[0] if dns_state.active_servers else ""
-                dns_st = "ok" if dns_state.is_healthy else ("warn" if dns_ms < 150.0 else "bad")
-                dns_desc = f"خادم DNS المعتمد بجهازك ({dns_name} · {active_ip}) يستجيب بسرعة ({int(round(dns_ms))} ms). ترجمة النطاقات نشطة."
-                self.flow_path.update_node_latency(3, dns_ms, status=dns_st, desc=dns_desc)
-            else:
-                dns_meas = obs.get_latest_measurement(MetricType.DNS_LATENCY)
-                is_dns_valid = (
-                    dns_meas is not None
-                    and dns_meas.raw_value is not None
-                    and math.isfinite(dns_meas.raw_value)
-                    and dns_meas.raw_value >= 0.0
-                    and getattr(dns_meas, "status", None) != ProbeStatus.FAILED
-                )
-                if is_dns_valid:
-                    dns_ms = dns_meas.raw_value
-                    dns_st = "ok" if dns_ms < DEFAULT_THRESHOLDS.latency.dns_warning_ms else "warn"
-                    self.flow_path.update_node_latency(3, dns_ms, status=dns_st, desc=f"خادم DNS النشط يستجيب ({int(round(dns_ms))} ms).")
-                elif self.flow_path.node_info[3]["latency"] is None:
-                    self.flow_path.update_node_latency(3, None, status="none", desc="جاري قياس استجابة خادم DNS...")
-
-            # Node 05: Internet (External latency)
-            if is_ext_valid:
-                ext_ms = ext.raw_value
-                if ext_ms < DEFAULT_THRESHOLDS.latency.external_warning_ms:
-                    ext_st = "ok"
-                    ext_desc = f"الوصول إلى الخوادم السحابية العالمية متاح ومستقر ({int(round(ext_ms))} ms)."
-                elif ext_ms < DEFAULT_THRESHOLDS.latency.external_critical_ms:
-                    ext_st = "warn"
-                    ext_desc = f"زمن الاستجابة للإنترنت الخارجي مرتفع نسبياً ({int(round(ext_ms))} ms)."
-                else:
-                    ext_st = "bad"
-                    ext_desc = f"انقطاع أو بطء حاد في الاتصال بالإنترنت العام ({int(round(ext_ms))} ms)."
-                self.flow_path.update_node_latency(4, ext_ms, status=ext_st, desc=ext_desc)
-            else:
-                self.flow_path.update_node_latency(4, None, status="bad", desc="تعذر الوصول إلى الإنترنت العام (انقطاع كامل).")
-
-        if not is_gw_valid and not is_ext_valid:
-            self.update_shield("offline", "تعذر الاتصال بالشبكة", "تعذر الوصول إلى الراوتر المنزلي أو شبكة الإنترنت الخارجية.")
-        elif not is_ext_valid:
-            self.update_shield("outage", "انقطاع الإنترنت", "الراوتر المنزلي متصل، ولكن تعذر الوصول إلى خوادم الإنترنت العامة.")
-        elif last_diag:
-            if last_diag.probable_cause == ProbableCause.HEALTHY and is_gw_valid and is_ext_valid:
-                self.update_shield("healthy", "الشبكة سليمة", "كافة مؤشرات الشبكة والراوتر وخوادم الإنترنت تعمل ضمن المعدلات الطبيعية الممتازة.")
-            elif last_diag.probable_cause in (ProbableCause.UNKNOWN_ANOMALY, None) and (not is_gw_valid or not is_ext_valid):
-                self.update_shield("inconclusive", "جاري تدقيق القياسات...", "جاري جمع مؤشرات الشبكة والتحقق الميداني من استجابة المسار.")
-            else:
-                is_healthy = last_diag.probable_cause in (ProbableCause.HEALTHY, ProbableCause.DESTINATION_SPECIFIC_OUTAGE)
-                expl = last_diag.explanation or ""
-                title = "الشبكة بطيئة أو متذبذبة"
-                if "Default gateway" in expl or "gateway failed" in expl:
-                    expl = "تعذر وصول حزم الفحص إلى الراوتر المنزلي. تحقق من كابل الشبكة أو تشغيل الراوتر."
-                    title = "انقطاع الاتصال بالراوتر"
-                elif "Target" in expl and "is failing" in expl:
-                    expl = "أحد خوادم الفحص الخارجية لا يستجيب مؤقتاً، بينما اتصالك العام سليم وبقية الوجهات تعمل بكفاءة."
-                    title = "تباطؤ في وجهة خارجية"
-                elif "DNS" in expl:
-                    expl = "فشل في استعلامات أسماء النطاقات (DNS) بينما الاتصال المباشر متاح. خادم DNS لا يستجيب."
-                    title = "خلل في استجابة DNS"
-                elif "Upstream" in expl or "ISP" in expl or "مزود الخدمة" in expl:
-                    expl = "الراوتر المنزلي متصل، لكن هناك تذبذب أو فقدان حزم في كابينة مزود خدمة الإنترنت (ISP)."
-                    title = "تذبذب في شبكة المزود"
-                elif "Wi-Fi" in expl or "الواي فاي" in expl:
-                    expl = "إشارة الواي فاي ضعيفة جداً مما يسبب بطء الاتصال وتأخير الحزم."
-                    title = "إشارة واي فاي ضعيفة"
-                elif "normal" in expl or "indicators" in expl or not any('\u0600' <= c <= '\u06FF' for c in expl):
-                    expl = "كافة مؤشرات الشبكة والراوتر وخوادم الإنترنت تعمل ضمن المعدلات الطبيعية الممتازة."
-                    title = "الشبكة سليمة"
-                self.update_shield(is_healthy, title, expl)
+            self.lbl_recs_body.setText(tr("dash.recs_empty"))
+            self.lbl_recs_body.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
     def update_dns_recommendation(
         self,
@@ -937,72 +991,111 @@ class DashboardView(QWidget):
         is_autonomous: bool = True,
         auto_applied: bool = False,
     ) -> None:
-        """Dynamically update recommendation card and flow path node from live benchmark."""
+        self._last_dns_name = curr_name or "—"
+        if best_ip:
+            self._last_dns_ip = best_ip if auto_applied else self._last_dns_ip
+        if curr_ms is not None:
+            self._last_dns_ms = curr_ms
         self.dns_panel.update_dns_state(
-            curr_name=curr_name,
-            curr_ms=curr_ms,
-            best_name=best_name,
-            best_ip=best_ip,
-            best_ms=best_ms,
-            is_optimal=is_optimal,
+            curr_name,
+            curr_ms,
+            best_name,
+            best_ip,
+            best_ms,
+            is_optimal,
             is_autonomous=is_autonomous,
             auto_applied=auto_applied,
         )
-        if curr_ms is not None and curr_ms > 0:
-            self.flow_path.update_dns_node(
-                latency_ms=curr_ms,
-                is_optimal=is_optimal,
-                dns_name=curr_name,
-            )
-        else:
-            self.flow_path.update_node_latency(3, None, status="none", desc="جاري قياس استجابة خادم DNS...")
+        self.flow_path.update_dns_node(curr_ms, is_optimal=is_optimal, dns_name=curr_name)
 
-    def update_timeline_from_records(
-        self,
-        incident: Optional[Any] = None,
-        audit_record: Optional[Any] = None,
-    ) -> None:
-        """Delegate dynamic timeline generation to timeline_panel from stored records."""
+    def update_timeline_from_records(self, incident: Optional[Any] = None, audit_record: Optional[Any] = None) -> None:
         self.timeline_panel.update_from_records(incident, audit_record)
 
     def log_autonomous_action(self, title: str, description: str, level: str = "success") -> None:
-        now_dt = datetime.now()
-        t1 = (now_dt - timedelta(seconds=15)).strftime("%H:%M:%S")
-        t2 = (now_dt - timedelta(seconds=12)).strftime("%H:%M:%S")
-        t3 = (now_dt - timedelta(seconds=5)).strftime("%H:%M:%S")
-        t4 = now_dt.strftime("%H:%M:%S")
+        now_s = datetime.now().strftime("%H:%M")
+        self.timeline_panel.set_event(
+            now_s,
+            [(now_s, title, description)],
+            is_resolved=(level in ("success", "ok", "info")),
+        )
 
-        res_msg = "استعادة الاستقرار وانخفاض زمن الاستجابة للمعدلات الطبيعية."
-        if level == "error":
-            res_msg = "تعذر إكمال المعالجة أو التحقق من استقرار الاتصال."
-        elif level == "warning":
-            res_msg = "تم التدخل بنجاح مع استمرار مراقبة مؤشرات الأداء."
+    def _apply_layout_mode(self, mode: str) -> None:
+        if mode == self._layout_mode:
+            return
+        self._layout_mode = mode
 
-        steps = [
-            (t1, "اكتشاف المشكلة", "رصد انحراف أو تذبذب في مؤشرات جودة وتدفق حركة البيانات."),
-            (t2, "تحديد السبب", description),
-            (t3, "الإصلاح", title),
-            (t4, "النتيجة", res_msg),
-        ]
-        self.timeline_panel.set_event(now_dt.strftime("%H:%M"), steps, is_resolved=(level == "success"))
+        # Re-grid charts, summary cards, and bottom panels
+        for grid in (self.charts_grid, self.summary_grid, self.bottom_grid):
+            while grid.count():
+                grid.takeAt(0)
+
+        if mode == "desktop":
+            self.metrics_strip.set_responsive_columns(4)
+            self.network_strip.set_responsive_mode("desktop")
+            self.charts_grid.addWidget(self.latency_chart, 0, 0)
+            self.charts_grid.addWidget(self.traffic_chart, 0, 1)
+            self.summary_grid.addWidget(self.panel_guard, 0, 0)
+            self.summary_grid.addWidget(self.panel_wifi_router, 0, 1)
+            self.summary_grid.addWidget(self.panel_recs, 0, 2)
+            self.bottom_grid.addWidget(self.consumers_panel, 0, 0)
+            self.bottom_grid.addWidget(self.dns_panel, 0, 1)
+        elif mode == "compact":
+            self.metrics_strip.set_responsive_columns(2)
+            self.network_strip.set_responsive_mode("compact")
+            self.charts_grid.addWidget(self.latency_chart, 0, 0)
+            self.charts_grid.addWidget(self.traffic_chart, 1, 0)
+            self.summary_grid.addWidget(self.panel_guard, 0, 0)
+            self.summary_grid.addWidget(self.panel_wifi_router, 1, 0)
+            self.summary_grid.addWidget(self.panel_recs, 2, 0)
+            self.bottom_grid.addWidget(self.consumers_panel, 0, 0)
+            self.bottom_grid.addWidget(self.dns_panel, 1, 0)
+        else:
+            self.metrics_strip.set_responsive_columns(1)
+            self.network_strip.set_responsive_mode("mobile")
+            self.charts_grid.addWidget(self.latency_chart, 0, 0)
+            self.charts_grid.addWidget(self.traffic_chart, 1, 0)
+            self.summary_grid.addWidget(self.panel_guard, 0, 0)
+            self.summary_grid.addWidget(self.panel_wifi_router, 1, 0)
+            self.summary_grid.addWidget(self.panel_recs, 2, 0)
+            self.bottom_grid.addWidget(self.consumers_panel, 0, 0)
+            self.bottom_grid.addWidget(self.dns_panel, 1, 0)
 
     def _sync_content_width(self) -> None:
-        if hasattr(self, "scroll") and hasattr(self, "content_widget"):
-            vw = self.scroll.viewport().width()
-            if vw > 0:
-                self.content_widget.setFixedWidth(vw)
+        vw = self.scroll.viewport().width()
+        if vw > 0:
+            self.content_holder.setFixedWidth(min(vw, tokens.MAX_CONTENT_WIDTH))
+            mode = "desktop" if vw >= 960 else ("compact" if vw >= 560 else "mobile")
+            self._apply_layout_mode(mode)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._sync_content_width()
-        w = self.width()
 
-        if w >= 1100:
-            if self._current_layout_mode != "desktop":
-                self._apply_layout_mode("desktop")
-        elif 700 <= w < 1100:
-            if self._current_layout_mode != "tablet":
-                self._apply_layout_mode("tablet")
-        else:  # w < 700
-            if self._current_layout_mode != "mobile":
-                self._apply_layout_mode("mobile")
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sync_content_width()
+
+    def shutdown(self) -> None:
+        """Stop timers and detach singleton clock/i18n observers cleanly."""
+        if hasattr(self, "_tick_timer") and self._tick_timer.isActive():
+            self._tick_timer.stop()
+        try:
+            language_manager().language_changed.disconnect(self.retranslate)
+        except Exception:
+            pass
+        if hasattr(self, "hero_dot") and hasattr(self.hero_dot, "set_paused"):
+            self.hero_dot.set_paused(True)
+        if hasattr(self, "latency_chart") and hasattr(self.latency_chart, "canvas"):
+            try:
+                self.latency_chart.canvas.set_paused(True)
+            except Exception:
+                pass
+        if hasattr(self, "flow_path") and hasattr(self.flow_path, "canvas"):
+            try:
+                AnimationMasterClock.get_instance().unsubscribe(self.flow_path.canvas._on_flow_tick)
+            except Exception:
+                pass
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
+        super().closeEvent(event)

@@ -8,8 +8,10 @@ for low-resource hardware.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, Set
+import weakref
+from typing import Any, Callable, List, Optional, Set
 from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtWidgets import QApplication
 from app.ui import tokens
 
 logger = logging.getLogger("netguard.ui.animation_clock")
@@ -34,7 +36,7 @@ class AnimationMasterClock(QObject):
         self._interval_ms = 160
         self._low_resource_mode = False
         self._is_paused = False
-        self._subscribers: Set[Callable[[float], None]] = set()
+        self._subscribers: List[Any] = []
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_timer_timeout)
@@ -49,8 +51,27 @@ class AnimationMasterClock(QObject):
     def get_instance(cls) -> AnimationMasterClock:
         """Singleton accessor for the UI process."""
         if cls._instance is None:
-            cls._instance = AnimationMasterClock()
+            app = QApplication.instance()
+            cls._instance = AnimationMasterClock(parent=app)
+            if app is not None:
+                try:
+                    app.aboutToQuit.connect(cls.shutdown_instance)
+                except Exception:
+                    pass
         return cls._instance
+
+    @classmethod
+    def shutdown_instance(cls) -> None:
+        """Stop timer and release singleton cleanly before QApplication exits."""
+        inst = cls._instance
+        cls._instance = None
+        if inst is not None:
+            try:
+                inst._timer.stop()
+                inst._subscribers.clear()
+                inst.deleteLater()
+            except RuntimeError:
+                pass
 
     @property
     def is_running(self) -> bool:
@@ -98,25 +119,47 @@ class AnimationMasterClock(QObject):
             self._timer.setInterval(self._interval_ms)
 
     def subscribe(self, callback: Callable[[float], None]) -> None:
-        """Subscribe a widget tick handler to the master clock."""
-        self._subscribers.add(callback)
+        """Subscribe a widget tick handler to the master clock without leaking C++ widget lifetime."""
+        self.unsubscribe(callback)
+        try:
+            if hasattr(callback, "__self__") and hasattr(callback, "__func__"):
+                self._subscribers.append(weakref.WeakMethod(callback))
+            else:
+                self._subscribers.append(callback)
+        except TypeError:
+            self._subscribers.append(callback)
         if not self._timer.isActive() and not self._is_paused and getattr(tokens, "ANIMATIONS_ENABLED", True):
             self.start()
 
     def unsubscribe(self, callback: Callable[[float], None]) -> None:
         """Unsubscribe a widget tick handler."""
-        self._subscribers.discard(callback)
+        kept: List[Any] = []
+        for entry in self._subscribers:
+            cb = entry() if isinstance(entry, weakref.WeakMethod) else entry
+            if cb is not None and cb != callback:
+                kept.append(entry)
+        self._subscribers = kept
 
     def _on_timer_timeout(self) -> None:
         delta_ms = float(self._timer.interval())
         self.tick.emit(delta_ms)
-        dead = []
-        for cb in list(self._subscribers):
+        alive: List[Any] = []
+        callbacks: List[Callable[[float], None]] = []
+        for entry in list(self._subscribers):
+            if isinstance(entry, weakref.WeakMethod):
+                cb = entry()
+                if cb is None:
+                    continue
+                alive.append(entry)
+                callbacks.append(cb)
+            else:
+                alive.append(entry)
+                callbacks.append(entry)
+        self._subscribers = alive
+        for cb in callbacks:
             try:
                 cb(delta_ms)
             except (ReferenceError, RuntimeError):
-                dead.append(cb)
+                self.unsubscribe(cb)
             except Exception as exc:
                 logger.debug("Subscriber animation callback error: %s", exc)
-        for d in dead:
-            self._subscribers.discard(d)

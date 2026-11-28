@@ -9,7 +9,7 @@ Follows the reference design system strictly:
 """
 
 from __future__ import annotations
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget,
@@ -47,7 +47,7 @@ class ModeOptionCard(QFrame):
         top_row = QHBoxLayout()
         top_row.setSpacing(10)
 
-        self.dot = QLabel()
+        self.dot = QFrame()
         self.dot.setFixedSize(8, 8)
         top_row.addWidget(self.dot)
 
@@ -196,28 +196,22 @@ class RemediationView(QWidget):
 
     mode_changed = Signal(object)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, embed_in_scroll: bool = False) -> None:
         super().__init__(parent)
+        self._embed_in_scroll = bool(embed_in_scroll)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
-        scroll.viewport().setAutoFillBackground(True)
-        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
-        scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
-        scroll.verticalScrollBar().setSingleStep(25)
-
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(
-            tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
-        )
+        if self._embed_in_scroll:
+            layout.setContentsMargins(0, 4, 0, 8)
+        else:
+            layout.setContentsMargins(
+                tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
+            )
         layout.setSpacing(tokens.SECTION_GAP)
 
         # -------------------------------------------------------------
@@ -323,8 +317,20 @@ class RemediationView(QWidget):
         self.ledger_panel.main_layout.addLayout(self.events_layout)
         layout.addWidget(self.ledger_panel)
 
-        scroll.setWidget(content_widget)
-        root_layout.addWidget(scroll)
+        if self._embed_in_scroll:
+            root_layout.addWidget(content_widget)
+        else:
+            scroll = QScrollArea(self)
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+            scroll.viewport().setAutoFillBackground(True)
+            scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+            scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+            scroll.verticalScrollBar().setSingleStep(25)
+            scroll.setWidget(content_widget)
+            root_layout.addWidget(scroll)
 
     def set_operating_mode(self, mode: OperatingMode | str | int) -> None:
         if isinstance(mode, int):

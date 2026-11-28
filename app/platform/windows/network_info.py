@@ -468,18 +468,28 @@ def get_network_identity(platform_adapter=None, include_hop2: bool = True, inclu
         from app.platform.windows.adapter import WindowsPlatformAdapter
         platform_adapter = WindowsPlatformAdapter()
 
-    iface = platform_adapter.get_primary_interface() or "Wi-Fi"
-    gw = platform_adapter.get_default_gateway() or "192.168.1.1"
-    local_ip = get_local_ip(iface)
+    iface_raw = platform_adapter.get_primary_interface()
+    gw_raw = platform_adapter.get_default_gateway()
+    local_ip = get_local_ip(iface_raw or "")
     wifi = get_wifi_details()
-    dns_servers = platform_adapter.get_interface_dns_servers(iface)
+    has_real_local = bool(local_ip and not str(local_ip).startswith("127."))
+    ssid_raw = str(wifi.get("ssid") or "").strip()
+    has_wifi_ssid = bool(ssid_raw and ssid_raw not in ("غير متصل", "—", "-", "غير متصل (أو سلكي)"))
 
-    if include_isp:
+    # Never synthesize a default "Wi-Fi" / "192.168.1.1" identity when adapter is disconnected.
+    is_connected = bool(iface_raw or gw_raw or has_real_local or has_wifi_ssid)
+    iface = iface_raw or ("Wi-Fi" if has_wifi_ssid else "")
+    gw = gw_raw or ""
+    dns_servers = platform_adapter.get_interface_dns_servers(iface) if iface else []
+
+    if include_isp and is_connected:
         isp = get_isp_and_public_ip()
+    elif not is_connected:
+        isp = {"ip": "—", "city": "—", "company": "غير متصل بالشبكة", "status": "disconnected"}
     else:
         isp = _cached_isp_info or {"ip": "—", "city": "", "company": "جاري التحقق من مزود الخدمة...", "status": "checking"}
 
-    if include_hop2:
+    if include_hop2 and is_connected and gw:
         hop2_diag = get_hop2_diagnostics(gw)
         isp_gateway = hop2_diag.get("ip") or get_isp_gateway_ip(gw)
         lat = hop2_diag.get("latency_ms")
@@ -491,19 +501,26 @@ def get_network_identity(platform_adapter=None, include_hop2: bool = True, inclu
     # Determine connection type display name
     ssid_name = wifi.get("ssid") or "غير متصل"
     is_wifi = wifi.get("is_wifi", True) if "is_wifi" in wifi else ("wi-fi" in iface.lower() or "wlan" in iface.lower() or "wireless" in iface.lower())
-    if not is_wifi and ssid_name in ("غير متصل (أو سلكي)", "—"):
+    if not is_wifi and iface and ssid_name in ("غير متصل (أو سلكي)", "غير متصل", "—"):
         ssid_name = f"اتصال سلكي ({iface})"
+
+    conn_type = "Wi-Fi" if (is_wifi and is_connected) else ("Ethernet" if (iface and is_connected) else "Disconnected")
 
     return {
         "iface": iface,
+        "interface_name": iface,
         "gateway": gw,
-        "local_ip": local_ip,
+        "gateway_ip": gw,
+        "local_ip": local_ip if is_connected else "—",
         "ssid": ssid_name,
         "is_wifi": is_wifi,
+        "is_connected": is_connected,
+        "connection_type": conn_type,
         "signal": wifi.get("signal", "—"),
         "band": wifi.get("band", "—"),
         "wifi": wifi,
         "dns": dns_servers,
+        "dns_servers": dns_servers,
         "isp": isp,
         "isp_company": isp.get("company", "غير متوفر"),
         "public_ip": isp.get("ip", "—"),

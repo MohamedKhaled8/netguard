@@ -13,7 +13,7 @@ Interactive hover tooltips and integrated 5-point mono time axis.
 from __future__ import annotations
 from typing import List, Dict, Any
 from datetime import datetime
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolTip
+from PySide6.QtWidgets import QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolTip
 from PySide6.QtGui import QPainter, QColor, QBrush, QFont
 from PySide6.QtCore import Qt, QPoint, QRectF
 from app.ui import tokens
@@ -171,7 +171,7 @@ class DayStrip(QWidget):
             h_layout = QHBoxLayout(w)
             h_layout.setContentsMargins(0, 0, 0, 0)
             h_layout.setSpacing(6)
-            dot = QLabel()
+            dot = QFrame()
             dot.setFixedSize(8, 8)
             dot.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
             txt = QLabel(label_text)

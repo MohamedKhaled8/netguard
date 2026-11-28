@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import Optional
 import shiboken6
 from PySide6.QtCore import QObject, QEvent, Qt
-from PySide6.QtWidgets import QWidget, QScrollArea, QTableWidget
+from PySide6.QtWidgets import QWidget, QScrollArea, QSizePolicy, QTableWidget
+from app.ui import tokens
 
 
 def _is_valid(obj: Optional[QObject]) -> bool:
@@ -50,13 +51,36 @@ def fit_table_to_content(table: QTableWidget, max_rows_before_scroll: int = 15) 
     """Give table its natural content height inside the page scroll area."""
     table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    base_font = tokens.get_sans_font(14, 400)
+    if table.font().pixelSize() < 14:
+        table.setFont(base_font)
+    table.verticalHeader().setMinimumSectionSize(38)
+    for r in range(table.rowCount()):
+        for c in range(table.columnCount()):
+            it = table.item(r, c)
+            if it is not None:
+                f = it.font()
+                if f.pixelSize() < 14 and f.pointSize() <= 10:
+                    it.setFont(base_font)
     header_h = table.horizontalHeader().height()
     if header_h <= 0:
-        header_h = 42
-    def_h = table.verticalHeader().defaultSectionSize()
-    if def_h <= 0:
-        def_h = 52
+        header_h = 46
+    def_h = max(38, table.verticalHeader().defaultSectionSize())
     total_rows = table.rowCount()
-    rows_h = sum(table.rowHeight(r) if table.rowHeight(r) > 0 else def_h for r in range(total_rows))
-    total_h = header_h + rows_h + 8
-    table.setFixedHeight(max(total_h, 60))
+    rows_h = sum(max(38, table.rowHeight(r)) if table.rowHeight(r) > 0 else def_h for r in range(total_rows))
+    total_h = header_h + rows_h + 12
+    table.setMinimumHeight(0)
+    table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    table.setFixedHeight(max(total_h, 64))
+    table.updateGeometry()
+    p = table.parentWidget()
+    for _ in range(5):
+        if p is None:
+            break
+        p.updateGeometry()
+        if p.layout() is not None:
+            p.layout().activate()
+        if isinstance(p, QScrollArea) and p.widget() is not None:
+            p.widget().adjustSize()
+            break
+        p = p.parentWidget()

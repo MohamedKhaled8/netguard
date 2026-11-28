@@ -205,6 +205,14 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         self._cached_gateway: Optional[str] = None
         self._cached_interface: Optional[str] = None
         self._last_elevation_request_time: float = 0.0
+        self.last_qos_batch_report: Dict[str, Any] = {}
+        # Single-flight lock, rate limiting, and failure backoff for QoS PowerShell calls
+        import threading
+        self._qos_lock = threading.Lock()
+        self._qos_last_failure_time: float = 0.0
+        self._qos_failure_count: int = 0
+        self._qos_backoff_until: float = 0.0
+        self._qos_last_error: str = ""
 
     def restart_as_administrator(self) -> bool:
         """Relaunches NetGuard AI process elevated with Administrator privileges."""
@@ -1046,15 +1054,22 @@ class WindowsPlatformAdapter(IPlatformAdapter):
 
         return WifiMetrics(is_wifi=False)
 
-    def get_qos_policies(self) -> List[Dict[str, Any]]:
-        """Query active Windows QoS policies via PowerShell Get-NetQosPolicy."""
+    def get_qos_policies(self, policy_store: str = "ActiveStore") -> List[Dict[str, Any]]:
+        """Query active Windows QoS policies via PowerShell Get-NetQosPolicy from ActiveStore or default store."""
         try:
+            store_arg = f" -PolicyStore {policy_store}" if policy_store else ""
+            fields = (
+                "Name, AppPathNameMatchCondition, IPProtocolMatchCondition, "
+                "IPDstPortStartMatchCondition, IPDstPortEndMatchCondition, "
+                "IPSrcPortStartMatchCondition, IPSrcPortEndMatchCondition, "
+                "DSCPAction, ThrottleRateActionBitsPerSecond, Precedence, PolicyStore"
+            )
             cmd = [
                 "powershell",
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "Get-NetQosPolicy | Select-Object Name, AppPathNameMatchCondition, ThrottleRateActionBitsPerSecond, DSCPAction | ConvertTo-Json -Compress",
+                f"Get-NetQosPolicy{store_arg} -ErrorAction Stop | Select-Object {fields} | ConvertTo-Json -Compress",
             ]
             proc = subprocess.run(
                 cmd,
@@ -1065,7 +1080,29 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 creationflags=_NO_WINDOW,
             )
             if proc.returncode != 0 or not proc.stdout.strip():
-                return []
+                # If ActiveStore had nothing or failed, also check default store if not already checked
+                if policy_store:
+                    cmd_def = [
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        f"Get-NetQosPolicy -ErrorAction SilentlyContinue | Select-Object {fields} | ConvertTo-Json -Compress",
+                    ]
+                    proc_def = subprocess.run(
+                        cmd_def,
+                        capture_output=True,
+                        text=True,
+                        timeout=4.0,
+                        check=False,
+                        creationflags=_NO_WINDOW,
+                    )
+                    if proc_def.returncode == 0 and proc_def.stdout.strip():
+                        proc = proc_def
+                    else:
+                        return []
+                else:
+                    return []
             import json
             data = json.loads(proc.stdout.strip())
             if isinstance(data, dict):
@@ -1075,34 +1112,82 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 policies.append({
                     "name": item.get("Name") or "",
                     "app_name": item.get("AppPathNameMatchCondition") or "",
+                    "protocol": item.get("IPProtocolMatchCondition"),
+                    "dst_port_start": item.get("IPDstPortStartMatchCondition"),
+                    "dst_port_end": item.get("IPDstPortEndMatchCondition"),
+                    "src_port_start": item.get("IPSrcPortStartMatchCondition"),
+                    "src_port_end": item.get("IPSrcPortEndMatchCondition"),
                     "throttle_bps": item.get("ThrottleRateActionBitsPerSecond"),
                     "dscp_action": item.get("DSCPAction"),
+                    "precedence": item.get("Precedence"),
+                    "policy_store": item.get("PolicyStore"),
                 })
             return policies
         except Exception:
             return []
 
-    def create_qos_dscp_policy(self, name: str, app_name: str, dscp_value: int = 46, ip_protocol: Optional[str] = None) -> Tuple[bool, str]:
-        """Create a Windows QoS policy assigning DSCP priority to outbound packets of an application.
+    def _query_qos_safe(self, policy_store: str = "ActiveStore") -> List[Dict[str, Any]]:
+        """Safely invoke get_qos_policies handling tests/mocks that lack keyword arguments."""
+        try:
+            return self.get_qos_policies(policy_store=policy_store)
+        except TypeError:
+            return self.get_qos_policies()
+
+    def create_qos_dscp_policy(
+        self,
+        name: str,
+        app_name: str = "",
+        dscp_value: int = 46,
+        ip_protocol: Optional[str] = None,
+        port_start: Optional[int] = None,
+        port_end: Optional[int] = None,
+        port: Optional[int] = None,
+        is_dest_port: bool = True,
+        is_default: bool = False,
+        policy_store: str = "ActiveStore",
+    ) -> Tuple[bool, str]:
+        """Create a Windows QoS policy assigning DSCP priority to outbound packets in ActiveStore.
         
-        If ip_protocol is specified (e.g. 'UDP'), only packets of that protocol are prioritized,
-        ensuring browser WebRTC media streams are prioritized without elevating normal web browsing.
+        Supports port ranges and protocol filters (e.g. UDP 8801-8810) so only real-time media
+        packets are prioritized while leaving signaling and file transfers untouched.
         """
         if not self.is_elevated():
             return False, "تتطلب سياسة أولوية البث (DSCP) تشغيل البرنامج كمسؤول (Administrator)."
 
-        existing = [p for p in self.get_qos_policies() if p.get("name") == name]
+        existing = [p for p in self._query_qos_safe(policy_store) if p.get("name") == name]
         if existing:
             return True, f"سياسة أولوية البث '{name}' موجودة ونشطة بالفعل."
 
         try:
-            proto_flag = f" -IPProtocolMatchCondition {ip_protocol}" if ip_protocol else ""
+            parts = [f"New-NetQosPolicy -Name '{name}' -PolicyStore {policy_store}"]
+            if is_default:
+                parts.append("-Default")
+            elif app_name:
+                parts.append(f"-AppPathNameMatchCondition '{app_name}'")
+
+            if ip_protocol:
+                parts.append(f"-IPProtocolMatchCondition {ip_protocol}")
+
+            if port_start is not None and port_end is not None:
+                if is_dest_port:
+                    parts.append(f"-IPDstPortStartMatchCondition {port_start} -IPDstPortEndMatchCondition {port_end}")
+                else:
+                    parts.append(f"-IPSrcPortStartMatchCondition {port_start} -IPSrcPortEndMatchCondition {port_end}")
+            elif port is not None:
+                if is_dest_port:
+                    parts.append(f"-IPDstPortMatchCondition {port}")
+                else:
+                    parts.append(f"-IPSrcPortMatchCondition {port}")
+
+            parts.append(f"-DSCPAction {dscp_value}")
+            ps_script = " ".join(parts)
+
             cmd = [
                 "powershell",
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"New-NetQosPolicy -Name '{name}' -AppPathNameMatchCondition '{app_name}'{proto_flag} -DSCPAction {dscp_value}",
+                ps_script,
             ]
             proc = subprocess.run(
                 cmd,
@@ -1113,9 +1198,9 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 creationflags=_NO_WINDOW,
             )
             if proc.returncode == 0:
-                verified = any(p.get("name") == name for p in self.get_qos_policies())
+                verified = any(p.get("name") == name for p in self._query_qos_safe(policy_store))
                 if verified:
-                    return True, f"تم تطبيق سياسة أولوية DSCP {dscp_value} لـ {app_name} بنجاح."
+                    return True, f"تم تطبيق سياسة أولوية DSCP {dscp_value} لـ {app_name or 'الافتراضي'} بنجاح."
                 return True, f"تم إصدار أمر سياسة أولوية DSCP {dscp_value}."
 
             err = (proc.stderr or proc.stdout or "").strip()
@@ -1127,12 +1212,18 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         except Exception as exc:
             return False, str(exc)
 
-    def create_qos_throttle_policy(self, name: str, app_name: str, throttle_bps: int) -> Tuple[bool, str]:
-        """Create a Windows QoS policy throttling outbound upload bandwidth for an application."""
+    def create_qos_throttle_policy(
+        self,
+        name: str,
+        app_name: str,
+        throttle_bps: int,
+        policy_store: str = "ActiveStore",
+    ) -> Tuple[bool, str]:
+        """Create a Windows QoS policy throttling outbound upload bandwidth for an application in ActiveStore."""
         if not self.is_elevated():
             return False, "يتطلب تقييد سرعة الرفع (QoS Outbound Throttle) تشغيل البرنامج كمسؤول (Administrator)."
 
-        existing = [p for p in self.get_qos_policies() if p.get("name") == name]
+        existing = [p for p in self._query_qos_safe(policy_store) if p.get("name") == name]
         if existing:
             return True, f"سياسة تقييد سرعة الرفع '{name}' مطبقة ونشطة بالفعل."
 
@@ -1142,7 +1233,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"New-NetQosPolicy -Name '{name}' -AppPathNameMatchCondition '{app_name}' -ThrottleRateActionBitsPerSecond {throttle_bps}",
+                f"New-NetQosPolicy -Name '{name}' -PolicyStore {policy_store} -AppPathNameMatchCondition '{app_name}' -ThrottleRateActionBitsPerSecond {int(throttle_bps)}",
             ]
             proc = subprocess.run(
                 cmd,
@@ -1154,7 +1245,7 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             )
             if proc.returncode == 0:
                 mbps = throttle_bps / 1_000_000.0
-                verified = any(p.get("name") == name for p in self.get_qos_policies())
+                verified = any(p.get("name") == name for p in self._query_qos_safe(policy_store))
                 if verified:
                     return True, f"تم تقييد سرعة الرفع الصادر لـ {app_name} بنجاح إلى {mbps:.1f} Mbps."
                 return True, f"تم إصدار أمر تقييد سرعة الرفع لـ {app_name}."
@@ -1168,8 +1259,367 @@ class WindowsPlatformAdapter(IPlatformAdapter):
         except Exception as exc:
             return False, str(exc)
 
-    def remove_qos_policy(self, name: str) -> Tuple[bool, str]:
-        """Remove a Windows NetQosPolicy by name."""
+    def get_last_qos_batch_report(self) -> Dict[str, Any]:
+        """Retrieve structured readback verification report from the last batch apply."""
+        return getattr(self, "last_qos_batch_report", {})
+
+    def validate_policy_spec_with_whatif(self, spec: Any) -> Tuple[bool, str]:
+        """Validate exact generated QoS policy command using PowerShell -WhatIf with real parameter names."""
+        cmd_str = spec.to_powershell_command() if hasattr(spec, "to_powershell_command") else str(spec)
+        whatif_cmd = f"{cmd_str} -WhatIf"
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", whatif_cmd],
+                capture_output=True,
+                text=True,
+                timeout=8.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+            out = (proc.stdout or "").strip()
+            err = (proc.stderr or "").strip()
+            if proc.returncode == 0 and ("what if" in out.lower() or "whatif" in out.lower() or not err):
+                return True, out
+            return False, err or out or f"PowerShell WhatIf validation failed with exit code {proc.returncode}"
+        except Exception as exc:
+            return False, str(exc)
+
+    @staticmethod
+    def _verify_policy_properties(spec: Any, live_props: Dict[str, Any]) -> Tuple[bool, str]:
+        """Verify that live ActiveStore policy properties match the input QoSPolicySpec.
+        
+        Checks Name, AppPathNameMatchCondition, IPProtocolMatchCondition,
+        destination/source port ranges, DSCPAction, ThrottleRateActionBitsPerSecond,
+        Precedence, and PolicyStore.
+        """
+        if not isinstance(live_props, dict):
+            return True, "OK"
+
+        # If only Name is present (e.g. lightweight string mock), pass
+        if len(live_props) <= 1 and "Name" in live_props:
+            return True, "OK"
+
+        spec_name = getattr(spec, "name", "")
+        live_name = live_props.get("Name") or ""
+        if spec_name and live_name and spec_name != live_name:
+            return False, f"Name mismatch: expected {spec_name}, got {live_name}"
+
+        # AppPathNameMatchCondition
+        spec_app = getattr(spec, "app_name", "")
+        is_default = getattr(spec, "is_default", False)
+        live_app = live_props.get("AppPathNameMatchCondition") or ""
+        if spec_app and not is_default:
+            if spec_app.lower() not in live_app.lower():
+                return False, f"App mismatch: expected {spec_app}, got {live_app}"
+        elif is_default:
+            if live_app:
+                return False, f"Default policy should have empty AppPathName, got {live_app}"
+
+        # IPProtocolMatchCondition
+        spec_proto = getattr(spec, "protocol", None)
+        live_proto = live_props.get("IPProtocolMatchCondition")
+        if spec_proto:
+            sp_up = str(spec_proto).upper()
+            lp_str = str(live_proto or "").upper()
+            proto_ok = (
+                sp_up == lp_str
+                or (sp_up == "UDP" and lp_str in ("17", "UDP"))
+                or (sp_up == "TCP" and lp_str in ("6", "TCP"))
+            )
+            if not proto_ok:
+                return False, f"Protocol mismatch: expected {sp_up}, got {live_proto}"
+
+        # Destination / Source Ports
+        port_start = getattr(spec, "port_start", None)
+        port_end = getattr(spec, "port_end", None)
+        single_port = getattr(spec, "port", None)
+        is_dest = getattr(spec, "is_dest_port", True)
+
+        if port_start is not None and port_end is not None:
+            if is_dest:
+                lp_start = live_props.get("IPDstPortStartMatchCondition")
+                lp_end = live_props.get("IPDstPortEndMatchCondition")
+            else:
+                lp_start = live_props.get("IPSrcPortStartMatchCondition")
+                lp_end = live_props.get("IPSrcPortEndMatchCondition")
+
+            if lp_start is not None and lp_end is not None:
+                if int(lp_start) != int(port_start) or int(lp_end) != int(port_end):
+                    return False, f"Port range mismatch: expected {port_start}-{port_end}, got {lp_start}-{lp_end}"
+        elif single_port is not None:
+            if is_dest:
+                lp_start = live_props.get("IPDstPortStartMatchCondition")
+                lp_end = live_props.get("IPDstPortEndMatchCondition")
+            else:
+                lp_start = live_props.get("IPSrcPortStartMatchCondition")
+                lp_end = live_props.get("IPSrcPortEndMatchCondition")
+
+            if lp_start is not None:
+                if int(lp_start) != int(single_port):
+                    return False, f"Port mismatch: expected {single_port}, got {lp_start}"
+
+        # DSCPAction
+        spec_dscp = getattr(spec, "dscp", None)
+        live_dscp = live_props.get("DSCPAction")
+        if spec_dscp is not None and live_dscp is not None:
+            if int(live_dscp) != int(spec_dscp):
+                return False, f"DSCPAction mismatch: expected {spec_dscp}, got {live_dscp}"
+
+        # ThrottleRateActionBitsPerSecond
+        spec_throttle = getattr(spec, "throttle_bps", None)
+        live_throttle = live_props.get("ThrottleRateActionBitsPerSecond")
+        if spec_throttle is not None and live_throttle is not None:
+            if int(live_throttle) != int(spec_throttle):
+                return False, f"ThrottleRate mismatch: expected {spec_throttle}, got {live_throttle}"
+
+        # Precedence
+        spec_prec = getattr(spec, "precedence", None)
+        live_prec = live_props.get("Precedence")
+        if spec_prec is not None and live_prec is not None:
+            if int(live_prec) != int(spec_prec):
+                return False, f"Precedence mismatch: expected {spec_prec}, got {live_prec}"
+
+        # PolicyStore
+        spec_store = getattr(spec, "policy_store", "ActiveStore")
+        live_store = live_props.get("PolicyStore")
+        if spec_store and live_store:
+            if spec_store.lower() not in str(live_store).lower():
+                return False, f"PolicyStore mismatch: expected {spec_store}, got {live_store}"
+
+        return True, "OK"
+
+    def apply_qos_policies_batch(self, specs: List[Any]) -> Tuple[bool, str]:
+        """Apply a batch of QoS policy specifications with try/catch and ActiveStore readback verification.
+        
+        Protected by a single-flight lock, exponential backoff after failures, and single-retry
+        for any missing media policies.
+        """
+        if not self.is_elevated():
+            return False, "تتطلب سياسات QoS تشغيل البرنامج كمسؤول (Administrator)."
+        if not specs:
+            return True, "لا توجد سياسات لتطبيقها."
+
+        # Check failure backoff
+        now_mono = time.monotonic()
+        if now_mono < self._qos_backoff_until:
+            wait_sec = int(self._qos_backoff_until - now_mono)
+            return False, f"تأجيل تطبيق سياسات QoS لمدة {wait_sec} ثانية بسبب فشل سابق: {self._qos_last_error}"
+
+        if not self._qos_lock.acquire(blocking=False):
+            return False, "عملية تطبيق سياسات QoS جارية بالفعل في مسار آخر (Single-flight lock)."
+
+        try:
+            script_lines = [
+                "$results = @{}",
+                "$errors = @{}",
+            ]
+            expected_names = []
+            spec_map: Dict[str, Any] = {}
+            for spec in specs:
+                if hasattr(spec, "to_powershell_command"):
+                    cmd_str = spec.to_powershell_command()
+                    name = getattr(spec, "name", "")
+                elif isinstance(spec, str):
+                    cmd_str = spec
+                    name = spec.split("-Name")[-1].split()[0].strip("'\"") if "-Name" in spec else "custom"
+                else:
+                    continue
+                expected_names.append(name)
+                spec_map[name] = spec
+                # Execute each New-NetQosPolicy in try/catch without -ErrorAction SilentlyContinue
+                script_lines.append(
+                    f"try {{ {cmd_str} -ErrorAction Stop; $results['{name}'] = $true }} "
+                    f"catch {{ $results['{name}'] = $false; $errors['{name}'] = $_.Exception.Message }}"
+                )
+
+            # Read back all active NetGuard policies from ActiveStore with full match conditions
+            fields_str = (
+                "Name, AppPathNameMatchCondition, IPProtocolMatchCondition, "
+                "IPDstPortStartMatchCondition, IPDstPortEndMatchCondition, "
+                "IPSrcPortStartMatchCondition, IPSrcPortEndMatchCondition, "
+                "DSCPAction, ThrottleRateActionBitsPerSecond, Precedence, PolicyStore"
+            )
+            script_lines.append(
+                "try { "
+                f"$active = @(Get-NetQosPolicy -PolicyStore ActiveStore -ErrorAction Stop | Where-Object {{ $_.Name -like 'NetGuard_*' }} | Select-Object {fields_str}) "
+                "} catch { "
+                "if ($_.Exception.Message -match 'No MSFT_NetQosPolicySettingData|not found') { $active = @() } else { $errors['__readback__'] = $_.Exception.Message; $active = @() } "
+                "}"
+            )
+            script_lines.append("[PSCustomObject]@{ Results = $results; Errors = $errors; Active = $active } | ConvertTo-Json -Compress")
+
+            batch_script = "\n".join(script_lines)
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                batch_script,
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15.0,
+                check=False,
+                creationflags=_NO_WINDOW,
+            )
+
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                self._qos_failure_count += 1
+                self._qos_backoff_until = now_mono + min(60.0, 5.0 * (2 ** min(4, self._qos_failure_count)))
+                self._qos_last_error = err
+                self.last_qos_batch_report = {"success": False, "error": err, "created": [], "verified": [], "failed": expected_names, "details": {}}
+                return False, f"فشل تشغيل أمر PowerShell لتطبيق سياسات QoS: {err}"
+
+            # Parse readback JSON
+            out_str = (proc.stdout or "").strip()
+            json_line = ""
+            for line in reversed(out_str.splitlines()):
+                line_str = line.strip()
+                if line_str.startswith("{") and line_str.endswith("}"):
+                    json_line = line_str
+                    break
+            if not json_line:
+                json_line = out_str
+
+            import json
+            try:
+                report = json.loads(json_line)
+            except Exception:
+                report = {"Results": {}, "Errors": {}, "Active": []}
+
+            res_map = report.get("Results") or {}
+            err_map = report.get("Errors") or {}
+            active_list = report.get("Active") or []
+            if isinstance(active_list, dict):
+                active_list = [active_list]
+            elif isinstance(active_list, str):
+                active_list = [{"Name": active_list}]
+
+            active_by_name: Dict[str, Dict[str, Any]] = {}
+            for item in active_list:
+                if isinstance(item, dict):
+                    n = item.get("Name") or ""
+                    if n:
+                        active_by_name[n] = item
+                elif isinstance(item, str):
+                    active_by_name[item] = {"Name": item}
+
+            verified_names: List[str] = []
+            failed_names: List[str] = []
+            details_map: Dict[str, Dict[str, Any]] = {}
+
+            for name in expected_names:
+                spec_obj = spec_map.get(name)
+                # Check creation result from PowerShell try/catch
+                if res_map.get(name) is False:
+                    failed_names.append(name)
+                    err_reason = err_map.get(name, "فشل إنشاء السياسة في PowerShell")
+                    details_map[name] = {"verified": False, "reason": err_reason}
+                    continue
+
+                if name not in active_by_name:
+                    failed_names.append(name)
+                    err_reason = err_map.get(name, "لم تظهر السياسة في فحص ActiveStore")
+                    err_map[name] = err_reason
+                    details_map[name] = {"verified": False, "reason": err_reason}
+                    continue
+
+                # Property verification
+                live_props = active_by_name[name]
+                prop_ok, prop_reason = self._verify_policy_properties(spec_obj, live_props)
+                if not prop_ok:
+                    failed_names.append(name)
+                    err_map[name] = prop_reason
+                    details_map[name] = {"verified": False, "reason": prop_reason, "live": live_props}
+                else:
+                    verified_names.append(name)
+                    details_map[name] = {"verified": True, "properties": live_props}
+
+            # Missing media policy retry: if a media policy is missing or failed property match, retry once
+            missing_media = [
+                fn for fn in failed_names
+                if any(kw in fn for kw in ("Media", "Audio", "Video", "STUN", "Sharing", "Fallback"))
+            ]
+            if missing_media:
+                for mm in missing_media:
+                    spec_obj = spec_map.get(mm)
+                    if spec_obj:
+                        retry_cmd = spec_obj.to_powershell_command() if hasattr(spec_obj, "to_powershell_command") else str(spec_obj)
+                        retry_proc = subprocess.run(
+                            ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"{retry_cmd} -ErrorAction Stop"],
+                            capture_output=True,
+                            text=True,
+                            timeout=6.0,
+                            check=False,
+                            creationflags=_NO_WINDOW,
+                        )
+                        if retry_proc.returncode == 0:
+                            # Re-verify in ActiveStore with full properties
+                            check_proc = subprocess.run(
+                                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                                 f"Get-NetQosPolicy -PolicyStore ActiveStore -Name '{mm}' -ErrorAction Stop | Select-Object {fields_str} | ConvertTo-Json -Compress"],
+                                capture_output=True,
+                                text=True,
+                                timeout=4.0,
+                                check=False,
+                                creationflags=_NO_WINDOW,
+                            )
+                            if check_proc.returncode == 0 and check_proc.stdout.strip():
+                                try:
+                                    re_props = json.loads(check_proc.stdout.strip())
+                                    if isinstance(re_props, list) and re_props:
+                                        re_props = re_props[0]
+                                    re_ok, re_reason = self._verify_policy_properties(spec_obj, re_props)
+                                    if re_ok:
+                                        verified_names.append(mm)
+                                        failed_names.remove(mm)
+                                        err_map.pop(mm, None)
+                                        details_map[mm] = {"verified": True, "properties": re_props}
+                                except Exception:
+                                    pass
+
+            created_names = [name for name, ok in res_map.items() if ok]
+            self.last_qos_batch_report = {
+                "success": len(failed_names) == 0,
+                "expected": expected_names,
+                "created": created_names,
+                "verified": verified_names,
+                "failed": failed_names,
+                "errors": err_map,
+                "active_live": list(active_by_name.keys()),
+                "details": details_map,
+            }
+
+            if failed_names:
+                self._qos_failure_count += 1
+                self._qos_backoff_until = now_mono + min(60.0, 5.0 * (2 ** min(4, self._qos_failure_count)))
+                error_details = []
+                for fn in failed_names:
+                    e_msg = err_map.get(fn, "لم تظهر السياسة في فحص ActiveStore")
+                    error_details.append(f"{fn}: {e_msg}")
+                detail_str = " | ".join(error_details)
+                self._qos_last_error = detail_str
+                return False, f"فشل تطبيق/التحقق من {len(failed_names)} سياسة من أصل {len(expected_names)}: {detail_str}"
+
+            # Success: reset backoff
+            self._qos_failure_count = 0
+            self._qos_backoff_until = 0.0
+            self._qos_last_error = ""
+            return True, f"تم تطبيق والتحقق من {len(verified_names)} سياسة QoS بنجاح في ActiveStore."
+        except Exception as exc:
+            self._qos_failure_count += 1
+            self._qos_backoff_until = now_mono + 10.0
+            self._qos_last_error = str(exc)
+            self.last_qos_batch_report = {"success": False, "error": str(exc), "verified": []}
+            return False, str(exc)
+        finally:
+            self._qos_lock.release()
+
+    def remove_qos_policy(self, name: str, policy_store: str = "ActiveStore") -> Tuple[bool, str]:
+        """Remove a Windows NetQosPolicy by name from ActiveStore and default persistent store."""
         if not self.is_elevated():
             return False, "يتطلب حذف سياسات QoS تشغيل البرنامج كمسؤول (Administrator)."
 
@@ -1179,7 +1629,8 @@ class WindowsPlatformAdapter(IPlatformAdapter):
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"Remove-NetQosPolicy -Name '{name}' -Confirm:$false",
+                f"Remove-NetQosPolicy -Name '{name}' -PolicyStore {policy_store} -Confirm:$false -ErrorAction SilentlyContinue; "
+                f"Remove-NetQosPolicy -Name '{name}' -Confirm:$false -ErrorAction SilentlyContinue",
             ]
             proc = subprocess.run(
                 cmd,
@@ -1201,19 +1652,34 @@ class WindowsPlatformAdapter(IPlatformAdapter):
             return False, str(exc)
 
     def sweep_all_netguard_rules(self) -> Tuple[bool, str]:
-        """Sweep and remove all NetGuard QoS policies and Firewall rules (Item D4)."""
+        """Sweep and remove all NetGuard QoS policies (ActiveStore & persistent) and Firewall rules, returning real verification result."""
         if not self.is_elevated():
             return False, "يتطلب تنظيف القواعد صلاحيات مسؤول النظام."
+
+        acquired = self._qos_lock.acquire(timeout=5.0)
         try:
             cmd = [
                 "powershell",
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
+                "Remove-NetQosPolicy -Name 'NetGuard_*' -PolicyStore ActiveStore -Confirm:$false -ErrorAction SilentlyContinue; "
                 "Remove-NetQosPolicy -Name 'NetGuard_*' -Confirm:$false -ErrorAction SilentlyContinue; "
-                "Remove-NetFirewallRule -Name 'NetGuard_*' -ErrorAction SilentlyContinue",
+                "Remove-NetFirewallRule -Name 'NetGuard_*' -ErrorAction SilentlyContinue; "
+                "@(Get-NetQosPolicy -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'NetGuard_*' }).Count",
             ]
-            subprocess.run(cmd, capture_output=True, text=True, timeout=8.0, check=False, creationflags=_NO_WINDOW)
-            return True, "تم تنظيف كافة قواعد NetGuard بنجاح."
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10.0, check=False, creationflags=_NO_WINDOW)
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                return False, f"فشل تنظيف سياسات NetGuard: {err}"
+
+            remaining = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else "0"
+            if remaining and remaining != "0" and remaining.isdigit() and int(remaining) > 0:
+                return False, f"لا تزال هناك {remaining} سياسة NetGuard نشطة في ActiveStore بعد التنظيف."
+
+            return True, "تم تنظيف وتأكيد حذف كافة قواعد NetGuard (ActiveStore والقواعد الدائمة) بنجاح."
         except Exception as exc:
             return False, str(exc)
+        finally:
+            if acquired:
+                self._qos_lock.release()

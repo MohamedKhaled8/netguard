@@ -68,30 +68,33 @@ class TestOffscreenLaunchTier1:
     """Tier 1: Verifies basic headless initialization and window attributes."""
 
     def test_application_offscreen_launch_and_window_title(self, managed_window: MainWindow, qapp: QApplication):
-        """Application must launch offscreen with exact title 'NetGuard AI' and 7-view stack."""
+        """Application must launch offscreen with exact title 'NetGuard AI' and 10-view stack."""
         assert managed_window is not None
         assert managed_window.windowTitle() == "NetGuard AI"
         assert managed_window.isVisible()
-        assert managed_window.stack.count() == 7
+        assert managed_window.stack.count() == 10
         assert managed_window.stack.currentIndex() == 0  # Starts on Dashboard
 
         # Verify default geometry bounds
         assert managed_window.width() >= 480
-        assert managed_window.height() >= 600
+        assert managed_window.height() >= 580
 
         # Cycle events to ensure no pending layout or paint exceptions
         qapp.processEvents()
 
     def test_offscreen_views_instantiation(self, managed_window: MainWindow):
-        """All 7 views must be instantiated and mounted into the content stack."""
+        """All 10 views must be instantiated and mounted into the content stack."""
         expected_views = [
             ("Dashboard", managed_window.view_dashboard),
-            ("Diagnosis", managed_window.view_diagnosis),
-            ("Remediation", managed_window.view_remediation),
-            ("DNS", managed_window.view_dns),
+            ("MeetingGuard", managed_window.view_meeting_guard),
             ("Traffic", managed_window.view_traffic),
-            ("History", managed_window.view_history),
+            ("DNS", managed_window.view_dns),
+            ("WifiIntelligence", managed_window.view_wifi),
+            ("RouterManagement", managed_window.view_router),
+            ("InternetQuality", managed_window.view_quality),
+            ("Reports", managed_window.view_reports),
             ("Settings", managed_window.view_settings),
+            ("About", managed_window.view_about),
         ]
 
         for idx, (name, view_obj) in enumerate(expected_views):
@@ -118,7 +121,7 @@ class TestOffscreenNavigationTier2Stress:
 
     def test_headless_navigation_all_seven_views(self, managed_window: MainWindow, qapp: QApplication):
         """Walk across all 7 views in sequence (0 through 6) and verify state."""
-        for target_idx in range(7):
+        for target_idx in range(8):
             active_btn = managed_window.nav_buttons[target_idx]
             managed_window._switch_view(target_idx, active_btn)
             qapp.processEvents()
@@ -140,8 +143,8 @@ class TestOffscreenNavigationTier2Stress:
                 qapp.processEvents()
 
     def test_rapid_view_switching_stress(self, managed_window: MainWindow, qapp: QApplication):
-        """Rapidly switch views 30 times in forward, reverse, and jump sequences."""
-        sequence = [0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, 6, 2, 4, 1, 5, 3, 0, 6, 1, 4, 2, 5, 3, 6, 0, 3, 6]
+        """Rapidly switch views 30 times in forward, reverse, and jump sequences across all 8 views."""
+        sequence = [0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0, 7, 2, 4, 1, 5, 3, 0, 7, 1, 4, 2, 5, 3, 6, 7, 0]
 
         for step, target_idx in enumerate(sequence):
             btn = managed_window.nav_buttons[target_idx]
@@ -194,10 +197,10 @@ class TestOffscreenNavigationTier2Stress:
             qapp.processEvents()
 
             assert win.windowTitle() == "NetGuard AI"
-            assert win.stack.count() == 7
+            assert win.stack.count() == 10
 
             # Walk through 2 views
-            win._switch_view(1, win.btn_diag)
+            win._switch_view(7, win.btn_reports)
             qapp.processEvents()
             win._switch_view(0, win.btn_dash)
             qapp.processEvents()
@@ -235,19 +238,19 @@ class TestOffscreenCrossFeatureTier3:
         qapp.processEvents()
         assert sidebar.opt_assisted.is_selected is True
         assert sidebar.opt_auto.is_selected is False
-        assert "يقترح الإصلاح وينتظر موافقتك" in sidebar.lbl_mode_desc.text()
+        assert "ينتظر موافقتك" in sidebar.lbl_mode_desc.text()
 
         # Mode 2: Observation (مراقبة فقط)
         sidebar._on_mode_clicked(2)
         qapp.processEvents()
         assert sidebar.opt_observe.is_selected is True
-        assert "يراقب ويسجل دون تغيير" in sidebar.lbl_mode_desc.text()
+        assert "دون إجراء أي تعديل" in sidebar.lbl_mode_desc.text()
 
         # Mode 0: Auto (تلقائي)
         sidebar._on_mode_clicked(0)
         qapp.processEvents()
         assert sidebar.opt_auto.is_selected is True
-        assert "يكتشف المشكلة ويصلحها" in sidebar.lbl_mode_desc.text()
+        assert "يكتشف الخلل" in sidebar.lbl_mode_desc.text()
 
     def test_offscreen_bridge_signal_reception(self, managed_window: MainWindow, qapp: QApplication):
         """Verify thread-safe UI bridge dispatches remediation events offscreen."""
@@ -288,25 +291,27 @@ class TestOffscreenScenario5Tier4:
         qapp.processEvents()
         assert managed_window.view_dashboard.isVisible()
 
-        # View 1: Diagnosis
-        managed_window._switch_view(1, managed_window.btn_diag)
+        # View 1: Meeting Guard (includes Remediation controls)
+        managed_window._switch_view(1, managed_window.btn_meeting_guard)
         qapp.processEvents()
-        assert managed_window.view_diagnosis.isVisible()
-
-        # View 2: Remediation
-        managed_window._switch_view(2, managed_window.btn_rem)
-        qapp.processEvents()
+        assert managed_window.view_meeting_guard.isVisible()
         assert managed_window.view_remediation.isVisible()
+
+        # View 2: Traffic
+        managed_window._switch_view(2, managed_window.btn_traffic)
+        qapp.processEvents()
+        assert managed_window.view_traffic.isVisible()
 
         # View 3: DNS
         managed_window._switch_view(3, managed_window.btn_dns)
         qapp.processEvents()
         assert managed_window.view_dns.isVisible()
 
-        # View 4: Traffic
-        managed_window._switch_view(4, managed_window.btn_traffic)
+        # View 7: Reports & Deep Diagnosis
+        managed_window._switch_view(7, managed_window.btn_reports)
         qapp.processEvents()
-        assert managed_window.view_traffic.isVisible()
+        assert managed_window.view_reports.isVisible()
+        assert managed_window.view_diagnosis.isVisible()
 
         # Exercise Zoom simulation toggle on Traffic view
         traffic_view = managed_window.view_traffic
@@ -326,15 +331,21 @@ class TestOffscreenScenario5Tier4:
         qapp.processEvents()
         assert traffic_view.btn_sim_zoom.text() == "محاكاة مكالمة Zoom"
 
-        # View 5: History
-        managed_window._switch_view(5, managed_window.btn_hist)
+        # View 7 Subtab 2: History inside Reports
+        managed_window._switch_view(7, managed_window.btn_reports)
+        managed_window.view_reports.switch_subtab(2)
         qapp.processEvents()
         assert managed_window.view_history.isVisible()
 
-        # View 6: Settings
-        managed_window._switch_view(6, managed_window.btn_settings)
+        # View 8: Settings
+        managed_window._switch_view(8, managed_window.btn_settings)
         qapp.processEvents()
         assert managed_window.view_settings.isVisible()
+
+        # View 9: About
+        managed_window._switch_view(9, managed_window.btn_about)
+        qapp.processEvents()
+        assert managed_window.view_about.isVisible()
 
         # Step 3: Resize offscreen
         managed_window.resize(650, 750)

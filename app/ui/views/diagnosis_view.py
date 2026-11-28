@@ -82,13 +82,14 @@ class LayerChecklistRow(QFrame):
         self.lbl_name = QLabel(name)
         self.lbl_name.setFont(tokens.get_sans_font(15, 600))
         self.lbl_name.setStyleSheet(f"color: {tokens.TEXT};")
-        top_row.addWidget(self.lbl_name)
-
-        top_row.addStretch()
+        self.lbl_name.setWordWrap(True)
+        top_row.addWidget(self.lbl_name, 1)
 
         self.lbl_metric = QLabel(metric_str)
         self.lbl_metric.setFont(tokens.get_mono_font(14, 500))
         self.lbl_metric.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_metric.setMinimumWidth(120)
+        self.lbl_metric.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         top_row.addWidget(self.lbl_metric)
 
         chip_text = "سليم" if status == "ok" else ("يحتاج تحسين" if status == "warn" else ("خلل / انقطاع" if status in ("bad", "error", "critical") else "غير مُقاس"))
@@ -120,28 +121,33 @@ class LayerChecklistRow(QFrame):
 class DiagnosisView(QWidget):
     """Architectural diagnosis view matching the graphite hairline design system."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, embed_in_scroll: bool = False) -> None:
         super().__init__(parent)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
-        self.scroll.viewport().setAutoFillBackground(True)
-        self.scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
-        self.scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
-        self.scroll.verticalScrollBar().setSingleStep(25)
-
         self.content_widget = QWidget()
         self.main_layout = QVBoxLayout(self.content_widget)
-        self.main_layout.setContentsMargins(
-            tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
-        )
+        if embed_in_scroll:
+            self.scroll = None
+            self.main_layout.setContentsMargins(0, 4, 0, 8)
+            root_layout.addWidget(self.content_widget)
+        else:
+            self.scroll = QScrollArea(self)
+            self.scroll.setWidgetResizable(True)
+            self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.scroll.setFrameShape(QFrame.NoFrame)
+            self.scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+            self.scroll.viewport().setAutoFillBackground(True)
+            self.scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+            self.scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+            self.scroll.verticalScrollBar().setSingleStep(25)
+            self.main_layout.setContentsMargins(
+                tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
+            )
+            root_layout.addWidget(self.scroll)
         self.main_layout.setSpacing(tokens.SECTION_GAP)
         layout = self.main_layout
 
@@ -162,8 +168,9 @@ class DiagnosisView(QWidget):
             "اضغط على زر 'فحص شامل ودقيق الآن' لإجراء اختبار تفصيلي لجميع مسارات الاتصال والراوتر وخوادم DNS."
         )
         self.explanation_lbl.setFont(tokens.get_sans_font(13, 400))
-        self.explanation_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; line-height: 1.6;")
+        self.explanation_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.explanation_lbl.setWordWrap(True)
+        self.explanation_lbl.setMinimumHeight(52)
 
         v_col.addWidget(self.cause_lbl)
         v_col.addWidget(self.explanation_lbl)
@@ -252,14 +259,26 @@ class DiagnosisView(QWidget):
         make_scroll_transparent(self.table, self.scroll)
         fit_table_to_content(self.table)
 
-        self.scroll.setWidget(self.content_widget)
-        root_layout.addWidget(self.scroll)
+        if self.scroll is not None:
+            self.scroll.setWidget(self.content_widget)
 
         # Synchronize with DNS Single Source of Truth (Item F9)
         try:
             DnsStateManager.get_instance().state_changed.connect(self._on_dns_state_changed)
         except Exception:
             pass
+
+    def shutdown(self) -> None:
+        if getattr(self, "_is_shut_down", False):
+            return
+        self._is_shut_down = True
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                DnsStateManager.get_instance().state_changed.disconnect(self._on_dns_state_changed)
+            except Exception:
+                pass
 
     def _set_evidence_cell(self, row_idx: int, val_txt: str, st_txt: str, eval_txt: str, status_variant: str) -> None:
         """Helper to update a row in the evidence table."""
@@ -701,11 +720,13 @@ class DiagnosisView(QWidget):
         if h2 and hasattr(self, "multi_protocol_panel"):
             if h2_lat is not None and h2_lat >= 0:
                 self.multi_protocol_panel.lbl_h2_lat.setText(f"{h2_lat:.1f}")
+                self.multi_protocol_panel.lbl_h2_lat.adjustSize()
                 self.multi_protocol_panel.lbl_h2_unit.setText("ms")
                 self.multi_protocol_panel.lbl_h2_ip.setText(h2.get("ip") or "المحطة الثانية لمزود الخدمة")
                 self.multi_protocol_panel.h2_chip.set_variant("ok-soft", "تستجيب بنجاح")
                 self.multi_protocol_panel.lbl_h2_sub.setText("نعم · الحزم وصلت للمحطة 3 وما بعدها بنجاح")
                 self.multi_protocol_panel.lbl_h2_sub.setStyleSheet(f"color: {tokens.STATUS_OK};")
+                self.multi_protocol_panel.hop2_card.updateGeometry()
 
         # 9. Update Predictive Diagnostics State
         if hasattr(self, "predictive_panel"):
@@ -721,10 +742,12 @@ class DiagnosisView(QWidget):
             )
 
     def _sync_content_width(self) -> None:
-        if hasattr(self, "scroll") and hasattr(self, "content_widget"):
+        if getattr(self, "scroll", None) is not None and hasattr(self, "content_widget"):
             vw = self.scroll.viewport().width()
             if vw > 0:
                 self.content_widget.setFixedWidth(vw)
+        elif hasattr(self, "content_widget") and self.width() > 0:
+            self.content_widget.setMaximumWidth(self.width())
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -734,7 +757,10 @@ class DiagnosisView(QWidget):
         super().resizeEvent(event)
         self._sync_content_width()
         w = self.width()
-        pad = tokens.PAGE_PADDING_DESKTOP if w >= 1050 else (20 if w >= 680 else 14)
+        if getattr(self, "scroll", None) is None:
+            pad = 0
+        else:
+            pad = tokens.PAGE_PADDING_DESKTOP if w >= 1050 else (20 if w >= 680 else 14)
         if hasattr(self, "main_layout"):
-            self.main_layout.setContentsMargins(pad, 20, pad, 30)
+            self.main_layout.setContentsMargins(pad, 20 if pad else 4, pad, 30 if pad else 8)
 

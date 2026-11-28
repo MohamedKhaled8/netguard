@@ -27,7 +27,7 @@ class UserSettingsSchema(BaseModel):
     probing_interval: float = Field(default=1.0, ge=0.01, le=3600.0)
     retention_days: int = Field(default=30, ge=1, le=3650)
     raw_sample_retention_hours: int = Field(default=24, ge=1, le=720)
-    policies: Dict[str, bool] = Field(
+    policies: Dict[str, Any] = Field(
         default_factory=lambda: {
             "allow_flush_dns": True,
             "meeting_guard": True,
@@ -175,7 +175,7 @@ class UserSettings(QObject):
             if self.event_bus:
                 self.event_bus.publish_sync(EventTopics.MODE_CHANGED, {"mode": target_mode.value})
 
-    def get_policy(self, name: str, default: Optional[bool] = None) -> bool:
+    def get_policy(self, name: str, default: Optional[Any] = None) -> Any:
         if name in self._data.policies:
             return self._data.policies[name]
         alias = self.POLICY_ALIASES.get(name)
@@ -183,8 +183,11 @@ class UserSettings(QObject):
             return self._data.policies[alias]
         return default if default is not None else False
 
-    def set_policy(self, name: str, enabled: bool) -> None:
-        val = bool(enabled)
+    def set_policy(self, name: str, enabled: Any) -> None:
+        if isinstance(enabled, dict):
+            val = dict(enabled)
+        else:
+            val = bool(enabled)
         old_val = self.get_policy(name)
         self._data.policies[name] = val
         alias = self.POLICY_ALIASES.get(name)

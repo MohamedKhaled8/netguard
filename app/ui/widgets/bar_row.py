@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QWidget,
 )
 from PySide6.QtGui import QPainter, QColor, QBrush
@@ -84,20 +85,22 @@ class ProcessBarRow(QWidget):
         self.lbl_name = QLabel(name)
         self.lbl_name.setFont(tokens.get_sans_font(14, 500))
         self.lbl_name.setStyleSheet(f"color: {tokens.TEXT};")
-        top_row.addWidget(self.lbl_name)
+        self.lbl_name.setWordWrap(True)
+        self.lbl_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        top_row.addWidget(self.lbl_name, 1)
 
         if tag_text:
-            self.tag_chip = Chip(tag_text, variant=tag_variant, radius=6, font_size=11)
+            self.tag_chip = Chip(tag_text, variant=tag_variant, radius=6, font_size=12)
             top_row.addWidget(self.tag_chip)
         else:
             self.tag_chip = None
 
-        top_row.addStretch()
-
         self.lbl_rate = QLabel(rate_str)
         self.lbl_rate.setFont(tokens.get_mono_font(13, 500))
         self.lbl_rate.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
-        top_row.addWidget(self.lbl_rate)
+        self.lbl_rate.setMinimumWidth(0)
+        self.lbl_rate.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        top_row.addWidget(self.lbl_rate, 0)
 
         layout.addLayout(top_row)
 
@@ -108,6 +111,11 @@ class ProcessBarRow(QWidget):
 
     def update_data(self, rate_str: str, fraction: float, fill_color: str = None) -> None:
         self.lbl_rate.setText(rate_str)
+        self.lbl_rate.adjustSize()
+        self.lbl_rate.updateGeometry()
+        if self.layout() is not None:
+            self.layout().activate()
+        self.updateGeometry()
         self.bar.set_fraction(fraction, fill_color)
 
 
@@ -265,7 +273,7 @@ class DNSRecommendationPanel(QFrame):
         self.lbl_curr_ms = QLabel("—")
         self.lbl_curr_ms.setFont(tokens.get_mono_font(13, 500))
         self.lbl_curr_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_curr_ms.setFixedWidth(75)
+        self.lbl_curr_ms.setFixedWidth(112)
         curr_top.addWidget(self.lbl_curr_name, stretch=1)
         curr_top.addWidget(self.lbl_curr_ms)
         curr_row.addLayout(curr_top)
@@ -276,7 +284,7 @@ class DNSRecommendationPanel(QFrame):
 
         # Clear explanation note under Current DNS
         self.lbl_curr_clarification = QLabel("هذا هو خادم DNS الذي يستخدمه جهازك حالياً، وليس مجرد خادم DNS مقترح.")
-        self.lbl_curr_clarification.setFont(tokens.get_sans_font(11, 400))
+        self.lbl_curr_clarification.setFont(tokens.get_sans_font(12, 400))
         self.lbl_curr_clarification.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         self.lbl_curr_clarification.setWordWrap(True)
         curr_row.addWidget(self.lbl_curr_clarification)
@@ -295,7 +303,7 @@ class DNSRecommendationPanel(QFrame):
         self.lbl_fast_ms = QLabel("—")
         self.lbl_fast_ms.setFont(tokens.get_mono_font(13, 500))
         self.lbl_fast_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_fast_ms.setFixedWidth(75)
+        self.lbl_fast_ms.setFixedWidth(112)
         fast_top.addWidget(self.lbl_fast_name, stretch=1)
         fast_top.addWidget(self.lbl_fast_ms)
         fast_row.addLayout(fast_top)
@@ -315,9 +323,8 @@ class DNSRecommendationPanel(QFrame):
         self.lbl_note.setFont(tokens.get_sans_font(12, 400))
         self.lbl_note.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         self.lbl_note.setWordWrap(True)
+        self.lbl_note.setMinimumHeight(48)
         footer_row.addWidget(self.lbl_note, stretch=1)
-
-        footer_row.addStretch()
 
         self.btn_action = PrimaryButton("طبّق التغيير")
         self.btn_action.setEnabled(False)
@@ -439,7 +446,8 @@ class DNSRecommendationPanel(QFrame):
             self.lbl_fast_ms.setText(f"{int(round(best_ms))} ms")
             self.lbl_fast_ms.setStyleSheet(f"color: {fast_color};")
             self.bar_fast.set_fraction(max(0.12, min(1.0, best_ms / 80.0)), fill_color=fast_color)
-            self.lbl_note.setText("يمكنك التراجع واستعادة إعدادات محول الشبكة الأصلية (DHCP) في أي وقت.")
+            self.lbl_note.setText("يمكنك التراجع واستعادة الإعدادات الأصلية في أي وقت.")
+            self.lbl_note.updateGeometry()
 
     def set_remediation_result(self, before_ms: float, after_ms: float, new_name: str, success: bool = True) -> None:
         """Display verifiable before vs after evidence post-remediation."""

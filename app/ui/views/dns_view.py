@@ -130,10 +130,12 @@ class DNSView(QWidget):
         self.lbl_last_evaluation = QLabel("آخر تقييم: جاري الفحص الدوري...")
         self.lbl_last_evaluation.setFont(tokens.get_sans_font(13, 400))
         self.lbl_last_evaluation.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_last_evaluation.setWordWrap(True)
 
         self.lbl_last_switch = QLabel("قرار DNS: جاري القياس")
         self.lbl_last_switch.setFont(tokens.get_sans_font(13, 400))
         self.lbl_last_switch.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        self.lbl_last_switch.setWordWrap(True)
 
         info_col.addWidget(self.lbl_last_evaluation)
         info_col.addWidget(self.lbl_last_switch)
@@ -143,6 +145,26 @@ class DNSView(QWidget):
         self.top_h.addWidget(self.benchmark_btn)
 
         header_panel.main_layout.addLayout(self.top_h)
+
+        # Cached vs Uncached clarity & Meeting Freeze status strip
+        self.lbl_cache_mode_note = QLabel(
+            "منهجية القياس: يقارن الفحص استعلامات UDP غير المخزّنة بالكاش (Uncached Query) بنطاقات فريدة لقياس سرعة الخادم الفعلية، ويُجمَّد التبديل التلقائي أثناء المكالمات لحماية استقرار الجلسة."
+        )
+        self.lbl_cache_mode_note.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_cache_mode_note.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; background-color: {tokens.INFO_SOFT_BG}; border: 1px solid {tokens.INFO_BORDER}; border-radius: 6px; padding: 6px 10px;"
+        )
+        self.lbl_cache_mode_note.setWordWrap(True)
+        header_panel.main_layout.addWidget(self.lbl_cache_mode_note)
+
+        self.lbl_dns_freeze_banner = QLabel("")
+        self.lbl_dns_freeze_banner.setVisible(False)
+        self.lbl_dns_freeze_banner.setFont(tokens.get_sans_font(12, 600))
+        self.lbl_dns_freeze_banner.setStyleSheet(
+            f"color: {tokens.STATUS_WARN}; background-color: {tokens.WARN_SOFT_BG}; border: 1px solid {tokens.WARN_BORDER}; border-radius: 6px; padding: 6px 10px;"
+        )
+        self.lbl_dns_freeze_banner.setWordWrap(True)
+        header_panel.main_layout.addWidget(self.lbl_dns_freeze_banner)
         self.content_layout.addWidget(header_panel)
 
         # -------------------------------------------------------------
@@ -233,7 +255,7 @@ class DNSView(QWidget):
         """)
         own_card_layout = QVBoxLayout(own_card_frame)
         own_card_layout.setContentsMargins(18, 14, 18, 14)
-        own_card_layout.setSpacing(12)
+        own_card_layout.setSpacing(18)
 
         # Header inside card: Title + Chip + Confidence
         own_head = QHBoxLayout()
@@ -246,7 +268,7 @@ class DNSView(QWidget):
         self.chip_owner_type = Chip(text="جاري الفحص", variant="tag-ok")
         own_head.addWidget(self.chip_owner_type)
 
-        self.lbl_owner_confidence = QLabel("دقة الكشف: 100%")
+        self.lbl_owner_confidence = QLabel("دقة التحقق: —")
         self.lbl_owner_confidence.setFont(tokens.get_sans_font(12, 400))
         self.lbl_owner_confidence.setStyleSheet(f"color: {tokens.TEXT_MUTED}; margin-right: 8px;")
         own_head.addWidget(self.lbl_owner_confidence)
@@ -264,20 +286,25 @@ class DNSView(QWidget):
         self.box_own_md, self.lbl_own_modes = _make_stat_box("طريقة الإعداد")
         self.box_own_gw, self.lbl_own_gateway = _make_stat_box("البوابة والراوتر")
         self.box_own_ap, self.lbl_own_apps = _make_stat_box("التطبيقات والسياسات")
+        for _box in (self.box_own_ad, self.box_own_md, self.box_own_gw, self.box_own_ap):
+            _box.setMinimumHeight(76)
+            _box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.grid_own = QGridLayout()
-        self.grid_own.setSpacing(14)
+        self.grid_own.setSpacing(16)
         self.grid_own.addWidget(self.box_own_ad, 0, 0)
         self.grid_own.addWidget(self.box_own_md, 0, 1)
-        self.grid_own.addWidget(self.box_own_gw, 0, 2)
-        self.grid_own.addWidget(self.box_own_ap, 0, 3)
+        self.grid_own.addWidget(self.box_own_gw, 1, 0)
+        self.grid_own.addWidget(self.box_own_ap, 1, 1)
         own_card_layout.addLayout(self.grid_own)
 
         # Transparent Limitations & Scope Box
-        self.lbl_own_limitations = QLabel("الشفافية والحدود التقنية: لا يمكن التحقق من الخادم الحقيقي خلف الراوتر دون صلاحيات دخول إدارية معتمدة.")
+        self.lbl_own_limitations = QLabel("الحدود والشفافية التقنية: لا يمكن التحقق من الخادم الحقيقي خلف الراوتر دون صلاحيات دخول إدارية معتمدة.")
         self.lbl_own_limitations.setFont(tokens.get_sans_font(12, 400))
         self.lbl_own_limitations.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: transparent; border: none;")
         self.lbl_own_limitations.setWordWrap(True)
+        self.lbl_own_limitations.setMinimumHeight(86)
+        self.lbl_own_limitations.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         own_card_layout.addWidget(self.lbl_own_limitations)
 
         self.ownership_panel.main_layout.addWidget(own_card_frame)
@@ -307,7 +334,7 @@ class DNSView(QWidget):
         self.lbl_curr_ms = QLabel("—")
         self.lbl_curr_ms.setFont(tokens.get_mono_font(14, 500))
         self.lbl_curr_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_curr_ms.setFixedWidth(75)
+        self.lbl_curr_ms.setFixedWidth(112)
         self.lbl_curr_ms.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         curr_top.addWidget(self.lbl_curr_name)
         curr_top.addWidget(self.lbl_curr_ms)
@@ -330,7 +357,7 @@ class DNSView(QWidget):
         self.lbl_fast_ms = QLabel("—")
         self.lbl_fast_ms.setFont(tokens.get_mono_font(14, 500))
         self.lbl_fast_ms.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        self.lbl_fast_ms.setFixedWidth(75)
+        self.lbl_fast_ms.setFixedWidth(112)
         self.lbl_fast_ms.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         fast_top.addWidget(self.lbl_fast_name)
         fast_top.addWidget(self.lbl_fast_ms)
@@ -368,19 +395,20 @@ class DNSView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.table.setColumnWidth(0, 55)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setMinimumSectionSize(140)
+        self.table.horizontalHeader().setMinimumSectionSize(50)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-        self.table.setColumnWidth(2, 140)
+        self.table.setColumnWidth(2, 160)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.table.setColumnWidth(3, 140)
+        self.table.setColumnWidth(3, 160)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
         self.table.setColumnWidth(4, 160)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(5, 110)
+        self.table.setColumnWidth(5, 126)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
         self.table.setColumnWidth(6, 115)
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
-        self.table.setColumnWidth(7, 120)
+        self.table.setColumnWidth(7, 126)
+        self.table.horizontalHeader().setMinimumHeight(46)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(54)
         self.table.setWordWrap(False)
@@ -390,6 +418,7 @@ class DNSView(QWidget):
                 background-color: transparent;
                 border: none;
                 gridline-color: transparent;
+                font-size: 14px;
             }}
             QTableWidget::item {{
                 border: none;
@@ -458,10 +487,27 @@ class DNSView(QWidget):
         self.lbl_smart_rec.setFont(tokens.get_sans_font(13, 600))
         self.lbl_smart_rec.setStyleSheet(f"color: {tokens.STATUS_OK}; background: transparent; border: none;")
         self.lbl_smart_rec.setWordWrap(True)
+        self.lbl_smart_rec.setMinimumHeight(56)
+        self.lbl_smart_rec.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         an_layout.addWidget(self.lbl_smart_rec)
 
         self.analysis_panel.main_layout.addWidget(analysis_frame)
         self.content_layout.addWidget(self.analysis_panel)
+
+        # Decision & Benchmark History Ledger (populated by add_decision_entry)
+        self.history_panel = Panel(
+            title="سجل قرارات وتبديلات DNS / Benchmark & Rollback History",
+            subtitle="توثيق فحوصات الاستجابة، التبديلات المعتمدة، وحالات التراجع الآمن",
+            parent=self,
+        )
+        self.history_table = QTableWidget(0, 5)
+        self.history_table.setHorizontalHeaderLabels(["الوقت", "الإجراء", "الخادم", "الاستجابة", "السبب / التحقق"])
+        self.history_table.verticalHeader().setVisible(False)
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.setMaximumHeight(200)
+        self.history_table.horizontalHeader().setStretchLastSection(True)
+        self.history_panel.main_layout.addWidget(self.history_table)
+        self.content_layout.addWidget(self.history_panel)
 
         self._populate_default_table()
 
@@ -492,13 +538,13 @@ class DNSView(QWidget):
 
             # Col 0: Rank
             r_item = QTableWidgetItem(f"{r + 1:02d}")
-            r_item.setFont(tokens.get_mono_font(13, 500))
+            r_item.setFont(tokens.get_mono_font(14, 500))
             r_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 0, r_item)
 
             # Col 1: Provider Name
             n_item = QTableWidgetItem(tokens.bidi_isolate(name))
-            n_item.setFont(tokens.get_sans_font(13, 600 if is_prim else 500))
+            n_item.setFont(tokens.get_sans_font(14, 600 if is_prim else 500))
             if is_prim:
                 n_item.setForeground(QColor(tokens.STATUS_OK))
             elif is_fall:
@@ -507,13 +553,13 @@ class DNSView(QWidget):
 
             # Col 2: Primary IP
             p_item = QTableWidgetItem(tokens.bidi_isolate(ip))
-            p_item.setFont(tokens.get_mono_font(13, 400))
+            p_item.setFont(tokens.get_mono_font(14, 400))
             p_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 2, p_item)
 
             # Col 3: Secondary IP
             s_item = QTableWidgetItem(tokens.bidi_isolate(sec_ip) if sec_ip else "—")
-            s_item.setFont(tokens.get_mono_font(13, 400))
+            s_item.setFont(tokens.get_mono_font(14, 400))
             s_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 3, s_item)
 
@@ -544,7 +590,7 @@ class DNSView(QWidget):
                 cfg_text = "—"
                 cfg_color = tokens.TEXT_MUTED
             cfg_item = QTableWidgetItem(cfg_text)
-            cfg_item.setFont(tokens.get_sans_font(12, 500))
+            cfg_item.setFont(tokens.get_sans_font(14, 500))
             cfg_item.setForeground(QColor(cfg_color))
             cfg_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 6, cfg_item)
@@ -552,8 +598,8 @@ class DNSView(QWidget):
             # Col 7: Action Button
             if is_prim:
                 btn_apply = SecondaryButton("معتمد حالياً ✓")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(False)
                 btn_apply.setStyleSheet(f"""
                     QPushButton {{
@@ -567,14 +613,14 @@ class DNSView(QWidget):
                 """)
             elif is_fall:
                 btn_apply = SecondaryButton("عيّن كأساسي")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(True)
                 btn_apply.clicked.connect(lambda checked=False, p_ip=ip, s_ip=sec_ip, n_str=name: self._handle_apply_click(p_ip, s_ip, n_str))
             else:
                 btn_apply = SecondaryButton("طبّق")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(True)
                 btn_apply.clicked.connect(lambda checked=False, p_ip=ip, s_ip=sec_ip, n_str=name: self._handle_apply_click(p_ip, s_ip, n_str))
 
@@ -625,6 +671,13 @@ class DNSView(QWidget):
         if fingerprint == getattr(self, "_rank_fingerprint", None):
             return
         self._rank_fingerprint = fingerprint
+        for old_r in range(self.table.rowCount()):
+            for old_c in (4, 5):
+                old_w = self.table.cellWidget(old_r, old_c)
+                if old_w is not None:
+                    self.table.removeCellWidget(old_r, old_c)
+                    old_w.setParent(None)
+                    old_w.deleteLater()
         self.table.clearContents()
         self.table.setRowCount(len(scores))
         max_ms = max((getattr(s, "median_latency_ms", 0.0) or s.mean_latency_ms) for s in scores) if scores else 60.0
@@ -650,7 +703,7 @@ class DNSView(QWidget):
             # Col 0: Rank
             rank_str = f"{r + 1:02d}"
             r_item = QTableWidgetItem(rank_str)
-            r_item.setFont(tokens.get_mono_font(13, 500))
+            r_item.setFont(tokens.get_mono_font(14, 500))
             r_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 0, r_item)
 
@@ -664,7 +717,7 @@ class DNSView(QWidget):
 
             n_item = QTableWidgetItem(tokens.bidi_isolate(short_name))
             n_item.setToolTip(s.name)
-            n_item.setFont(tokens.get_sans_font(13, 600 if is_prim_row else 500))
+            n_item.setFont(tokens.get_sans_font(14, 600 if is_prim_row else 500))
             if is_prim_row:
                 n_item.setForeground(QColor(tokens.STATUS_OK))
             elif is_fall_row:
@@ -673,13 +726,13 @@ class DNSView(QWidget):
 
             # Col 2: Primary IP
             p_item = QTableWidgetItem(tokens.bidi_isolate(p_ip))
-            p_item.setFont(tokens.get_mono_font(13, 400))
+            p_item.setFont(tokens.get_mono_font(14, 400))
             p_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 2, p_item)
 
             # Col 3: Secondary IP
             s_item = QTableWidgetItem(tokens.bidi_isolate(s_ip) if s_ip else "—")
-            s_item.setFont(tokens.get_mono_font(13, 400))
+            s_item.setFont(tokens.get_mono_font(14, 400))
             s_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 3, s_item)
 
@@ -720,7 +773,7 @@ class DNSView(QWidget):
                 cfg_text = "—"
                 cfg_color = tokens.TEXT_MUTED
             cfg_item = QTableWidgetItem(cfg_text)
-            cfg_item.setFont(tokens.get_sans_font(12, 500))
+            cfg_item.setFont(tokens.get_sans_font(14, 500))
             cfg_item.setForeground(QColor(cfg_color))
             cfg_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(r, 6, cfg_item)
@@ -728,8 +781,8 @@ class DNSView(QWidget):
             # Col 7: Action Button
             if is_prim_row:
                 btn_apply = SecondaryButton("معتمد حالياً ✓")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(False)
                 btn_apply.setStyleSheet(f"""
                     QPushButton {{
@@ -743,14 +796,14 @@ class DNSView(QWidget):
                 """)
             elif is_fall_row:
                 btn_apply = SecondaryButton("عيّن كأساسي")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(True)
                 btn_apply.clicked.connect(lambda checked=False, p=p_ip, sec=s_ip, n=short_name: self._handle_apply_click(p, sec, n))
             else:
                 btn_apply = SecondaryButton("طبّق")
-                btn_apply.setFixedHeight(32)
-                btn_apply.setFixedWidth(104)
+                btn_apply.setFixedHeight(36)
+                btn_apply.setFixedWidth(102)
                 btn_apply.setEnabled(True)
                 btn_apply.clicked.connect(lambda checked=False, p=p_ip, sec=s_ip, n=short_name: self._handle_apply_click(p, sec, n))
 
@@ -870,6 +923,8 @@ class DNSView(QWidget):
         except Exception:
             pass
 
+        self.table.doItemsLayout()
+        self.table.updateGeometries()
         fit_table_to_content(self.table)
 
     def set_active_dns_info(self, dns_list: List[str]) -> None:
@@ -1008,9 +1063,33 @@ class DNSView(QWidget):
                 self.lbl_own_limitations.setText(f"الحدود والشفافية التقنية: {lims_text}")
             else:
                 self.lbl_own_limitations.setText("الحدود والشفافية التقنية: تم فحص وتأكيد إعدادات محول الشبكة بالكامل.")
+        if hasattr(self, "ownership_panel"):
+            self.ownership_panel.updateGeometry()
+            if self.ownership_panel.layout() is not None:
+                self.ownership_panel.layout().activate()
+            self.ownership_panel.adjustSize()
+
+    def set_meeting_freeze_state(self, active: bool, app_name: str = "") -> None:
+        if active:
+            app_txt = f" ({app_name})" if app_name else ""
+            self.lbl_dns_freeze_banner.setText(
+                tokens.bidi_isolate_mixed(
+                    f"وضع حماية الاجتماع نشط{app_txt}: تم تجميد التبديل التلقائي لخادم DNS مؤقتاً لمنع انقطاع الجلسة."
+                )
+            )
+            self.lbl_dns_freeze_banner.setVisible(True)
+        else:
+            self.lbl_dns_freeze_banner.setVisible(False)
 
     def add_decision_entry(self, time_str: str, action: str, server: str, latency: str, reason: str) -> None:
-        pass
+        if not hasattr(self, "history_table"):
+            return
+        self.history_table.insertRow(0)
+        for col, val in enumerate((time_str, action, server, latency, reason)):
+            item = QTableWidgetItem(tokens.bidi_isolate_mixed(str(val or "—")))
+            self.history_table.setItem(0, col, item)
+        while self.history_table.rowCount() > 25:
+            self.history_table.removeRow(self.history_table.rowCount() - 1)
 
     def _sync_content_width(self) -> None:
         if hasattr(self, "scroll") and hasattr(self, "content_widget"):

@@ -67,8 +67,8 @@ class MetricKpiCard(QFrame):
         self.lbl_title = QLabel(title)
         self.lbl_title.setFont(tokens.get_sans_font(13, 500))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
-        top_h.addWidget(self.lbl_title)
-        top_h.addStretch()
+        self.lbl_title.setWordWrap(True)
+        top_h.addWidget(self.lbl_title, 1)
 
         self.chip = Chip(chip_text, variant=chip_variant)
         top_h.addWidget(self.chip)
@@ -129,7 +129,7 @@ class RootCauseStationItem(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("RootCauseStationItem")
-        self.setMinimumHeight(116)
+        self.setMinimumHeight(144)
         self.setStyleSheet(f"""
             QFrame#RootCauseStationItem {{
                 background-color: {tokens.SURFACE_INSET};
@@ -152,7 +152,7 @@ class RootCauseStationItem(QFrame):
         top_h.setSpacing(8)
 
         lbl_id = QLabel(f"محطة {station_id}")
-        lbl_id.setFont(tokens.get_mono_font(11, 600))
+        lbl_id.setFont(tokens.get_mono_font(12, 600))
         lbl_id.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: {tokens.SURFACE}; padding: 2px 7px; border-radius: 4px; border: 1px solid {tokens.LINE};")
         top_h.addWidget(lbl_id)
 
@@ -175,7 +175,6 @@ class RootCauseStationItem(QFrame):
         self.lbl_desc.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.lbl_desc.setWordWrap(True)
         layout.addWidget(self.lbl_desc)
-        layout.addStretch()
 
     def set_station_state(self, status: str, variant: str, details: str) -> None:
         self.chip.set_variant(variant, status)
@@ -315,10 +314,10 @@ class PredictiveDiagnosticsPanel(Panel):
 
         grid.addWidget(self.st_local, 0, 0)
         grid.addWidget(self.st_wifi, 0, 1)
-        grid.addWidget(self.st_gateway, 0, 2)
-        grid.addWidget(self.st_isp, 1, 0)
-        grid.addWidget(self.st_dns, 1, 1)
-        grid.addWidget(self.st_cloud, 1, 2)
+        grid.addWidget(self.st_gateway, 1, 0)
+        grid.addWidget(self.st_isp, 1, 1)
+        grid.addWidget(self.st_dns, 2, 0)
+        grid.addWidget(self.st_cloud, 2, 1)
 
         iso_layout.addLayout(grid)
         container_layout.addWidget(iso_box)

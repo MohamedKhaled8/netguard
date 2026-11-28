@@ -94,12 +94,15 @@ def calculate_contrast(c1: QColor, c2: QColor) -> float:
 class LayoutChecker:
     PAGE_NAMES = [
         "Dashboard",
-        "Diagnosis",
-        "Remediation",
-        "DNS",
+        "MeetingGuard",
         "Traffic",
-        "History",
+        "DNS",
+        "WifiIntelligence",
+        "RouterManagement",
+        "InternetQuality",
+        "Reports",
         "Settings",
+        "About",
     ]
 
     WINDOW_SIZES = [
@@ -139,6 +142,90 @@ class LayoutChecker:
             ProcessNetworkProfile(name="NetGuard.exe", pid=2204, category=WorkloadCategory.SYSTEM, active_socket_count=2, is_protected_system_process=True),
         ]
         win.view_traffic.update_profiles(profiles, conferencing_active=True)
+
+        # Populate Wi-Fi Intelligence and Router Management views cleanly
+        if hasattr(win, "view_wifi") and hasattr(win, "view_router"):
+            from app.wifi.models import (
+                AccessPointScanResult,
+                ConnectedDeviceRecord,
+                NeighborAccessPoint,
+                RouterCapabilities,
+                RouterConfigurationSnapshot,
+                RouterDiscoveryResult,
+                RouterWifiRadioConfig,
+                WifiInterfaceTelemetry,
+            )
+            telem = WifiInterfaceTelemetry(
+                interface_name="Wi-Fi",
+                connection_state="connected",
+                ssid="Home_WiFi_5G",
+                bssid="f8:95:22:82:bf:78",
+                phy_standard="802.11ac",
+                band="5 GHz",
+                channel=44,
+                channel_frequency_mhz=5220,
+                channel_width_mhz=40,
+                rssi_dbm=-58,
+                signal_quality_pct=84,
+                tx_link_rate_mbps=433.0,
+                rx_link_rate_mbps=390.0,
+                security_mode="WPA2-PSK",
+            )
+            aps = [
+                NeighborAccessPoint(ssid="Home_WiFi", bssid="f8:95:22:82:bf:63", band="2.4 GHz", channel=6, center_frequency_mhz=2437, rssi_dbm=-54, channel_width_mhz=40),
+                NeighborAccessPoint(ssid="Neighbor_Net", bssid="aa:bb:cc:dd:ee:01", band="2.4 GHz", channel=6, center_frequency_mhz=2437, rssi_dbm=-62, channel_width_mhz=20),
+                NeighborAccessPoint(ssid="Home_WiFi_5G", bssid="f8:95:22:82:bf:78", band="5 GHz", channel=44, center_frequency_mhz=5220, rssi_dbm=-58, channel_width_mhz=40, is_connected_ap=True),
+            ]
+            scan_res = AccessPointScanResult(
+                interface_name="Wi-Fi",
+                total_bss_count=len(aps),
+                access_points=aps,
+                grouped_by_band_channel={
+                    "2.4 GHz": {6: aps[:2]},
+                    "5 GHz": {44: [aps[2]]},
+                },
+            )
+            wv = win.view_wifi
+            wv._last_tel = telem
+            wv._last_scan = scan_res
+            if wv.bundle:
+                wv._last_ch_report = wv.bundle.channel_analyzer.analyze(
+                    scan_result=scan_res,
+                    current_band="5 GHz",
+                    current_channel=44,
+                    connected_bssid="f8:95:22:82:bf:78",
+                )
+            wv._render_telemetry(telem)
+            wv._render_band_views()
+            wv._render_bss_table()
+
+            rv = win.view_router
+            rv._discovery = RouterDiscoveryResult(
+                gateway_ip="192.168.1.1",
+                gateway_mac="f8:95:22:82:bf:63",
+                detected_vendor="Huawei",
+                hardware_vendor="Huawei",
+                detected_model="DN8245V-56",
+                isp_brand="WE (TE Data)",
+                preferred_url="https://192.168.1.1",
+                adapter_id="huawei",
+                capabilities=RouterCapabilities(adapter_id="huawei", vendor_family="Huawei"),
+            )
+            rv._snapshot = RouterConfigurationSnapshot(
+                adapter_id="huawei",
+                vendor="Huawei",
+                model="DN8245V-56",
+                firmware_version="V5R020",
+                wan_status="Connected",
+                wan_ip="197.55.10.22",
+                dns_servers=["1.1.1.1", "8.8.8.8"],
+                radios={"2.4 GHz": RouterWifiRadioConfig(band="2.4 GHz", enabled=True, ssid="Home_WiFi", channel="6", channel_width="40 MHz", security_mode="WPA2")},
+            )
+            rv._devices = [
+                ConnectedDeviceRecord(ip_address="192.168.1.1", mac_address="f8:95:22:82:bf:63", hostname="Gateway", vendor="Huawei", connection_type="ethernet", connection_status="connected", is_gateway=True, source="merged"),
+                ConnectedDeviceRecord(ip_address="192.168.1.10", mac_address="10:20:30:40:50:60", hostname="Workstation-PC", vendor="Intel Corporate", connection_type="wifi_5", connection_status="connected", is_local_host=True, source="os_arp"),
+            ]
+            rv._render_all_router_data()
 
     def check_all_pages(self, win: MainWindow) -> List[Violation]:
         app = QApplication.instance()

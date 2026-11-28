@@ -1,0 +1,112 @@
+=== FAKE_DATA_GUARD ===
+[SUCCESS] check_no_fake_data: 0 violations found in app/ui. All UI claims and numbers verified real.
+FAKE_EXIT:0
+
+=== UNIT_TESTS ===
+........................................................................ [ 18%]
+........................................................................ [ 37%]
+........................................................................ [ 56%]
+........................................................................ [ 75%]
+........................................................................ [ 94%]
+......................                                                   [100%]
+============================== warnings summary ===============================
+tests/unit/test_dns_subsystem_recovery.py::test_7_switch_dns_action_admin_precondition_and_verification
+  C:\Program Files\Python312\Lib\unittest\mock.py:2217: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def __init__(self, name, parent):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_no_fake_data.py::test_ui_contains_zero_fake_data
+  C:\Program Files\Python312\Lib\ast.py:52: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return compile(source, filename, mode, flags,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_ui_behaviour.py::test_remediation_policy_gating_ui_to_orchestrator
+  E:\Mt FlutterProject\netguard\.venv\Lib\site-packages\_pytest\runner.py:180: RuntimeWarning: coroutine 'NetGuardApplication._run_retention_prune' was never awaited
+    del sys.last_exc  # type:ignore[attr-defined]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+382 passed, 3 warnings in 151.81s (0:02:31)
+UNIT_EXIT:0
+
+=== INTEGRATION_TESTS ===
+..............................................................           [100%]
+62 passed in 100.91s (0:01:40)
+INT_EXIT:0
+=== E2E_TESTS ===
+........................................................................ [ 14%]
+........................................................................ [ 29%]
+........................................................................ [ 43%]
+........................................................................ [ 58%]
+.FF...........................................FF.....F.................. [ 73%]
+.....................................................................FF. [ 87%]
+....F.....................................F..................            [100%]
+================================== FAILURES ===================================
+____________________ test_f4_02_20fps_throttling_interval _____________________
+tests\e2e\test_tier1_features.py:339: in test_f4_02_20fps_throttling_interval
+    assert anim_clock._interval_ms == 50
+E   assert 160 == 50
+E    +  where 160 = <app.ui.animation_clock.AnimationMasterClock(0x2a5c0ff2f80) at 0x000002A5C28BE000>._interval_ms
+___________________ test_f4_03_low_resource_mode_reduction ____________________
+tests\e2e\test_tier1_features.py:353: in test_f4_03_low_resource_mode_reduction
+    assert anim_clock._timer.interval() == 50
+E   assert 160 == 50
+E    +  where 160 = <built-in method interval of PySide6.QtCore.QTimer object at 0x000002A5C2849700>()
+E    +    where <built-in method interval of PySide6.QtCore.QTimer object at 0x000002A5C2849700> = <PySide6.QtCore.QTimer(0x2a5c0ff37f0) at 0x000002A5C2849700>.interval
+E    +      where <PySide6.QtCore.QTimer(0x2a5c0ff37f0) at 0x000002A5C2849700> = <app.ui.animation_clock.AnimationMasterClock(0x2a5c0ff3520) at 0x000002A5C2849540>._timer
+_______________________ test_f13_02_teams_web_detection _______________________
+tests\e2e\test_tier1_features.py:909: in test_f13_02_teams_web_detection
+    assert detector.classify_process_priority("teams.exe") == TrafficPriorityClass.REALTIME
+E   AssertionError: assert <TrafficPriorityClass.INTERACTIVE: 2> == <TrafficPriorityClass.REALTIME: 1>
+E    +  where <TrafficPriorityClass.INTERACTIVE: 2> = classify_process_priority('teams.exe')
+E    +    where classify_process_priority = <app.traffic.meeting_detector.MeetingDetector(0x2a5c4403b80) at 0x000002A5C3D8E380>.classify_process_priority
+E    +  and   <TrafficPriorityClass.REALTIME: 1> = TrafficPriorityClass.REALTIME
+_______________________ test_f13_03_zoom_web_detection ________________________
+tests\e2e\test_tier1_features.py:916: in test_f13_03_zoom_web_detection
+    assert detector.classify_process_priority("zoom.exe") == TrafficPriorityClass.REALTIME
+E   AssertionError: assert <TrafficPriorityClass.INTERACTIVE: 2> == <TrafficPriorityClass.REALTIME: 1>
+E    +  where <TrafficPriorityClass.INTERACTIVE: 2> = classify_process_priority('zoom.exe')
+E    +    where classify_process_priority = <app.traffic.meeting_detector.MeetingDetector(0x2a5c4404ee0) at 0x000002A5C3D88940>.classify_process_priority
+E    +  and   <TrafficPriorityClass.REALTIME: 1> = TrafficPriorityClass.REALTIME
+________________________ test_f14_04_webex_recognition ________________________
+tests\e2e\test_tier1_features.py:959: in test_f14_04_webex_recognition
+    assert "webexmta.exe" in detector.KNOWN_CONFERENCING_EXES
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'MeetingDetector' object has no attribute 'KNOWN_CONFERENCING_EXES'
+____________________ test_f13_b02_meeting_tab_audio_muted _____________________
+tests\e2e\test_tier2_boundaries.py:857: in test_f13_b02_meeting_tab_audio_muted
+    assert state.is_active is True
+E   AssertionError: assert False is True
+E    +  where False = MeetingState(is_active=False, app_name='', app_type='app', process_name='', pid=0, started_at=None, duration_seconds=0...audio_only=False, mode_state=<MeetingModeState.IDLE: 'idle'>, udp_send_bytes_per_sec=0.0, endpoints=[], confidence=0.0).is_active
+______________ test_f13_b03_webrtc_connection_over_tcp_fallback _______________
+tests\e2e\test_tier2_boundaries.py:871: in test_f13_b03_webrtc_connection_over_tcp_fallback
+    assert state.is_active is True
+E   AssertionError: assert False is True
+E    +  where False = MeetingState(is_active=False, app_name='', app_type='app', process_name='', pid=0, started_at=None, duration_seconds=0...audio_only=False, mode_state=<MeetingModeState.IDLE: 'idle'>, udp_send_bytes_per_sec=0.0, endpoints=[], confidence=0.0).is_active
+_____________________ test_f14_b04_webex_crash_detection ______________________
+tests\e2e\test_tier2_boundaries.py:947: in test_f14_b04_webex_crash_detection
+    assert detector.classify_process_priority("webexmta.exe") == TrafficPriorityClass.REALTIME
+E   AssertionError: assert <TrafficPriorityClass.INTERACTIVE: 2> == <TrafficPriorityClass.REALTIME: 1>
+E    +  where <TrafficPriorityClass.INTERACTIVE: 2> = classify_process_priority('webexmta.exe')
+E    +    where classify_process_priority = <app.traffic.meeting_detector.MeetingDetector(0x2a5c3ab8de0) at 0x000002A5C3CDB3C0>.classify_process_priority
+E    +  and   <TrafficPriorityClass.REALTIME: 1> = TrafficPriorityClass.REALTIME
+_________ test_tier3_12_f14_f15_cisco_webex_triggers_dscp46_priority __________
+tests\e2e\test_tier3_cross_features.py:390: in test_tier3_12_f14_f15_cisco_webex_triggers_dscp46_priority
+    assert prio == TrafficPriorityClass.REALTIME
+E   assert <TrafficPriorityClass.INTERACTIVE: 2> == <TrafficPriorityClass.REALTIME: 1>
+E    +  where <TrafficPriorityClass.REALTIME: 1> = TrafficPriorityClass.REALTIME
+=========================== short test summary info ===========================
+FAILED tests/e2e/test_tier1_features.py::test_f4_02_20fps_throttling_interval
+FAILED tests/e2e/test_tier1_features.py::test_f4_03_low_resource_mode_reduction
+FAILED tests/e2e/test_tier1_features.py::test_f13_02_teams_web_detection - As...
+FAILED tests/e2e/test_tier1_features.py::test_f13_03_zoom_web_detection - Ass...
+FAILED tests/e2e/test_tier1_features.py::test_f14_04_webex_recognition - Attr...
+FAILED tests/e2e/test_tier2_boundaries.py::test_f13_b02_meeting_tab_audio_muted
+FAILED tests/e2e/test_tier2_boundaries.py::test_f13_b03_webrtc_connection_over_tcp_fallback
+FAILED tests/e2e/test_tier2_boundaries.py::test_f14_b04_webex_crash_detection
+FAILED tests/e2e/test_tier3_cross_features.py::test_tier3_12_f14_f15_cisco_webex_triggers_dscp46_priority
+9 failed, 484 passed in 62.48s (0:01:02)
+E2E_EXIT:1

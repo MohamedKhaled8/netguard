@@ -1,0 +1,6 @@
+# NetGuard AI - Objective Layout & Typography Audit Report
+Generated at: 2026-11-28 00:00:21
+Total Violations Found: 0
+
+| Page | Window Size | Scale | Widget | Rule | Violation Details |
+|---|---|---|---|---|---|

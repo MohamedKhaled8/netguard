@@ -1,322 +1,468 @@
 """Internationalization (i18n) module for NetGuard AI.
 
-Provides bilingual translations (Arabic & English) with plain-language explanations
-for network metrics, diagnostics, and remediation actions.
+Provides centralized bilingual localization (Arabic RTL & English LTR)
+and a reactive LanguageManager signal for live UI switching.
 """
 
 from __future__ import annotations
-from typing import Dict, Any, List
 
-STRINGS: Dict[str, Dict[str, str]] = {
-    "ar": {
-        # App Header & Navigation
-        "app_title": "NETGUARD AI",
-        "app_subtitle": "نظام مراقبة وإدارة استقرار الشبكة",
-        "version": "الإصدار 2.0.0 · PySide6",
-        "lang_toggle": "English",
-        "nav_dashboard": "لوحة التحكم",
-        "nav_diagnostics": "تشخيص الأعطال",
-        "nav_healing": "الإصلاح الذاتي",
-        "nav_traffic": "استهلاك البرامج",
-        "nav_dns": "خوادم DNS السريعة",
-        "nav_history": "سجل المشاكل",
-        "nav_settings": "الإعدادات",
+import inspect
+import weakref
+from typing import Any, Callable, Dict, List
 
-        # Dashboard View
-        "system_healthy": "حالة الشبكة: ممتازة ومستقرة",
-        "system_healthy_desc": "نظام الحماية الذكي يراقب جودة واستقرار اتصالك بالإنترنت لحظياً.",
-        "system_anomaly": "تنبيه: تم رصد مشكلة في الشبكة",
-        "mode_autonomous": "حماية ذاتية نشطة",
-        "mode_assisted": "وضع الإشعار اليدوي",
-        "mode_observation": "وضع المراقبة فقط",
-        
-        # Quick Fix Actions
-        "quick_fix_btn": "فحص ذكي وإصلاح سريع",
-        "quick_fix_running": "جاري الفحص وإصلاح المسارات...",
-        "quick_fix_success": "تم فحص الشبكة وتحديث مسارات الاتصال وتفريغ الكاش بنجاح!",
-        "flush_dns_btn": "تنظيف كاش DNS",
-        "flush_dns_success": "تم تفريغ كاش الـ DNS بنجاح وتسريع التصفح!",
-        "recheck_gw_btn": "إعادة فحص الراوتر",
-        "recheck_gw_success": "تم فحص الراوتر بنجاح والاتصال مستقر.",
-
-        # KPI Cards
-        "card_gateway_title": "اتصال الراوتر (Gateway)",
-        "card_gateway_desc": "يقيس جودة اتصال جهازك بالراوتر المنزلي عبر الواي فاي أو الكابل.",
-        "card_external_title": "سرعة استجابة الإنترنت (Ping)",
-        "card_external_desc": "يقيس سرعة الوصول للمواقع العالمية وسيرفرات الألعاب والتصفح.",
-        "card_jitter_title": "استقرار الخط (Jitter)",
-        "card_jitter_desc": "يقيس مدى ثبات الاتصال (مهم جداً للمكالمات الصوتية والفيديو بدون تقطيع).",
-        "card_dns_title": "سرعة فتح المواقع (DNS)",
-        "card_dns_desc": "يقيس زمن استجابة خوادم العناوين لتصفح المواقع بدون تأخير.",
-
-        # KPI Statuses
-        "stat_normal": "ممتاز ومستقر",
-        "stat_high_latency": "بطء في الاستجابة",
-        "stat_stable": "ثابت ومثالي",
-        "stat_unstable": "تذبذب ملحوظ",
-        "stat_fast": "سريع جداً",
-        "stat_degraded": "تصفح متثاقل",
-
-        # Chart
-        "chart_title": "مخطط البنج واستقرار الاتصال لحظة بلحظة (Ping Telemetry)",
-
-        # Diagnostics View
-        "diag_banner_title": "مركز التشخيص الذاتي المتقدم",
-        "diag_banner_desc": "يقوم الذكاء الاصطناعي بتحليل مسارات الشبكة وعزل سبب أي بطء أو انقطاع.",
-        "diag_run_btn": "إجراء فحص شامل الآن",
-        "diag_running": "جاري الفحص الشامل للشبكة...",
-        "diag_cause_label": "السبب المحتمل:",
-        "diag_confidence_label": "دقة التشخيص:",
-        "diag_severity_label": "مستوى الخطورة:",
-        "diag_explanation_label": "التفسير بالتفصيل:",
-        "diag_evidence_title": "الأدلة والبيانات الميدانية:",
-        "diag_actions_title": "الإجراءات الموصى بها:",
-
-        # Diagnostic Causes Translations
-        "cause_healthy": "الشبكة تعمل بكفاءة تامة (لا توجد أعطال)",
-        "cause_local_gateway_unreachable": "فقدان الاتصال بالراوتر المنزلي (تأكد من الواي فاي أو الكابل)",
-        "cause_local_gateway_high_latency": "بطء أو تشويش في الاتصال بين جهازك والراوتر",
-        "cause_dns_failure": "تعطل خادم DNS المعتمد (المتصفح لا يفتح أسماء المواقع)",
-        "cause_dns_high_latency": "خادم DNS الحالي بطيء جداً في الرد",
-        "cause_upstream_isp_loss": "انقطاع أو عطل عام لدى شركة الإنترنت (مزود الخدمة)",
-        "cause_destination_specific_failure": "المشكلة في موقع محدد وليست من خط الإنترنت الخاص بك",
-        "cause_wifi_degradation": "ضعف إشارة الواي فاي أو تداخل قنوات الاتصال",
-
-        # Remediation View
-        "rem_banner_title": "سجل الحماية والإصلاح التلقائي",
-        "rem_banner_desc": "إجراءات تعافي آمنة ومدروسة لحل مشاكل الاتصال بدون تدخل يدوي.",
-        "rem_flush_btn": "تفريغ كاش DNS الآن",
-        "rem_recheck_btn": "إعادة فحص الراوتر",
-        "rem_col_time": "الوقت",
-        "rem_col_action": "الإجراء المنفذ",
-        "rem_col_risk": "مستوى الخطورة",
-        "rem_col_status": "الحالة",
-        "rem_col_duration": "زمن التنفيذ",
-        "rem_col_verify": "التحقق",
-        "rem_col_rollback": "التراجع التلقائي",
-
-        # DNS View
-        "dns_banner_title": "محرك فحص واختيار أسرع DNS",
-        "dns_banner_desc": "مقارنة حية ومباشرة بين خوادم Cloudflare و Google و Quad9 لاختيار الأسرع لك.",
-        "dns_bench_btn": "فحص وترتيب الخوادم الآن",
-        "dns_bench_running": "جاري الفحص الدقيق للخوادم...",
-        "dns_col_rank": "الترتيب",
-        "dns_col_name": "اسم الخادم",
-        "dns_col_ip": "عنوان IP",
-        "dns_col_latency": "متوسط السرعة (البنج)",
-        "dns_col_fail": "نسبة الخطأ",
-        "dns_col_score": "التقييم العام",
-
-        # Traffic View
-        "traffic_banner_title": "مراقبة استهلاك البرامج للإنترنت",
-        "traffic_meeting_none": "وضع الاجتماعات: متوقف (لا توجد مكالمات Zoom / Teams جارية)",
-        "traffic_meeting_active": "وضع الاجتماعات: نشط (يتم تأمين الأولوية لمكالمتك ومنع التقطيع)",
-        "traffic_scan_btn": "فحص البرامج النشطة",
-        "traffic_col_pid": "PID",
-        "traffic_col_name": "اسم البرنامج",
-        "traffic_col_cat": "التصنيف",
-        "traffic_col_prio": "الأولوية",
-        "traffic_col_sockets": "الاتصالات المفتوحة",
-
-        # History View
-        "hist_banner_title": "سجل الأعطال والمشاكل السابقة",
-        "hist_banner_desc": "سجل دائم للأعطال ومعدل التكرار لقياس استقرار الخدمة مع مزود الإنترنت.",
-        "hist_clear_btn": "تنظيف السجل",
-        "hist_col_time": "التوقيت",
-        "hist_col_cause": "المشكلة المرصودة",
-        "hist_col_conf": "الدقة",
-        "hist_col_sev": "الخطورة",
-        "hist_col_desc": "التفاصيل والنتيجة",
-
-        # Settings View
-        "set_banner_title": "إعدادات النظام وسياسات الحماية",
-        "set_banner_desc": "تخصيص لغة البرنامج، وضع الحماية التلقائي، ومعدل تكرار الفحوصات.",
-        "set_lang_label": "لغة واجهة البرنامج:",
-        "set_mode_label": "وضع الحماية الذاتية:",
-        "set_mode_opt_safe": "حماية ذاتية آمنة (إصلاح تلقائي ذكي)",
-        "set_mode_opt_assisted": "وضع المساعد (طلب الإذن قبل الإصلاح)",
-        "set_mode_opt_obs": "مراقبة وإشعار فقط (بدون أي تعديل)",
-        "set_save_btn": "حفظ الإعدادات وتطبيقها",
-        "set_saved_success": "تم حفظ الإعدادات وتطبيقها بنجاح!",
-    },
-    "en": {
-        # App Header & Navigation
-        "app_title": "NETGUARD AI",
-        "app_subtitle": "Autonomous Network Intelligence",
-        "version": "v2.0.0 · PySide6",
-        "lang_toggle": "العربية",
-        "nav_dashboard": "Dashboard",
-        "nav_diagnostics": "Diagnostics",
-        "nav_healing": "Self-Healing",
-        "nav_traffic": "App Traffic",
-        "nav_dns": "DNS Engine",
-        "nav_history": "Incident History",
-        "nav_settings": "Settings",
-
-        # Dashboard View
-        "system_healthy": "SYSTEM STATUS: HEALTHY",
-        "system_healthy_desc": "Continuous predictive monitoring and autonomous protection active.",
-        "system_anomaly": "WARNING: NETWORK ANOMALY DETECTED",
-        "mode_autonomous": "AUTONOMOUS SAFE",
-        "mode_assisted": "ASSISTED MODE",
-        "mode_observation": "OBSERVATION ONLY",
-        
-        # Quick Fix Actions
-        "quick_fix_btn": "Smart Scan & Quick Fix",
-        "quick_fix_running": "Scanning and refreshing network paths...",
-        "quick_fix_success": "Network audited, DNS cache flushed, and routes optimized!",
-        "flush_dns_btn": "Flush DNS Cache",
-        "flush_dns_success": "DNS cache cleared successfully for faster browsing!",
-        "recheck_gw_btn": "Recheck Gateway",
-        "recheck_gw_success": "Gateway link re-verified and fully stable.",
-
-        # KPI Cards
-        "card_gateway_title": "Gateway Connection",
-        "card_gateway_desc": "Measures connection latency to your home router over Wi-Fi or Ethernet.",
-        "card_external_title": "Internet Latency (Ping)",
-        "card_external_desc": "Measures round-trip response to global internet servers and games.",
-        "card_jitter_title": "Connection Stability (Jitter)",
-        "card_jitter_desc": "Measures latency variation (crucial for smooth voice & video calls).",
-        "card_dns_title": "Domain Resolution (DNS)",
-        "card_dns_desc": "Measures speed of looking up website domains without delay.",
-
-        # KPI Statuses
-        "stat_normal": "Optimal",
-        "stat_high_latency": "Elevated Latency",
-        "stat_stable": "Stable & Steady",
-        "stat_unstable": "Jitter Spike",
-        "stat_fast": "Lightning Fast",
-        "stat_degraded": "Degraded Response",
-
-        # Chart
-        "chart_title": "Real-Time Latency & Stability Chart (Ping Telemetry)",
-
-        # Diagnostics View
-        "diag_banner_title": "Advanced Network Diagnostics",
-        "diag_banner_desc": "AI multi-probe correlation isolating the exact root cause of latency or outages.",
-        "diag_run_btn": "Run Full Audit Now",
-        "diag_running": "Running comprehensive network audit...",
-        "diag_cause_label": "Probable Cause:",
-        "diag_confidence_label": "Confidence:",
-        "diag_severity_label": "Severity:",
-        "diag_explanation_label": "Detailed Explanation:",
-        "diag_evidence_title": "Supporting Telemetry Evidence:",
-        "diag_actions_title": "Recommended Recovery Actions:",
-
-        # Diagnostic Causes Translations
-        "cause_healthy": "Network is healthy with optimal connectivity",
-        "cause_local_gateway_unreachable": "Local router gateway is unreachable (check Wi-Fi / cable)",
-        "cause_local_gateway_high_latency": "High local latency between host and router",
-        "cause_dns_failure": "Configured DNS resolver failed to answer queries",
-        "cause_dns_high_latency": "DNS resolver is responding slowly",
-        "cause_upstream_isp_loss": "Upstream ISP packet loss or infrastructure outage",
-        "cause_destination_specific_failure": "Target-specific issue (your connection is fine)",
-        "cause_wifi_degradation": "Wi-Fi signal degradation or channel interference",
-
-        # Remediation View
-        "rem_banner_title": "Autonomous Self-Healing Engine",
-        "rem_banner_desc": "Policy-governed recovery with pre-validation and automatic rollback.",
-        "rem_flush_btn": "Flush DNS Cache Now",
-        "rem_recheck_btn": "Recheck Gateway",
-        "rem_col_time": "Timestamp",
-        "rem_col_action": "Action Name",
-        "rem_col_risk": "Risk Level",
-        "rem_col_status": "Status",
-        "rem_col_duration": "Exec Time",
-        "rem_col_verify": "Verification",
-        "rem_col_rollback": "Rollback",
-
-        # DNS View
-        "dns_banner_title": "Intelligent DNS Resolver Engine",
-        "dns_banner_desc": "Continuous benchmark across Cloudflare, Google, Quad9, and OpenDNS.",
-        "dns_bench_btn": "Run Resolver Benchmark",
-        "dns_bench_running": "Benchmarking resolvers...",
-        "dns_col_rank": "Rank",
-        "dns_col_name": "Resolver Name",
-        "dns_col_ip": "IP Address",
-        "dns_col_latency": "Mean Latency",
-        "dns_col_fail": "Failure Rate",
-        "dns_col_score": "Composite Score",
-
-        # Traffic View
-        "traffic_banner_title": "Application-Aware Traffic Intelligence",
-        "traffic_meeting_none": "Active Meeting Detection: None (Standard Operations)",
-        "traffic_meeting_active": "Active Meeting Detected (Zoom/Teams) - High-Risk Actions Locked",
-        "traffic_scan_btn": "Refresh Process List",
-        "traffic_col_pid": "PID",
-        "traffic_col_name": "Process Name",
-        "traffic_col_cat": "Category",
-        "traffic_col_prio": "Priority",
-        "traffic_col_sockets": "Active Sockets",
-
-        # History View
-        "hist_banner_title": "Network Incident History",
-        "hist_banner_desc": "Persistent audit log of all detected network anomalies, outages, and degraded states.",
-        "hist_clear_btn": "Clear History",
-        "hist_col_time": "Timestamp",
-        "hist_col_cause": "Probable Cause",
-        "hist_col_conf": "Confidence",
-        "hist_col_sev": "Severity",
-        "hist_col_desc": "Explanation",
-
-        # Settings View
-        "set_banner_title": "System Configuration & Policies",
-        "set_banner_desc": "Configure language, autonomous self-healing modes, and probe thresholds.",
-        "set_lang_label": "User Interface Language:",
-        "set_mode_label": "Self-Healing Mode:",
-        "set_mode_opt_safe": "Autonomous Safe (Smart Auto-Remediation)",
-        "set_mode_opt_assisted": "Assisted (Prompt before changing settings)",
-        "set_mode_opt_obs": "Observation Only (Monitor & alert without changes)",
-        "set_save_btn": "Save & Apply Settings",
-        "set_saved_success": "Settings saved and applied successfully!",
-    }
-}
-
-_current_lang = "ar"
+_CURRENT_LANG = "ar"
 
 
-def set_language(lang: str) -> None:
-    global _current_lang
-    if lang in STRINGS:
-        _current_lang = lang
+class _LanguageSignal:
+    """Thread-safe, weak-ref-safe language change dispatcher avoiding module-level C++ QObject lifetime issues."""
+
+    def __init__(self) -> None:
+        self._slots: List[Any] = []
+
+    def connect(self, slot: Callable[[str], Any]) -> None:
+        self.disconnect(slot)
+        try:
+            if hasattr(slot, "__self__") and hasattr(slot, "__func__"):
+                self._slots.append(weakref.WeakMethod(slot))
+            else:
+                self._slots.append(slot)
+        except TypeError:
+            self._slots.append(slot)
+
+    def disconnect(self, slot: Callable[[str], Any] | None = None) -> None:
+        if slot is None:
+            self._slots.clear()
+            return
+        kept: List[Any] = []
+        for entry in self._slots:
+            cb = entry() if isinstance(entry, weakref.WeakMethod) else entry
+            if cb is not None and cb != slot:
+                kept.append(entry)
+        self._slots = kept
+
+    def emit(self, lang: str) -> None:
+        alive: List[Any] = []
+        callbacks: List[Callable[[str], Any]] = []
+        for entry in list(self._slots):
+            if isinstance(entry, weakref.WeakMethod):
+                cb = entry()
+                if cb is None:
+                    continue
+                alive.append(entry)
+                callbacks.append(cb)
+            else:
+                alive.append(entry)
+                callbacks.append(entry)
+        self._slots = alive
+        for cb in callbacks:
+            try:
+                sig = inspect.signature(cb)
+                params = [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+                ]
+                if params:
+                    cb(lang)
+                else:
+                    cb()
+            except RuntimeError:
+                # Underlying C++ Qt widget already deleted
+                pass
+
+
+class _LanguageManager:
+    def __init__(self) -> None:
+        self.language_changed = _LanguageSignal()
+
+
+_LANG_MGR = _LanguageManager()
 
 
 def get_language() -> str:
-    return _current_lang
+    return _CURRENT_LANG
 
 
-def tr(key: str, default: str = "") -> str:
-    """Retrieve localized string for the active language."""
-    return STRINGS.get(_current_lang, {}).get(key, default or key)
+def set_language(lang: str) -> None:
+    global _CURRENT_LANG
+    norm = "en" if str(lang).lower().startswith("en") else "ar"
+    if _CURRENT_LANG != norm:
+        _CURRENT_LANG = norm
+        _LANG_MGR.language_changed.emit(norm)
 
 
-def get_friendly_diagnosis_explanation(cause_val: str, raw_explanation: str = "") -> str:
-    """Converts internal diagnostic explanations into crisp, natural Arabic."""
-    cause_str = cause_val.lower() if isinstance(cause_val, str) else str(cause_val).lower()
+def language_manager() -> _LanguageManager:
+    return _LANG_MGR
 
-    if "healthy" in cause_str:
-        return "الشبكة مستقرة وتعمل بكفاءة تامة دون أي تذبذب أو بطء."
-    elif "upstream" in cause_str or "isp" in cause_str:
-        return "تذبذب مؤقت في شبكة مزود الخدمة (WE / Orange). الاتصال بالراوتر ممتاز، والمشكلة بالخط الخارجي."
-    elif "gateway_unreachable" in cause_str or "unreachable" in cause_str:
-        return "انقطع الاتصال بالراوتر المحلي. يرجى التحقق من تشغيل الراوتر أو اتصال الكابل."
-    elif "gateway_high_latency" in cause_str or "gateway" in cause_str and "latency" in cause_str:
-        return "تذبذب بين جهازك والراوتر. ينصح بالاقتراب أو استخدام شبكة 5GHz لتقليل التداخل."
-    elif "unresponsive" in cause_str or "dns_failure" in cause_str:
-        return "خادم DNS لا يستجيب. يقوم النظام بالتحويل التلقائي لأسرع خادم مستقر (Google / Cloudflare)."
-    elif "dns" in cause_str and "latency" in cause_str:
-        return "خادم DNS الحالي بطيء الاستجابة. ينصح باعتماد خادم أسرع لتسريع فتح الروابط."
-    elif "wi_fi" in cause_str or "wifi" in cause_str:
-        return "إشارة الواي فاي ضعيفة أو توجد عوائق لاسلكية تؤثر على ثبات البنج."
-    elif "bufferbloat" in cause_str:
-        return "ارتفاع البنج بسبب ضغط تحميل أو رفع ملفات على الشبكة في نفس الوقت."
-    elif "background_app" in cause_str:
-        return "تطبيق في الخلفية يستهلك جزءاً كبيراً من سرعة الاتصال."
-    elif "destination" in cause_str:
-        return "الإنترنت يعمل لديك بشكل طبيعي، والمشكلة مؤقتة في السيرفر الخارجي المستهدف."
 
-    if raw_explanation and any(w in raw_explanation.lower() for w in ["gateway", "packet loss", "upstream", "isp"]):
-        return "تذبذب في خط مزود الخدمة الخارجي (Upstream). الاتصال بالراوتر سليم، وتتم المراقبة تلقائياً."
+STRINGS: Dict[str, Dict[str, str]] = {
+    "ar": {
+        "app_title": "NetGuard AI",
+        "app_subtitle": "منصة هندسة وإدارة الشبكات لنظام ويندوز",
+        "lang_toggle": "English",
+        # Navigation (10 canonical sections + legacy aliases)
+        "nav_dashboard": "لوحة التحكم",
+        "nav_meeting_guard": "حماية الاجتماعات",
+        "nav_traffic": "مراقب الشبكة",
+        "nav_dns": "محسّن DNS",
+        "nav_wifi": "ذكاء الواي فاي",
+        "nav_router": "إدارة الراوتر",
+        "nav_quality": "جودة الإنترنت",
+        "nav_reports": "التقارير والتشخيص",
+        "nav_settings": "الإعدادات",
+        "nav_about": "حول البرنامج",
+        "nav.dashboard": "لوحة التحكم",
+        "nav.meeting_guard": "حماية الاجتماعات",
+        "nav.traffic": "مراقب الشبكة",
+        "nav.dns": "محسّن DNS",
+        "nav.wifi_intelligence": "ذكاء الواي فاي",
+        "nav.router_management": "إدارة الراوتر",
+        "nav.internet_quality": "جودة الإنترنت",
+        "nav.reports": "التقارير",
+        "nav.settings": "الإعدادات",
+        "nav.about": "حول البرنامج",
+        # Global Statuses (10 canonical states)
+        "status_healthy": "سليم",
+        "status_active": "نشط",
+        "status_running": "قيد التشغيل",
+        "status_warning": "تحذير",
+        "status_failed": "فشل",
+        "status_unavailable": "غير متاح",
+        "status_unsupported": "غير مدعوم",
+        "status_not_connected": "غير متصل",
+        "status_waiting": "بانتظار القياس",
+        "status_verifying": "قيد التحقق",
+        "status.healthy": "سليم",
+        "status.active": "نشط",
+        "status.running": "قيد التشغيل",
+        "status.warning": "تحذير",
+        "status.failed": "فشل",
+        "status.unavailable": "غير متاح",
+        "status.unsupported": "غير مدعوم",
+        "status.not_connected": "غير متصل",
+        "status.waiting": "بانتظار القياس",
+        "status.verifying": "قيد التحقق",
+        # Top Bar & Modes
+        "topbar_net_connected": "متصل بالشبكة",
+        "topbar_net_disconnected": "غير متصل بالشبكة",
+        "topbar_guard_ready": "درع الاجتماعات: جاهز",
+        "topbar_guard_active": "درع الاجتماعات: نشط ومؤمن",
+        "topbar_guard_off": "درع الاجتماعات: متوقف",
+        "topbar_bg_idle": "الخلفية: خامل",
+        "topbar_last_update": "آخر تحديث",
+        "topbar_no_updates": "لم يتم التحديث بعد",
+        "topbar_notifications": "التنبيهات",
+        "mode_label": "وضع التشغيل",
+        "mode_auto": "تلقائي آمن",
+        "mode_ask": "بموافقتي",
+        "mode_watch": "مراقبة فقط",
+        "mode_auto_desc": "يكتشف الخلل ويعالجه تلقائياً بأمان مع التحقق والتراجع عند الحاجة.",
+        "mode_ask_desc": "يفحص ويقترح التعديلات وينتظر موافقتك قبل تطبيق أي تغيير.",
+        "mode_watch_desc": "يراقب ويحلل ويسجل الأدلة دون إجراء أي تعديل على النظام.",
+        # Dashboard
+        "dash_title": "نظرة عامة على الشبكة",
+        "dash_sub": "ملخص فوري لحالة الاتصال، صحة الشبكة المحسوبة، أداء الواي فاي، الحماية، والتوصيات الفعلية",
+        "dash.health_gauge": "صحة الشبكة",
+        "dash.hero_initializing": "جاري تهيئة القياسات الأولية...",
+        "dash.hero_desc_init": "يجمع النظام قياسات البوابة والإنترنت و DNS الفعلية دون عرض قيم تقديرية.",
+        "dash.hero_title_healthy": "الشبكة مستقرة وتعمل بكفاءة",
+        "dash.hero_title_warning": "تم رصد تذبذب أو بطء جزئي في الشبكة",
+        "dash.hero_title_critical": "تم رصد خلل حرج يؤثر على الاتصال",
+        "dash.awaiting_probes": "بانتظار اكتمال أول دورة قياس فعلية لحساب مؤشر الصحة.",
+        "dash.health_good": "جميع الفحوصات الفعلية ضمن الحدود المستقرة.",
+        "dash.health_degraded": "تم رصد مؤشرات تراجع تتطلب المراجعة.",
+        "dash.health_critical": "يوجد تدهور حرج في المسار أو فقدان حزم مرتفع.",
+        "dash.note_gw_high": "كمون البوابة مرتفع",
+        "dash.note_ext_high": "كمون الإنترنت مرتفع",
+        "dash.note_packet_loss": "فقدان حزم مرصود",
+        "dash.note_dns_slow": "استجابة DNS بطيئة",
+        "dash.note_wifi_weak": "إشارة الواي فاي ضعيفة",
+        "dash.adapter_pending": "المحول: جاري القراءة...",
+        "dash.guard_idle": "درع الاجتماعات: جاهز",
+        "dash.guard_protecting": "حماية الاجتماع",
+        "dash.no_speed_test": "السرعة: غير مُقاسة بعد",
+        "dash.btn_quick_scan": "فحص سريع الآن",
+        "dash.scanning": "جاري الفحص...",
+        "dash.btn_preflight": "جهّز لاجتماع",
+        "dash.btn_export": "تصدير تقرير",
+        "dash.live_traffic": "معدل نقل البيانات المباشر (تنزيل / رفع)",
+        "dash.guard_panel_title": "حماية الاجتماعات و QoS",
+        "dash.guard_panel_sub": "أولوية المكالمات الحية والتحقق من Windows ActiveStore",
+        "dash.guard_idle_detail": "لا توجد مكالمة فيديو نشطة حالياً. المراقبة الخلفية في وضع الاستعداد.",
+        "dash.guard_active_detail": "التطبيق النشط: {app} · المرحلة: {stage}",
+        "dash.qos_pending": "سياسات ActiveStore: بانتظار مكالمة نشطة",
+        "dash.qos_verified_count": "السياسات المؤكدة في ActiveStore: {verified} / {total}",
+        "dash.wifi_router_title": "الواي فاي والراوتر",
+        "dash.wifi_router_sub": "ملخص الربط اللاسلكي وبوابة الشبكة",
+        "dash.wifi_quality": "جودة الواي فاي",
+        "dash.wifi_unmeasured": "لم تُجمع بيانات الواي فاي بعد — افتح ذكاء الواي فاي للفحص.",
+        "dash.router_unconfigured": "الراوتر: غير مقروء بعد (انتقل إلى إدارة الراوتر).",
+        "dash.devices_count": "{n} أجهزة متصلة",
+        "dash.recs_title": "التوصيات الفعلية",
+        "dash.recs_sub": "توصيات مستخلصة من القياسات الحالية فقط",
+        "dash.recs_empty": "بانتظار جمع قياسات كافية لتقييم التوصيات.",
+        "dash.recs_all_good": "لا توجد إجراءات مطلوبة حالياً — المؤشرات سليمة.",
+        "dash.rec_dns": "ينصح بفحص خوادم DNS عبر محسّن DNS لتحسين سرعة الاستعلام.",
+        "dash.rec_wifi": "إشارة الواي فاي منخفضة؛ افحص القنوات والتداخل في ذكاء الواي فاي.",
+        "dash.rec_loss": "تم رصد فقدان حزم؛ افحص الكابلات أو تداخل الواي فاي.",
+        "dash.rec_gw": "استجابة البوابة المحلية مرتفعة؛ افحص الحمل على الراوتر.",
+        "dash.open_section": "فتح القسم",
+        "dash.local_adapter": "المحول المحلي",
+        "dash.router_node": "الراوتر",
+        "dash.speed_tested": "آخر اختبار سرعة",
+        "dash.speed_ago_sec": "اختبار السرعة: منذ {val} ث",
+        "dash.speed_ago_min": "اختبار السرعة: منذ {val} د",
+        "dash.interventions": "التدخلات",
+        "dash.status_warn": "تنبيه",
+        "dash.status_stable": "مستقر",
+        "dash.jitter_good": "ممتاز • مثالي للمكالمات",
+        "dash.loss_detected": "فقدان مرصود",
+        "dash.loss_zero": "ممتاز · لا حزم ضائعة",
+        "dash.live_rate_caption": "معدل التنزيل الفعلي الحالي",
+        # Meeting Guard
+        "mg_title": "مركز تحكم حماية الاجتماعات و QoS",
+        "mg_sub": "مراقبة حالة المكالمات الحية، التحقق من سياسات Windows ActiveStore QoS، وتقييد الرفع الخلفي تلقائياً",
+        "mg.app_controls": "التحكم في تطبيقات الاجتماعات وأولوية البث",
+        "mg.app_controls_sub": "تحديد التطبيقات المحمية وتقسيم منافذ Teams والتحقق من تقييد الخلفية",
+        "mg.master_toggle": "تفعيل الحماية الذكية للاجتماعات (Master QoS)",
+        "mg.teams_split": "فصل منافذ الوسائط لـ Microsoft Teams (UDP 3478–3481) عن باقي التطبيقات",
+        "mg.kill_switch": "إيقاف فوري لجميع سياسات QoS",
+        "mg.etw_label": "قياس ETW لحزم الإرسال (UDP Outbound)",
+        "mg.dns_freeze": "حالة تجميد تغييرات DNS أثناء المكالمة",
+        "mg.sessions_active": "الجلسات النشطة حالياً",
+        "mg.sessions_completed": "تقارير المكالمات المنتهية",
+        "mg.remediation_title": "وضع التشغيل وأدوات المعالجة التلقائية",
+        # Traffic Monitor
+        "tm_title": "وحدة تحليل حركة الشبكة المباشرة",
+        "tm_sub": "معدلات التنزيل والرفع الفعلية، إجمالي البيانات المنقولة، توزيع البروتوكولات، واتصالات العمليات",
+        "tm.dl_card": "معدل التنزيل الفعلي",
+        "tm.ul_card": "معدل الرفع الفعلي",
+        "tm.total_rx_tx": "إجمالي البيانات المنقولة (RX / TX)",
+        "tm.active_conns": "الاتصالات النشطة والبروتوكولات",
+        "tm.dl_chart": "تاريخ سرعة التنزيل",
+        "tm.ul_chart": "تاريخ سرعة الرفع",
+        "tm.search_placeholder": "ابحث باسم العملية أو البروتوكول...",
+        "tm.limit_banner": "ملاحظة تقنية: في ويندوز يُقاس إجمالي تدفق الشبكة ومعدلات الواجهة من عدادات NIC، وتُعرض هنا الاتصالات والعمليات الفعلية ومعدل إرسال UDP عبر ETW — ولا يُخلط مطلقاً بين قرص التخزين وحركة الشبكة.",
+        # DNS Optimizer
+        "dns_title": "محسن ومقارن خوادم DNS",
+        "dns_sub": "فحص الخادم الحالي ومقارنة الاستجابة المباشرة دون كاش مع احترام تجميد الاجتماعات",
+        # Wi-Fi Intelligence
+        "wifi_title": "محطة تحليل الترددات والواي فاي",
+        "wifi_sub": "قياسات المحول الحقيقية، تحليل الطيف الترددي، والتقييم الموزون للقنوات",
+        # Router Management
+        "router_title": "وحدة إدارة وتشخيص الراوتر",
+        "router_sub": "فحص وتوحيد إعدادات الراوتر، فحص التغطية، إدارة الأجهزة، وتطبيق التغييرات بموافقة وتحقق",
+        "router_tab_overview": "نظرة عامة",
+        "router_tab_wifi": "الواي فاي",
+        "router_tab_wan": "الإنترنت / WAN",
+        "router_tab_lan": "الشبكة المحلية و DHCP",
+        "router_tab_devices": "الأجهزة المتصلة",
+        "router_tab_qos": "QoS وعرض النطاق",
+        "router_tab_diag": "مشاكل الراوتر وكل الإعدادات",
+        "router_tab_web": "واجهة الراوتر المباشرة (المتصفح)",
+        # Internet Quality
+        "iq_title": "مختبر جودة الإنترنت و Bufferbloat",
+        "iq_sub": "فصل معدل ربط PHY عن سرعة الإنترنت الفعلية وقياس الكمون تحت الحمل",
+        "iq.unmeasured": "غير مُقاس بعد",
+        # Reports
+        "rep_title": "التقارير ومخطط التحقيق التشخيصي",
+        "rep_sub": "مخطط تدفق التحقيق المتسلسل من المسح حتى التحقق، مقارنة قبل/بعد، وتصدير التقارير المنقحة",
+        # Settings
+        "set_title": "مركز إعدادات النظام",
+        "set_sub": "إدارة منظمة لإعدادات الشبكة، الحماية، الواي فاي، الراوتر، اللغة، والتسجيل",
+        # About
+        "about_title": "حول NetGuard AI",
+        "about_sub": "معلومات الإصدار، بنية المنصة، وضمانات الخصوصية والتنفيذ المحلي",
+    },
+    "en": {
+        "app_title": "NetGuard AI",
+        "app_subtitle": "Windows Network Intelligence & Administration Platform",
+        "lang_toggle": "العربية",
+        # Navigation (10 canonical sections + dot aliases)
+        "nav_dashboard": "Dashboard",
+        "nav_meeting_guard": "Meeting Guard",
+        "nav_traffic": "Traffic Monitor",
+        "nav_dns": "DNS Optimizer",
+        "nav_wifi": "Wi-Fi Intelligence",
+        "nav_router": "Router Management",
+        "nav_quality": "Internet Quality",
+        "nav_reports": "Reports",
+        "nav_settings": "Settings",
+        "nav_about": "About",
+        "nav.dashboard": "Dashboard",
+        "nav.meeting_guard": "Meeting Guard",
+        "nav.traffic": "Traffic Monitor",
+        "nav.dns": "DNS Optimizer",
+        "nav.wifi_intelligence": "Wi-Fi Intelligence",
+        "nav.router_management": "Router Management",
+        "nav.internet_quality": "Internet Quality",
+        "nav.reports": "Reports",
+        "nav.settings": "Settings",
+        "nav.about": "About",
+        # Global Statuses
+        "status_healthy": "Healthy",
+        "status_active": "Active",
+        "status_running": "Running",
+        "status_warning": "Warning",
+        "status_failed": "Failed",
+        "status_unavailable": "Unavailable",
+        "status_unsupported": "Unsupported",
+        "status_not_connected": "Not Connected",
+        "status_waiting": "Not Measured",
+        "status_verifying": "Verifying",
+        "status.healthy": "Healthy",
+        "status.active": "Active",
+        "status.running": "Running",
+        "status.warning": "Warning",
+        "status.failed": "Failed",
+        "status.unavailable": "Unavailable",
+        "status.unsupported": "Unsupported",
+        "status.not_connected": "Not Connected",
+        "status.waiting": "Not Measured",
+        "status.verifying": "Verifying",
+        # Top Bar & Modes
+        "topbar_net_connected": "Connected",
+        "topbar_net_disconnected": "Not Connected",
+        "topbar_guard_ready": "Meeting Guard: Ready",
+        "topbar_guard_active": "Meeting Guard: Active",
+        "topbar_guard_off": "Meeting Guard: Disabled",
+        "topbar_bg_idle": "Background: Idle",
+        "topbar_last_update": "Last Update",
+        "topbar_no_updates": "Not synced yet",
+        "topbar_notifications": "Notifications",
+        "mode_label": "Operating Mode",
+        "mode_auto": "Autonomous Safe",
+        "mode_ask": "Approval Required",
+        "mode_watch": "Observation Only",
+        "mode_auto_desc": "Detects and safely resolves verified faults with readback and rollback.",
+        "mode_ask_desc": "Diagnoses issues and waits for your explicit approval before any change.",
+        "mode_watch_desc": "Monitors, measures, and logs evidence without modifying system settings.",
+        # Dashboard
+        "dash_title": "Network Overview",
+        "dash_sub": "Real-time network health score, link status, traffic, Meeting Guard, router, and diagnostics",
+        "dash.health_gauge": "Network Health",
+        "dash.hero_initializing": "Collecting initial probes...",
+        "dash.hero_desc_init": "Gathering real gateway, WAN, and DNS latency without fabricated baselines.",
+        "dash.hero_title_healthy": "Network is Healthy and Stable",
+        "dash.hero_title_warning": "Partial Latency or Signal Degradation",
+        "dash.hero_title_critical": "Critical Connectivity Fault Detected",
+        "dash.awaiting_probes": "Waiting for first real probe cycle to calculate network health.",
+        "dash.health_good": "All live probes are within stable thresholds.",
+        "dash.health_degraded": "Degradation indicators require attention.",
+        "dash.health_critical": "Severe path degradation or elevated packet loss detected.",
+        "dash.note_gw_high": "High gateway latency",
+        "dash.note_ext_high": "High internet latency",
+        "dash.note_packet_loss": "Packet loss detected",
+        "dash.note_dns_slow": "Slow DNS resolution",
+        "dash.note_wifi_weak": "Weak Wi-Fi signal",
+        "dash.adapter_pending": "Adapter: Detecting...",
+        "dash.guard_idle": "Meeting Guard: Ready",
+        "dash.guard_protecting": "Protecting Call",
+        "dash.no_speed_test": "Speed: Not measured yet",
+        "dash.btn_quick_scan": "Run Health Check",
+        "dash.scanning": "Scanning...",
+        "dash.btn_preflight": "Meeting Pre-Flight",
+        "dash.btn_export": "Export Report",
+        "dash.live_traffic": "Real-Time Traffic Throughput (Download / Upload)",
+        "dash.guard_panel_title": "Meeting Guard & QoS",
+        "dash.guard_panel_sub": "Call prioritization and Windows ActiveStore verification",
+        "dash.guard_idle_detail": "No active call detected. Background protection is standing by.",
+        "dash.guard_active_detail": "Active App: {app} · Lifecycle: {stage}",
+        "dash.qos_pending": "ActiveStore Policies: Standing by for active call",
+        "dash.qos_verified_count": "Verified in ActiveStore: {verified} / {total}",
+        "dash.wifi_router_title": "Wi-Fi & Router Summary",
+        "dash.wifi_router_sub": "Wireless link telemetry and gateway summary",
+        "dash.wifi_quality": "Wi-Fi Quality",
+        "dash.wifi_unmeasured": "No Wi-Fi telemetry collected yet — open Wi-Fi Intelligence to scan.",
+        "dash.router_unconfigured": "Router: Not inspected yet (open Router Management).",
+        "dash.devices_count": "{n} connected devices",
+        "dash.recs_title": "Top Recommendations",
+        "dash.recs_sub": "Derived strictly from current real measurements",
+        "dash.recs_empty": "Waiting for sufficient probes to evaluate recommendations.",
+        "dash.recs_all_good": "No actions needed — all monitored metrics look healthy.",
+        "dash.rec_dns": "Run DNS Optimizer benchmark to verify faster local resolution.",
+        "dash.rec_wifi": "Wi-Fi signal is degraded; inspect channel interference in Wi-Fi Intelligence.",
+        "dash.rec_loss": "Packet loss detected; check local cabling or wireless interference.",
+        "dash.rec_gw": "Local gateway RTT is elevated; inspect router load.",
+        "dash.open_section": "Open Section",
+        "dash.local_adapter": "Local Adapter",
+        "dash.router_node": "Router",
+        "dash.speed_tested": "Last Speed Test",
+        "dash.speed_ago_sec": "Speed test: {val}s ago",
+        "dash.speed_ago_min": "Speed test: {val}m ago",
+        "dash.interventions": "Interventions",
+        "dash.status_warn": "Warning",
+        "dash.status_stable": "Stable",
+        "dash.jitter_good": "Excellent · Ideal for calls",
+        "dash.loss_detected": "Loss detected",
+        "dash.loss_zero": "No packet loss",
+        "dash.live_rate_caption": "Live NIC download rate",
+        # Meeting Guard
+        "mg_title": "Meeting Guard & QoS Control Center",
+        "mg_sub": "Live call telemetry, Windows ActiveStore QoS policy verification, and adaptive bulk upload control",
+        "mg.app_controls": "Protected Meeting Applications & Traffic Controls",
+        "mg.app_controls_sub": "Manage monitored call apps, Teams port split, and background upload limits",
+        "mg.master_toggle": "Enable Meeting Guard Master Protection (QoS)",
+        "mg.teams_split": "Isolate Microsoft Teams Media Ports (UDP 3478–3481)",
+        "mg.kill_switch": "Instant QoS Kill Switch",
+        "mg.etw_label": "ETW Outbound UDP Telemetry",
+        "mg.dns_freeze": "Meeting DNS Protection Freeze",
+        "mg.sessions_active": "Active Call Sessions",
+        "mg.sessions_completed": "Completed Session Reports",
+        "mg.remediation_title": "Operating Mode & Self-Healing Policies",
+        # Traffic Monitor
+        "tm_title": "Live Traffic Analysis Console",
+        "tm_sub": "Real-time download/upload throughput, total transferred bytes, protocols, and process connections",
+        "tm.dl_card": "Download Throughput",
+        "tm.ul_card": "Upload Throughput",
+        "tm.total_rx_tx": "Total Transferred (RX / TX)",
+        "tm.active_conns": "Active Sockets & Protocols",
+        "tm.dl_chart": "Download Rate History",
+        "tm.ul_chart": "Upload Rate History",
+        "tm.search_placeholder": "Filter by process name or protocol...",
+        "tm.limit_banner": "Engineering Note: On Windows, interface RX/TX bytes come from NIC counters while per-process rows display real active sockets and ETW outbound UDP rates. Disk I/O is never reported as network traffic.",
+        # DNS Optimizer
+        "dns_title": "DNS Optimizer & Resolver Benchmark",
+        "dns_sub": "Active resolver verification, uncached UDP latency comparison, and meeting-safe switching",
+        # Wi-Fi Intelligence
+        "wifi_title": "Wi-Fi RF Analysis Workstation",
+        "wifi_sub": "Windows WLAN telemetry, spectrum occupancy, and weighted channel interference scoring",
+        # Router Management
+        "router_title": "Router Administration Console",
+        "router_sub": "Normalized gateway inspection, Wi-Fi/WAN/LAN configuration, connected clients, and verified edits",
+        "router_tab_overview": "Overview",
+        "router_tab_wifi": "Wi-Fi",
+        "router_tab_wan": "Internet / WAN",
+        "router_tab_lan": "LAN && DHCP",
+        "router_tab_devices": "Connected Devices",
+        "router_tab_qos": "QoS && Bandwidth",
+        "router_tab_diag": "Audit && All Settings",
+        "router_tab_web": "Live Router Web Portal",
+        # Internet Quality
+        "iq_title": "Internet Quality & Bufferbloat Workspace",
+        "iq_sub": "Separating Wi-Fi PHY rate, LAN throughput, and WAN throughput with loaded-latency analysis",
+        "iq.unmeasured": "Not measured",
+        # Reports
+        "rep_title": "Diagnostic Investigation Flowchart & Reports",
+        "rep_sub": "14-stage execution workflow, root-cause evidence, before/after comparison, and redacted export",
+        # Settings
+        "set_title": "Configuration Center",
+        "set_sub": "Organized settings for diagnostics, Meeting Guard, QoS, DNS, router management, and logging",
+        # About
+        "about_title": "About NetGuard AI",
+        "about_sub": "Version, architecture, platform capabilities, and local-only security guarantees",
+    },
+}
 
-    return raw_explanation or "يراقب النظام مسارات الشبكة ويعالج أي اختناق تلقائياً."
 
+def tr(key: str, lang: str | None = None, **kwargs: Any) -> str:
+    """Translate a key in the active (or specified) language with safe English fallback."""
+    active = lang or _CURRENT_LANG
+    table = STRINGS.get(active, STRINGS["ar"])
+    text = table.get(key) or STRINGS["en"].get(key) or key
+    if kwargs:
+        try:
+            return text.format(**kwargs)
+        except Exception:
+            return text
+    return text

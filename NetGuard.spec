@@ -1,4 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+
+hiddenimports = ['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtSvg', 'PySide6.QtNetwork', 'PySide6.QtWebChannel', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtPrintSupport', 'pyqtgraph', 'psutil', 'dns', 'dns.resolver', 'dns.asyncresolver', 'yaml', 'sqlite3', 'pydantic', 'pydantic_core']
+hiddenimports += collect_submodules('app')
 
 
 a = Analysis(
@@ -6,7 +10,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets'), ('config', 'config'), ('app/dns/providers.json', 'app/dns')],
-    hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtSvg', 'pyqtgraph', 'psutil', 'dns', 'yaml', 'sqlite3'],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

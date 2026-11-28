@@ -26,7 +26,7 @@ class Panel(QFrame):
         subtitle: str = "",
         header_widget: Optional[QWidget] = None,
         parent: Optional[QWidget] = None,
-        padding: int = 24,
+        padding: int = 20,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("BasePanel")
@@ -48,7 +48,7 @@ class Panel(QFrame):
 
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(padding, padding, padding, padding)
-        self.main_layout.setSpacing(16)
+        self.main_layout.setSpacing(14)
 
         # Header area (only if title or header_widget provided)
         self.header_layout = QHBoxLayout()
@@ -63,19 +63,17 @@ class Panel(QFrame):
         self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT}; background: transparent;")
         self.lbl_title.setWordWrap(True)
+        self.lbl_title.setMinimumWidth(80)
         self.title_col.addWidget(self.lbl_title)
 
-        if subtitle:
-            self.lbl_subtitle = QLabel(subtitle)
-            self.lbl_subtitle.setFont(tokens.get_sans_font(12, 400))
-            self.lbl_subtitle.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: transparent;")
-            self.lbl_subtitle.setWordWrap(True)
-            self.title_col.addWidget(self.lbl_subtitle)
-        else:
-            self.lbl_subtitle = None
+        self.lbl_subtitle = QLabel(subtitle)
+        self.lbl_subtitle.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_subtitle.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: transparent;")
+        self.lbl_subtitle.setWordWrap(True)
+        self.lbl_subtitle.setVisible(bool(subtitle))
+        self.title_col.addWidget(self.lbl_subtitle)
 
-        self.header_layout.addLayout(self.title_col)
-        self.header_layout.addStretch()
+        self.header_layout.addLayout(self.title_col, 1)
 
         if header_widget is not None:
             self.header_layout.addWidget(header_widget)
@@ -91,3 +89,4 @@ class Panel(QFrame):
         self.lbl_title.setText(title)
         if self.lbl_subtitle:
             self.lbl_subtitle.setText(subtitle)
+            self.lbl_subtitle.setVisible(bool(subtitle))

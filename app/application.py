@@ -45,11 +45,14 @@ class NetGuardApplication:
 
         # 3. Remediation Subsystem
         from app.traffic.controller import TrafficController
+        from app.traffic.qos_config import AppQoSConfig
         user_settings = getattr(self.ctx, "settings", getattr(self.ctx, "user_settings", None))
+        self.qos_config = AppQoSConfig.from_user_settings(user_settings)
         self.traffic_controller = TrafficController(
             event_bus=self.ctx.event_bus,
             platform=self.ctx.platform,
             user_settings=user_settings,
+            qos_config=self.qos_config,
         )
 
         self.action_registry = ActionRegistry()
@@ -88,6 +91,11 @@ class NetGuardApplication:
             event_bus=self.ctx.event_bus,
         )
         self.settings.changed.connect(self._on_settings_changed)
+
+        # 6. Integrated Wi-Fi, Network, Speed/Bufferbloat & Router Suite
+        from app.wifi import build_wifi_bundle
+
+        self.wifi_bundle = build_wifi_bundle(self)
 
         self._running = False
         self.async_loop: Optional[asyncio.AbstractEventLoop] = None

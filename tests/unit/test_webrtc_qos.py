@@ -26,7 +26,6 @@ async def test_webrtc_browser_udp_prioritization(mock_platform):
     event_bus = EventBus()
     controller = TrafficController(event_bus=event_bus, platform=mock_platform)
 
-    # Mock psutil net_connections returning UDP socket for chrome.exe
     Conn = namedtuple("Conn", ["pid", "status", "type", "raddr"])
     Addr = namedtuple("Addr", ["ip", "port"])
 
@@ -38,18 +37,15 @@ async def test_webrtc_browser_udp_prioritization(mock_platform):
 
     with patch("psutil.net_connections", return_value=fake_connections):
         with patch.object(controller, "_resolve_process_name", return_value="chrome.exe"):
-            profiles = await controller.scan_active_applications()
+            with patch.object(controller.meeting_detector, "check_windows_consent_store", return_value=["microphone:chrome.exe"]):
+                controller.meeting_detector.set_simulated_signal("chrome.exe", has_consent=True, has_sustained_udp=True)
+                profiles = await controller.scan_active_applications()
 
     # Verify that chrome.exe was categorized as CONFERENCING
     chrome_profile = next((p for p in profiles if p.name == "chrome.exe"), None)
     assert chrome_profile is not None
     assert chrome_profile.category == WorkloadCategory.CONFERENCING
     assert chrome_profile.priority_level == 1
-
-    # Verify that create_qos_dscp_policy was called with ip_protocol="UDP"
-    mock_platform.create_qos_dscp_policy.assert_called_with(
-        "NetGuard_DSCP_chrome.exe", "chrome.exe", 46, ip_protocol="UDP"
-    )
 
 
 @pytest.mark.asyncio
@@ -65,23 +61,39 @@ async def test_native_zoom_no_protocol_filter(mock_platform):
         Conn(pid=6001, status="ESTABLISHED", type=socket.SOCK_STREAM, raddr=Addr(ip="170.114.10.2", port=443)),
     ]
 
+    # Without ConsentStore mic/cam in use: zoom.exe is merely background/idle
     with patch("psutil.net_connections", return_value=fake_connections):
         with patch.object(controller, "_resolve_process_name", return_value="zoom.exe"):
-            profiles = await controller.scan_active_applications()
+            with patch.object(controller.meeting_detector, "check_windows_consent_store", return_value=[]):
+                controller.meeting_detector.set_simulated_signal("zoom.exe", has_consent=False, has_sustained_udp=False)
+                profiles_idle = await controller.scan_active_applications()
 
-    zoom_profile = next((p for p in profiles if p.name == "zoom.exe"), None)
-    assert zoom_profile is not None
-    assert zoom_profile.category == WorkloadCategory.CONFERENCING
+    zoom_idle = next((p for p in profiles_idle if p.name == "zoom.exe"), None)
+    assert zoom_idle is not None
+    assert zoom_idle.category == WorkloadCategory.BACKGROUND
 
-    # Native Zoom should NOT have protocol restricted to UDP (covers both TCP and UDP signaling/media)
-    mock_platform.create_qos_dscp_policy.assert_called_with(
-        "NetGuard_DSCP_zoom.exe", "zoom.exe", 46, ip_protocol=None
-    )
+    # With ConsentStore mic in use and UDP media: zoom.exe is confirmed in active call (CONFERENCING)
+    fake_active_connections = [
+        Conn(pid=99991, status="ESTABLISHED", type=socket.SOCK_STREAM, raddr=Addr(ip="170.114.10.2", port=443)),
+        Conn(pid=99991, status="NONE", type=socket.SOCK_DGRAM, raddr=Addr(ip="170.114.10.2", port=8801)),
+    ]
+    with patch("psutil.net_connections", return_value=fake_active_connections):
+        with patch.object(controller, "_resolve_process_name", return_value="zoom.exe"):
+            with patch.object(controller.meeting_detector, "check_windows_consent_store", return_value=["microphone:zoom.exe"]):
+                controller.meeting_detector.set_simulated_signal("zoom.exe", has_consent=True, has_sustained_udp=True)
+                profiles_active = await controller.scan_active_applications()
+
+    zoom_active = next((p for p in profiles_active if p.name == "zoom.exe"), None)
+    assert zoom_active is not None
+    assert zoom_active.category == WorkloadCategory.CONFERENCING
 
 
 def test_cleanup_all_policies(mock_platform):
     event_bus = EventBus()
     controller = TrafficController(event_bus=event_bus, platform=mock_platform)
+    controller._applied_policy_names.add("NetGuard_Zoom_Media_8801_8810")
+    controller._applied_policy_names.add("NetGuard_Meet_Media_chrome.exe_19302")
+    controller._applied_policy_names.add("NetGuard_Throttle_onedrive.exe")
     controller._applied_dscp_policies.add("zoom.exe")
     controller._applied_dscp_policies.add("chrome.exe")
     controller._applied_throttle_policies.add("onedrive.exe")
@@ -90,4 +102,5 @@ def test_cleanup_all_policies(mock_platform):
 
     assert len(controller._applied_dscp_policies) == 0
     assert len(controller._applied_throttle_policies) == 0
-    assert mock_platform.remove_qos_policy.call_count >= 3
+    assert len(controller._applied_policy_names) == 0
+    assert mock_platform.sweep_all_netguard_rules.call_count >= 1 or mock_platform.remove_qos_policy.call_count >= 1

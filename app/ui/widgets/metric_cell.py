@@ -69,7 +69,7 @@ class MetricCell(QFrame):
 
         # 1. Muted Label (13px)
         self.title_lbl = QLabel(title)
-        self.title_lbl.setFont(tokens.get_sans_font(13, 400))
+        self.title_lbl.setFont(tokens.get_sans_font(12, 500))
         self.title_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         layout.addWidget(self.title_lbl)
 
@@ -85,7 +85,7 @@ class MetricCell(QFrame):
         val_row.setAlignment(Qt.AlignLeft)
 
         self.val_lbl = QLabel(initial_val)
-        self.val_lbl.setFont(tokens.get_mono_font(26, 600))
+        self.val_lbl.setFont(tokens.get_mono_font(24, 600))
         self.val_lbl.setStyleSheet(f"color: {tokens.TEXT};")
         self.val_lbl.setMinimumHeight(28)
 
@@ -98,13 +98,13 @@ class MetricCell(QFrame):
         val_row.addStretch()
         layout.addWidget(val_container)
 
-        # 3. Sparkline (32px high)
+        # 3. Sparkline (36px high)
         self.sparkline = Sparkline(
             samples=initial_samples if initial_samples is not None else [],
             color=status_color,
             parent=self,
         )
-        self.sparkline.setFixedHeight(40)
+        self.sparkline.setFixedHeight(36)
         self.sparkline.setAttribute(Qt.WA_TranslucentBackground, True)
         self.sparkline.setStyleSheet("background: transparent; border: 0px solid transparent;")
         layout.addWidget(self.sparkline)
@@ -114,12 +114,12 @@ class MetricCell(QFrame):
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.setSpacing(6)
 
-        self.dot = QLabel()
+        self.dot = QFrame()
         self.dot.setFixedSize(7, 7)
-        self.dot.setStyleSheet(f"background-color: {status_color}; border-radius: 3.5px;")
+        self.dot.setStyleSheet(f"background-color: {status_color}; border-radius: 3px; border: none;")
 
         self.footer_lbl = QLabel(footer_text)
-        self.footer_lbl.setFont(tokens.get_sans_font(12, 400))
+        self.footer_lbl.setFont(tokens.get_sans_font(12, 500))
         self.footer_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
 
         footer_row.addWidget(self.dot)

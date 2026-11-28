@@ -325,6 +325,32 @@ class UpdateChecker(QObject):
                         content = resp.read().decode("utf-8")
                         manifest_data = json.loads(content)
                 else:
+                    if manifest_loc.startswith("\\\\"):
+                        unc_host = manifest_loc.lstrip("\\").split("\\", 1)[0]
+                        if unc_host:
+                            # Wrap getaddrinfo + connect in a bounded daemon thread because Windows NetBIOS/LLMNR blocks past socket timeouts.
+                            reach_err: List[Optional[Exception]] = [None]
+                            done_ev = threading.Event()
+
+                            def _probe_unc() -> None:
+                                try:
+                                    import socket
+                                    with socket.create_connection((unc_host, 445), timeout=0.45):
+                                        pass
+                                except Exception as ex:
+                                    reach_err[0] = ex
+                                finally:
+                                    done_ev.set()
+
+                            threading.Thread(target=_probe_unc, daemon=True, name="UncReachProbe").start()
+                            if not done_ev.wait(timeout=0.55):
+                                raise FileNotFoundError(
+                                    f"انتهت مهلة التحقق من خادم التحديثات الشبكي ({unc_host}) خلال 0.55s"
+                                )
+                            if reach_err[0] is not None:
+                                raise FileNotFoundError(
+                                    f"خادم التحديثات الشبكي ({unc_host}) غير متصل حالياً: {reach_err[0]}"
+                                )
                     if not os.path.exists(manifest_loc):
                         raise FileNotFoundError(f"تعذر العثور على ملف الإصدار: {manifest_loc}")
                     with open(manifest_loc, "r", encoding="utf-8") as f:

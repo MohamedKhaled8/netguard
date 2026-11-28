@@ -80,7 +80,7 @@ async def test_dns_benchmark_ranking(monkeypatch):
 async def test_dns_optimizer_selection(monkeypatch):
     platform = MockDNSPlatform()
     bus = EventBus()
-    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus)
+    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus, min_consecutive_rounds=1)
 
     async def mock_rank_all():
         return [
@@ -102,7 +102,7 @@ async def test_dns_optimizer_rejects_failed_os_apply(monkeypatch):
     platform = MockDNSPlatform()
     platform.apply_ok = False
     bus = EventBus()
-    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus)
+    optimizer = DNSOptimizer(platform_adapter=platform, event_bus=bus, min_consecutive_rounds=1)
 
     async def mock_rank_all():
         return [

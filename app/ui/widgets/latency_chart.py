@@ -35,6 +35,8 @@ from PySide6.QtCore import (
 )
 from app.ui import tokens
 from app.ui.animation_clock import AnimationMasterClock
+from app.ui.i18n import tr, get_language
+from app.core.thresholds import DEFAULT_THRESHOLDS
 
 
 class LatencyPlotCanvas(QWidget):
@@ -119,7 +121,12 @@ class LatencyPlotCanvas(QWidget):
         if w < 100 or not self.samples:
             painter.setFont(tokens.get_sans_font(13, 400))
             painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
-            painter.drawText(self.rect(), Qt.AlignCenter, "في انتظار تسجيل قياسات حقيقية…")
+            empty_msg = (
+                "Waiting for real measurements…"
+                if get_language() == "en"
+                else "في انتظار تسجيل قياسات حقيقية…"
+            )
+            painter.drawText(self.rect(), Qt.AlignCenter, empty_msg)
             return
 
         pad_left = 42.0
@@ -159,14 +166,16 @@ class LatencyPlotCanvas(QWidget):
         painter.drawLine(QPointF(pad_left, y_thresh), QPointF(pad_left + plot_w, y_thresh))
 
         # Label for threshold: subtle pill badge on the far right without colliding with wave
-        painter.setFont(tokens.get_sans_font(10, 500))
-        pill_rect = QRectF(pad_left + plot_w - 110, y_thresh - 17, 105, 15)
+        painter.setFont(tokens.get_sans_font(12, 500))
+        ref_ms = int(DEFAULT_THRESHOLDS.latency.external_warning_ms)
+        ref_text = f"حد مرجعي: {ref_ms} ms"
+        pill_w = max(136.0, float(painter.fontMetrics().horizontalAdvance(ref_text)) + 16.0)
+        pill_rect = QRectF(pad_left + plot_w - pill_w - 4.0, y_thresh - 22.0, pill_w, 20.0)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(tokens.SURFACE_INSET)))
-        painter.drawRoundedRect(pill_rect, 3, 3)
+        painter.drawRoundedRect(pill_rect, 4, 4)
         painter.setPen(QPen(QColor(tokens.TEXT_MUTED)))
-        ref_ms = int(DEFAULT_THRESHOLDS.latency.external_warning_ms)
-        painter.drawText(pill_rect, Qt.AlignCenter, f"حد مرجعي: {ref_ms} ms")
+        painter.drawText(pill_rect, Qt.AlignCenter, ref_text)
 
         # -------------------------------------------------------------
         # 2. X Axis (5 Mono Time Labels)
@@ -197,8 +206,9 @@ class LatencyPlotCanvas(QWidget):
         # 3. Time Series Curve & Fill
         # -------------------------------------------------------------
         points: List[QPointF] = []
+        denom = max(1, n_pts - 1)
         for i, val in enumerate(self.samples):
-            x = pad_left + (i / (n_pts - 1)) * plot_w
+            x = pad_left + (plot_w * 0.5 if n_pts == 1 else (i / denom) * plot_w)
             clamped_val = min(y_max, max(0.0, val))
             y = pad_top + plot_h - (clamped_val / y_max) * plot_h
             points.append(QPointF(x, y))
@@ -368,7 +378,7 @@ class LatencyChart(QFrame):
         def make_stat_col(label_txt: str, val_txt: str, val_color: str = tokens.TEXT) -> Tuple[QFrame, QLabel]:
             box = QFrame()
             box.setObjectName("LatencyStatBox")
-            box.setFixedHeight(54)
+            box.setMinimumHeight(72)
             box.setStyleSheet("""
                 QFrame#LatencyStatBox {
                     background: transparent;
@@ -385,7 +395,7 @@ class LatencyChart(QFrame):
             col_l.setAlignment(Qt.AlignCenter)
 
             lbl = QLabel(label_txt)
-            lbl.setFont(tokens.get_sans_font(11, 400))
+            lbl.setFont(tokens.get_sans_font(12, 400))
             lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; border: none; background: transparent;")
             lbl.setAlignment(Qt.AlignCenter)
 

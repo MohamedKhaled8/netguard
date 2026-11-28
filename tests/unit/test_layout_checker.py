@@ -56,10 +56,10 @@ def test_layout_checker_populates_and_checks_window(qapp: QApplication):
     # Check that populate mock data succeeds
     checker.populate_mock_data(win)
 
-    # Verify that checker traverses views and produces violations on current unpatched layout
+    # Verify that checker traverses views cleanly with zero layout violations after fixes
     violations = checker.check_all_pages(win)
     assert isinstance(violations, list)
-    assert len(violations) > 0  # Confirms baseline defects exist before fixes
+    assert len(violations) == 0
 
     win.close()
     win.deleteLater()

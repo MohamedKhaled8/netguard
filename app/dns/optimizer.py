@@ -15,16 +15,20 @@ from app.remediation.actions.switch_dns import SwitchDNSResolverAction
 
 logger = logging.getLogger("netguard.dns.optimizer")
 
-DEFAULT_MIN_IMPROVEMENT_MS = 1.0
+DEFAULT_MIN_IMPROVEMENT_MS = 10.0
+DEFAULT_MIN_IMPROVEMENT_RATIO = 0.25
+DEFAULT_COOLDOWN_SEC = 1800.0  # 30 minutes cooldown
+DEFAULT_MIN_CONSECUTIVE_ROUNDS = 3
 
 REASON_MESSAGES = {
     "no_candidates": "لا توجد نتائج قياس موثوقة حالياً.",
     "policy_disabled": "التحويل التلقائي لـ DNS موقف من الإعدادات.",
     "meeting": "مكالمة نشطة — تأجيل تغيير DNS حتى تنتهي.",
-    "cooldown": "تم تغيير DNS مؤخراً. انتظار فترة الاستقرار قبل تحويل جديد.",
+    "cooldown": "تم تغيير DNS مؤخراً. انتظار فترة الاستقرار (30 دقيقة) قبل تحويل جديد.",
     "not_elevated": "تعذر تغيير DNS: التطبيق يحتاج صلاحيات المدير لتعديل إعداد ويندوز.",
     "already_optimal": "الخادم الحالي هو الأسرع أو مساوٍ له ضمن القياس.",
-    "insufficient_gain": "الفرق أقل من 1 مللي ثانية، داخل هامش القياس.",
+    "insufficient_gain": "الفرق أقل من 10 مللي ثانية أو 25%، غير كافٍ لتبرير إفراغ كاش DNS.",
+    "consecutive_rounds_needed": "الخادم يحتاج للتفوق لـ 3 جولات متتالية لتأكيد الاستقرار.",
     "packet_loss": "الخادم الأسرع غير مستقر (فقد استعلامات). لن يتم التحويل.",
     "poor_score": "كل الخوادم المرشحة ضعيفة. الإبقاء على الإعداد الحالي.",
     "apply": "سيتم التحويل إلى الخادم الأسرع بعد التحقق.",
@@ -79,10 +83,13 @@ def decide_auto_switch(
     meeting_active: bool = False,
     cooldown_remaining: float = 0.0,
     elevated: bool = True,
-    min_improvement_ms: float = DEFAULT_MIN_IMPROVEMENT_MS,
+    min_improvement_ms: Optional[float] = None,
+    min_improvement_ratio: float = DEFAULT_MIN_IMPROVEMENT_RATIO,
+    consecutive_rounds: int = DEFAULT_MIN_CONSECUTIVE_ROUNDS,
+    min_consecutive_rounds: int = DEFAULT_MIN_CONSECUTIVE_ROUNDS,
     current_ms_fallback: Optional[float] = None,
 ) -> DnsSwitchDecision:
-    """Pure policy: switch only when a safer resolver is meaningfully faster."""
+    """Pure policy: switch only when a safer resolver is meaningfully faster (gain >= max(10ms, 25%) across >= 3 rounds)."""
     current_ip = current_servers[0] if current_servers else None
     display_best = select_best_resolver(ranked)
 
@@ -128,9 +135,16 @@ def decide_auto_switch(
         return _out(False, "insufficient_gain", best, None, 0.0)
 
     gain = float(current_ms) - best_ms
-    if gain < min_improvement_ms:
+
+    # Threshold: gain must be >= max(10ms, 25% of current_ms) unless explicit min_improvement_ms passed
+    req_gain = min_improvement_ms if min_improvement_ms is not None else max(10.0, float(current_ms) * min_improvement_ratio)
+    if gain < req_gain:
         code = "already_optimal" if gain <= 0.5 else "insufficient_gain"
         return _out(False, code, best, current_ms, gain)
+
+    # Require >= 3 consecutive rounds
+    if consecutive_rounds < min_consecutive_rounds:
+        return _out(False, "consecutive_rounds_needed", best, current_ms, gain)
 
     return _out(True, "apply", best, current_ms, gain)
 
@@ -144,9 +158,11 @@ class DNSOptimizer:
         event_bus: EventBus,
         orchestrator: Optional[RemediationOrchestrator] = None,
         settings: Optional[Any] = None,
-        cooldown_sec: float = 30.0,
+        cooldown_sec: float = DEFAULT_COOLDOWN_SEC,
         session_tracker: Optional[Any] = None,
         min_improvement_ms: Optional[float] = None,
+        min_consecutive_rounds: int = DEFAULT_MIN_CONSECUTIVE_ROUNDS,
+        traffic_controller: Optional[Any] = None,
     ) -> None:
         self.platform = platform_adapter
         self.event_bus = event_bus
@@ -154,16 +170,41 @@ class DNSOptimizer:
         self.settings = settings
         self.cooldown_sec = cooldown_sec
         self.session_tracker = session_tracker
-        self.min_improvement_ms = (
-            min_improvement_ms if min_improvement_ms is not None else DEFAULT_MIN_IMPROVEMENT_MS
-        )
+        self.traffic_controller = traffic_controller
+        self.min_improvement_ms = min_improvement_ms
+        self.min_consecutive_rounds = min_consecutive_rounds
         self.benchmark = DNSBenchmark()
         self._ranked_cache: List[ResolverScore] = []
         self._last_switch_time: float = 0.0
         self.last_decision: Optional[DnsSwitchDecision] = None
+        self._consecutive_wins: Dict[str, int] = {}
+        self._last_winning_ip: Optional[str] = None
+
+    def is_meeting_active(self) -> bool:
+        """Returns True if a meeting is actively in progress to freeze DNS operations."""
+        if self.traffic_controller and hasattr(self.traffic_controller, "is_critical_meeting_active"):
+            try:
+                if bool(self.traffic_controller.is_critical_meeting_active()):
+                    return True
+            except Exception:
+                pass
+        if self.session_tracker:
+            checker = getattr(self.session_tracker, "has_active_meeting", None) or getattr(
+                self.session_tracker, "is_critical_meeting_active", None
+            ) or getattr(self.session_tracker, "has_active_conferencing", None)
+            if callable(checker):
+                try:
+                    return bool(checker())
+                except Exception:
+                    pass
+        return False
 
     async def evaluate_and_rank(self) -> List[ResolverScore]:
-        """Runs benchmark across all resolvers directly and updates rankings."""
+        """Runs benchmark across all resolvers directly and updates rankings (suppressed during meetings)."""
+        if self.is_meeting_active():
+            logger.info("DNS benchmark deferred: active meeting in progress (protecting live call).")
+            return list(self._ranked_cache)
+
         logger.info("Running DNS benchmark ranking across candidate resolvers...")
         ranked = await self.benchmark.rank_all()
         self._ranked_cache = ranked
@@ -178,13 +219,7 @@ class DNSOptimizer:
         allow_switch = True
         if self.settings and hasattr(self.settings, "get_policy"):
             allow_switch = bool(self.settings.get_policy("auto_switch_dns", True))
-        meeting_active = False
-        if self.session_tracker:
-            checker = getattr(self.session_tracker, "has_active_meeting", None) or getattr(
-                self.session_tracker, "is_critical_meeting_active", None
-            )
-            if callable(checker):
-                meeting_active = bool(checker())
+        meeting_active = self.is_meeting_active()
 
         now = time.monotonic()
         cooldown_remaining = max(0.0, self.cooldown_sec - (now - self._last_switch_time))
@@ -222,6 +257,15 @@ class DNSOptimizer:
         if current_ip and latency_for_ip(ranked or [], current_ip) is None:
             fallback_ms = measure_dns_latency(current_ip)
 
+        candidate = select_best_resolver(ranked or [])
+        candidate_ip = candidate.ip if candidate else None
+        if candidate_ip and candidate_ip == self._last_winning_ip:
+            self._consecutive_wins[candidate_ip] = self._consecutive_wins.get(candidate_ip, 0) + 1
+        elif candidate_ip:
+            self._last_winning_ip = candidate_ip
+            self._consecutive_wins = {candidate_ip: 1}
+        consec_rounds = self._consecutive_wins.get(candidate_ip, 1) if candidate_ip else 1
+
         decision = decide_auto_switch(
             ranked or [],
             current_servers,
@@ -230,6 +274,8 @@ class DNSOptimizer:
             cooldown_remaining=0.0,
             elevated=elevated,
             min_improvement_ms=self.min_improvement_ms,
+            consecutive_rounds=consec_rounds,
+            min_consecutive_rounds=self.min_consecutive_rounds,
             current_ms_fallback=fallback_ms,
         )
         self.last_decision = decision

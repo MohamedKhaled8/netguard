@@ -136,6 +136,7 @@ class HistoryView(QWidget):
         measurement_repo: Optional[Any] = None,
         incident_repo: Optional[Any] = None,
         parent=None,
+        embed_in_scroll: bool = False,
     ) -> None:
         super().__init__(parent)
         self.measurement_repo = measurement_repo
@@ -146,21 +147,29 @@ class HistoryView(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
-        scroll.viewport().setAutoFillBackground(True)
-        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
-        scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
-        scroll.verticalScrollBar().setSingleStep(25)
-
         content_widget = QWidget()
+        self.content_widget = content_widget
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(
-            tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
-        )
+        if embed_in_scroll:
+            self.scroll = None
+            scroll = None
+            layout.setContentsMargins(0, 4, 0, 8)
+            root_layout.addWidget(content_widget)
+        else:
+            self.scroll = QScrollArea(self)
+            scroll = self.scroll
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setStyleSheet(f"QScrollArea {{ background-color: {tokens.BG}; border: none; }}")
+            scroll.viewport().setAutoFillBackground(True)
+            scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+            scroll.viewport().setStyleSheet(f"background-color: {tokens.BG};")
+            scroll.verticalScrollBar().setSingleStep(25)
+            layout.setContentsMargins(
+                tokens.PAGE_PADDING_DESKTOP, 28, tokens.PAGE_PADDING_DESKTOP, 36
+            )
+            root_layout.addWidget(scroll)
         layout.setSpacing(tokens.SECTION_GAP)
 
         # -------------------------------------------------------------
@@ -211,8 +220,8 @@ class HistoryView(QWidget):
         self.events_panel.main_layout.addLayout(self.events_list_layout)
         layout.addWidget(self.events_panel)
 
-        scroll.setWidget(content_widget)
-        root_layout.addWidget(scroll)
+        if scroll is not None:
+            scroll.setWidget(content_widget)
 
         self._refresh_day()
 

@@ -96,20 +96,50 @@ class IPlatformAdapter(ABC):
             return float(m["signal_percent"])
         return None
 
-    def get_qos_policies(self) -> List[Dict[str, Any]]:
+    def get_qos_policies(self, policy_store: str = "ActiveStore") -> List[Dict[str, Any]]:
         """Retrieve active Windows QoS policies matching NetGuard configurations."""
         return []
 
-    def create_qos_dscp_policy(self, name: str, app_name: str, dscp_value: int = 46, ip_protocol: Optional[str] = None) -> Tuple[bool, str]:
+    def create_qos_dscp_policy(
+        self,
+        name: str,
+        app_name: str = "",
+        dscp_value: int = 46,
+        ip_protocol: Optional[str] = None,
+        port_start: Optional[int] = None,
+        port_end: Optional[int] = None,
+        port: Optional[int] = None,
+        is_dest_port: bool = True,
+        is_default: bool = False,
+        policy_store: str = "ActiveStore",
+    ) -> Tuple[bool, str]:
         """Create a Windows QoS policy assigning DSCP priority to outbound packets of an application."""
         return False, "Not implemented on this platform"
 
-    def create_qos_throttle_policy(self, name: str, app_name: str, throttle_bps: int) -> Tuple[bool, str]:
+    def create_qos_throttle_policy(
+        self,
+        name: str,
+        app_name: str,
+        throttle_bps: int,
+        policy_store: str = "ActiveStore",
+    ) -> Tuple[bool, str]:
         """Create a Windows QoS policy throttling outbound upload bandwidth for an application."""
         return False, "Not implemented on this platform"
 
-    def remove_qos_policy(self, name: str) -> Tuple[bool, str]:
+    def remove_qos_policy(self, name: str, policy_store: str = "ActiveStore") -> Tuple[bool, str]:
         """Remove a Windows NetQosPolicy by name."""
+        return False, "Not implemented on this platform"
+
+    def apply_qos_policies_batch(self, specs: List[Any]) -> Tuple[bool, str]:
+        """Apply a batch of QoS policy specifications in a single operation."""
+        return False, "Not implemented on this platform"
+
+    def get_last_qos_batch_report(self) -> Dict[str, Any]:
+        """Retrieve structured readback verification report from the last batch apply."""
+        return {}
+
+    def sweep_all_netguard_rules(self) -> Tuple[bool, str]:
+        """Remove all NetGuard QoS and firewall rules from active and persistent stores."""
         return False, "Not implemented on this platform"
 
     def restart_as_administrator(self) -> bool:

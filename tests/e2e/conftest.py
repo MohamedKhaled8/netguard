@@ -543,7 +543,7 @@ class SimulatedPlatformAdapter(IPlatformAdapter):
             "dropout": data.get("dropout", 0),
         }
 
-    def get_qos_policies(self) -> List[Dict[str, Any]]:
+    def get_qos_policies(self, policy_store: str = "ActiveStore") -> List[Dict[str, Any]]:
         self.executed_commands.append("get_qos_policies")
         policies = []
         for name, p in self.env.qos_policies.items():
@@ -588,7 +588,7 @@ class SimulatedPlatformAdapter(IPlatformAdapter):
         mbps = throttle_bps / 1_000_000.0
         return True, f"Successfully throttled upload bandwidth for {app_name} to {mbps:.1f} Mbps."
 
-    def remove_qos_policy(self, name: str) -> Tuple[bool, str]:
+    def remove_qos_policy(self, name: str, policy_store: str = "ActiveStore") -> Tuple[bool, str]:
         self.executed_commands.append(f"remove_qos_policy {name}")
         if not self.is_elevated():
             return False, "Access denied: Requires administrator privileges to remove QoS policy."
@@ -607,6 +607,100 @@ class SimulatedPlatformAdapter(IPlatformAdapter):
         for k in keys_to_del:
             del self.env.qos_policies[k]
         return True, f"Swept {len(keys_to_del)} residual NetGuard policies."
+
+
+class Pass4SimulatedPlatformAdapter(SimulatedPlatformAdapter):
+    """Extended simulated adapter implementing Pass 4 ActiveStore readback verification and lock safety."""
+
+    def __init__(self, env: SimulatedWindowsEnvironment) -> None:
+        super().__init__(env)
+        self._qos_lock = threading.Lock()
+        self.last_qos_batch_report: Dict[str, Any] = {}
+        self.simulate_batch_failure: bool = False
+        self.simulate_dscp_mismatch: bool = False
+        self.simulate_empty_verified: bool = False
+        self.simulate_lingering_policy_on_sweep: bool = False
+        self.simulate_lock_contention: bool = False
+        self.simulate_readback_failure: Optional[str] = None
+
+    def apply_qos_policies_batch(self, specs: List[Any]) -> Tuple[bool, str]:
+        if self.simulate_lock_contention:
+            return False, "Single-flight lock contention"
+        acquired = self._qos_lock.acquire(blocking=False)
+        if not acquired:
+            return False, "Single-flight lock contention"
+        try:
+            if not self.is_elevated():
+                return False, "Requires Administrator privileges"
+
+            created: List[str] = []
+            verified: List[str] = []
+            failed: List[str] = []
+            details: Dict[str, Any] = {}
+
+            for spec in specs:
+                name = getattr(spec, "name", str(spec))
+                if self.simulate_batch_failure or (self.simulate_readback_failure and self.simulate_readback_failure in name):
+                    failed.append(name)
+                    details[name] = {"created": False, "error": "Simulated ActiveStore error"}
+                else:
+                    created.append(name)
+                    stored_dscp = 0 if self.simulate_dscp_mismatch else getattr(spec, "dscp", None)
+                    policy_dict = {
+                        "Name": name,
+                        "AppPathNameMatchCondition": getattr(spec, "app_name", ""),
+                        "IPProtocolMatchCondition": getattr(spec, "protocol", None),
+                        "DSCPAction": stored_dscp,
+                        "ThrottleRateActionBitsPerSecond": getattr(spec, "throttle_bps", None),
+                        "Precedence": getattr(spec, "precedence", None),
+                        "PolicyStore": getattr(spec, "policy_store", "ActiveStore"),
+                    }
+                    self.env.qos_policies[name] = policy_dict
+
+                    # Verification checks matching properties
+                    req_dscp = getattr(spec, "dscp", None)
+                    if not self.simulate_empty_verified and (req_dscp is None or stored_dscp == req_dscp):
+                        verified.append(name)
+                    else:
+                        failed.append(name)
+
+                    details[name] = {"created": True, "properties": policy_dict}
+
+            self.last_qos_batch_report = {
+                "created": created,
+                "verified": verified,
+                "failed": failed,
+                "details": details,
+            }
+            ok = (len(failed) == 0 and len(verified) == len(specs))
+            return ok, f"Batch processed: {len(verified)} verified, {len(failed)} failed"
+        finally:
+            self._qos_lock.release()
+
+    def sweep_all_netguard_rules(self) -> Tuple[bool, str]:
+        acquired = self._qos_lock.acquire(timeout=5.0)
+        if not acquired:
+            return False, "Single-flight lock timeout"
+        try:
+            if not self.is_elevated():
+                return False, "Requires Administrator privileges"
+
+            keys_to_del = [k for k in self.env.qos_policies if k.startswith("NetGuard_")]
+            if self.simulate_lingering_policy_on_sweep and keys_to_del:
+                keys_to_del = keys_to_del[:-1]
+
+            for k in keys_to_del:
+                del self.env.qos_policies[k]
+
+            remaining = len([k for k in self.env.qos_policies if k.startswith("NetGuard_")])
+            if remaining > 0:
+                return False, f"{remaining} policies failed to remove"
+            return True, f"Cleaned {len(keys_to_del)} policies"
+        finally:
+            self._qos_lock.release()
+
+    def remove_qos_policy(self, name: str, policy_store: str = "ActiveStore") -> Tuple[bool, str]:
+        return super().remove_qos_policy(name)
 
 
 # =====================================================================
@@ -632,6 +726,18 @@ def sim_win() -> SimulatedWindowsEnvironment:
 def sim_platform(sim_win: SimulatedWindowsEnvironment) -> SimulatedPlatformAdapter:
     """Provide a simulated Windows platform adapter."""
     return SimulatedPlatformAdapter(sim_win)
+
+
+@pytest.fixture
+def pass4_platform(sim_win: SimulatedWindowsEnvironment) -> Pass4SimulatedPlatformAdapter:
+    """Provide an extended Pass 4 platform adapter with batch QoS and readback."""
+    return Pass4SimulatedPlatformAdapter(sim_win)
+
+
+@pytest.fixture
+def pass4_adapter(sim_win: SimulatedWindowsEnvironment) -> Pass4SimulatedPlatformAdapter:
+    """Alias for pass4_platform."""
+    return Pass4SimulatedPlatformAdapter(sim_win)
 
 
 @pytest.fixture

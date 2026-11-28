@@ -25,6 +25,8 @@ class Chip(QLabel):
         font_size: int = 12,
     ) -> None:
         super().__init__(text, parent)
+        from PySide6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.setAlignment(Qt.AlignCenter)
         self.variant = variant
         self.radius = radius
@@ -33,11 +35,18 @@ class Chip(QLabel):
         self.setMinimumHeight(24)
         self._apply_style()
 
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        self.adjustSize()
+        self.updateGeometry()
+
     def set_variant(self, variant: str, text: str = "") -> None:
         self.variant = variant
         if text:
-            self.setText(text)
+            super().setText(text)
         self._apply_style()
+        self.adjustSize()
+        self.updateGeometry()
 
     def _apply_style(self) -> None:
         if self.variant == "ok-soft":
@@ -49,13 +58,21 @@ class Chip(QLabel):
             border = tokens.BAD_SOFT_BORDER
             color = tokens.BAD_SOFT_TEXT
         elif self.variant == "tag-warn":
-            bg = tokens.SURFACE_INSET
+            bg = tokens.WARN_SOFT_BG
             border = tokens.WARN_BORDER
             color = tokens.STATUS_WARN
         elif self.variant == "tag-ok":
-            bg = tokens.SURFACE_INSET
+            bg = tokens.OK_SOFT_BG
             border = tokens.OK_SOFT_BORDER
             color = tokens.STATUS_OK
+        elif self.variant in ("info", "accent"):
+            bg = tokens.INFO_SOFT_BG
+            border = tokens.INFO_BORDER
+            color = tokens.ACCENT_BRIGHT
+        elif self.variant == "purple":
+            bg = tokens.PURPLE_SOFT_BG
+            border = tokens.PURPLE_BORDER
+            color = tokens.SECONDARY_PURPLE
         else:
             bg = tokens.SURFACE_INSET
             border = tokens.LINE

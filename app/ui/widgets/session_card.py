@@ -60,23 +60,25 @@ class ActiveSessionCard(QFrame):
         self.live_dot.setStyleSheet(f"background-color: {tokens.STATUS_OK}; border-radius: 4.5px;")
         top_row.addWidget(self.live_dot)
 
+        title_stack = QVBoxLayout()
+        title_stack.setSpacing(2)
         self.lbl_title = QLabel(session.app_name)
         self.lbl_title.setFont(tokens.get_sans_font(15, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
-        top_row.addWidget(self.lbl_title)
+        self.lbl_title.setWordWrap(True)
+        title_stack.addWidget(self.lbl_title)
 
         lbl_proc_tag = QLabel(f"{session.process_name} (PID {session.pid})")
         lbl_proc_tag.setFont(tokens.get_mono_font(12, 400))
         lbl_proc_tag.setStyleSheet(f"color: {tokens.TEXT_MUTED}; background: {tokens.SURFACE}; padding: 2px 8px; border-radius: 4px;")
-        top_row.addWidget(lbl_proc_tag)
+        title_stack.addWidget(lbl_proc_tag, alignment=Qt.AlignLeft)
+        top_row.addLayout(title_stack, 1)
 
         chip_active = Chip("محمي استباقياً ✓", variant="ok-soft")
         top_row.addWidget(chip_active)
 
-        top_row.addStretch()
-
         self.btn_end = SecondaryButton("إنهاء المراقبة")
-        self.btn_end.setFixedHeight(34)
+        self.btn_end.setFixedHeight(36)
         if on_close_callback:
             self.btn_end.clicked.connect(lambda: on_close_callback(session.process_name))
         top_row.addWidget(self.btn_end)
@@ -302,7 +304,7 @@ class SessionReportCard(QFrame):
             col.addWidget(v_lbl)
 
             s_lbl = QLabel(sub)
-            s_lbl.setFont(tokens.get_sans_font(11, 400))
+            s_lbl.setFont(tokens.get_sans_font(12, 400))
             s_lbl.setStyleSheet(f"color: {tokens.STATUS_OK};")
             s_lbl.setWordWrap(True)
             col.addWidget(s_lbl)

@@ -1,0 +1,27 @@
+NETGUARD AI — PASS 4 BUILD INFORMATION
+================================================================================
+Build Timestamp: 2026-11-24T16:54:21+02:00
+Target Platform: Windows-11-10.0.26300-SP0 (64-bit)
+Python Version: Python 3.12.10 (tags/v3.12.10:b44917f)
+PyInstaller Version: 6.22.3 (contrib hooks: 2026.10)
+
+BUILD OUTPUT LOCATIONS & VERIFICATION
+================================================================================
+Primary Target Binary:   D:\NetGuard.exe
+Secondary Target Binary: D:\NetGuard_FINAL\NetGuard.exe
+File Size:               71,585,258 bytes (68.27 MB)
+SHA-256 Hash:            2D869D5074AA4144F5300AC59565C553B313B9829F498437CD7139D1468DD13B
+UAC Administrator Token: True (uac_admin=True in PyInstaller manifest)
+Packaging Mode:          --onefile --windowed
+
+BUILD COMMAND EXECUTED
+================================================================================
+& "E:\Mt FlutterProject\netguard\.venv\Scripts\python.exe" scripts/build_exe.py
+(Underlying command: pyinstaller NetGuard.spec --noconfirm --clean)
+
+INCLUDED PASS 4 ARCHITECTURAL FIXES
+================================================================================
+- Feature 1-5 (M1): Real ETW per-PID UDP send telemetry; fail-closed telemetry; elimination of pytest artificial signal; data-driven generic registry fallback; structured per-cycle diagnostics.
+- Feature 6-11 (M2): Precedence hierarchy (200/170/160/150/100/50); 14-scenario policy conflict & specificity matrix; ActiveStore readback verification with -ErrorAction Stop; lock safety & exact cleanup.
+- Feature 12-19 (M3): Removal of fabricated 0/5/25 default baselines; fresh live telemetry connection; settings hydration at startup; Kill Switch widget reference fix; strict DNS meeting freeze; active bounded upload capacity testing.
+- Feature 20-23 (M4): Standalone PowerShell QoS self-test script (CLEANUP=PASS); full PASS4 audit documentation; PyInstaller elevated standalone deployment to D:\NetGuard.exe.

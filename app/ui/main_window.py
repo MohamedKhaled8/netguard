@@ -39,22 +39,30 @@ from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QPainter, QColor, QBrush, QPen
 
 from app.ui import tokens
+from app.ui.i18n import get_language, language_manager, set_language, tr
 from app.ui.styles import DARK_THEME_QSS
 from app.ui.widgets.nav_item import NavItem
 from app.ui.widgets.buttons import SecondaryButton
+from app.ui.widgets.top_bar import TopStatusBar
 from app.ui.views.dashboard_view import DashboardView
-from app.ui.views.diagnosis_view import DiagnosisView
-from app.ui.views.remediation_view import RemediationView
+from app.ui.views.meeting_guard_view import MeetingGuardView
 from app.ui.views.dns_view import DNSView
 from app.ui.views.traffic_view import TrafficView
-from app.ui.views.history_view import HistoryView
+from app.ui.views.wifi_intelligence_view import WifiIntelligenceView
+from app.ui.views.router_management_view import RouterManagementView
+from app.ui.views.internet_quality_view import InternetQualityView
+from app.ui.views.reports_view import ReportsView
 from app.ui.views.settings_view import SettingsView
+from app.ui.views.about_view import AboutView
+from app.core.network_state import GlobalNetworkStateStore, normalize_network_identity_payload
+from app.core.perf import PerfMetricsCollector
 from app.traffic.controller import TrafficController
 from app.core.models.metrics import (
     OperatingMode,
     ActionExecutionRecord,
     ActionExecutionStatus,
     RiskLevel,
+    MetricType,
 )
 from app.core.bus import EventTopics
 
@@ -88,7 +96,7 @@ class SidebarModeOption(QFrame):
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(10)
 
-        self.dot = QLabel()
+        self.dot = QFrame()
         self.dot.setFixedSize(8, 8)
         layout.addWidget(self.dot)
 
@@ -151,7 +159,7 @@ class SidebarModeOption(QFrame):
 
 
 class SidebarWidget(QFrame):
-    """Right-side navigation and control sidebar with top_bar collapse support."""
+    """Primary navigation sidebar housing the 10 NetGuard AI sections and Operating Mode."""
 
     mode_changed = Signal(int)
 
@@ -161,16 +169,16 @@ class SidebarWidget(QFrame):
         self._current_mode = "dock"
 
         self.sidebar_layout = QVBoxLayout(self)
-        self.sidebar_layout.setContentsMargins(16, 20, 16, 20)
-        self.sidebar_layout.setSpacing(8)
+        self.sidebar_layout.setContentsMargins(14, 18, 14, 16)
+        self.sidebar_layout.setSpacing(6)
 
         # -------------------------------------------------------------
         # 1. Top Brand Header
         # -------------------------------------------------------------
         self.brand_container = QWidget()
         brand_col = QVBoxLayout(self.brand_container)
-        brand_col.setContentsMargins(0, 0, 0, 8)
-        brand_col.setSpacing(4)
+        brand_col.setContentsMargins(4, 0, 4, 8)
+        brand_col.setSpacing(3)
 
         wordmark_row = QHBoxLayout()
         wordmark_row.setSpacing(8)
@@ -180,44 +188,70 @@ class SidebarWidget(QFrame):
         brand_circle.setStyleSheet(f"background-color: {tokens.ACCENT}; border-radius: 5px;")
         wordmark_row.addWidget(brand_circle)
 
-        brand_title = QLabel("NetGuard")
-        brand_title.setFont(tokens.get_mono_font(18, 500))
+        brand_title = QLabel("NetGuard AI")
+        brand_title.setFont(tokens.get_mono_font(16, 700))
         brand_title.setStyleSheet(f"color: {tokens.TEXT};")
         wordmark_row.addWidget(brand_title)
         wordmark_row.addStretch()
         brand_col.addLayout(wordmark_row)
 
-        brand_sub = QLabel("مراقبة الشبكة وإصلاحها تلقائياً")
-        brand_sub.setFont(tokens.get_sans_font(12, 400))
-        brand_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
-        brand_col.addWidget(brand_sub)
+        self.brand_sub = QLabel(tr("app_subtitle"))
+        self.brand_sub.setFont(tokens.get_sans_font(13, 400))
+        self.brand_sub.setStyleSheet(f"color: {tokens.TEXT_MUTED}; line-height: 1.35;")
+        self.brand_sub.setMinimumHeight(38)
+        self.brand_sub.setWordWrap(True)
+        brand_col.addWidget(self.brand_sub)
 
         self.sidebar_layout.addWidget(self.brand_container)
 
         # -------------------------------------------------------------
-        # 2. Navigation Items (7 items in adaptable grid)
+        # 2. Navigation Items (10 Canonical Sections)
         # -------------------------------------------------------------
         self.nav_container = QWidget()
         self.nav_grid = QGridLayout(self.nav_container)
         self.nav_grid.setContentsMargins(0, 0, 0, 0)
-        self.nav_grid.setSpacing(4)
+        self.nav_grid.setSpacing(3)
 
-        self.btn_dash = NavItem("home", "الرئيسية", 0, self)
-        self.btn_diag = NavItem("activity", "التشخيص", 1, self)
-        self.btn_rem = NavItem("shield", "الإصلاح التلقائي", 2, self)
-        self.btn_dns = NavItem("globe", "DNS", 3, self)
-        self.btn_traffic = NavItem("traffic", "حركة البيانات", 4, self)
-        self.btn_hist = NavItem("clock", "السجل", 5, self)
-        self.btn_settings = NavItem("sliders", "الإعدادات", 6, self)
+        self.btn_dash = NavItem("dashboard", tr("nav.dashboard"), 0, self)
+        self.btn_meeting_guard = NavItem("meeting_guard", tr("nav.meeting_guard"), 1, self)
+        self.btn_traffic = NavItem("traffic", tr("nav.traffic"), 2, self)
+        self.btn_dns = NavItem("dns", tr("nav.dns"), 3, self)
+        self.btn_wifi = NavItem("wifi", tr("nav.wifi_intelligence"), 4, self)
+        self.btn_router = NavItem("router", tr("nav.router_management"), 5, self)
+        self.btn_quality = NavItem("internet_quality", tr("nav.internet_quality"), 6, self)
+        self.btn_reports = NavItem("reports", tr("nav.reports"), 7, self)
+        self.btn_settings = NavItem("settings", tr("nav.settings"), 8, self)
+        self.btn_about = NavItem("about", tr("nav.about"), 9, self)
 
+        # Compatibility aliases for tests referencing old button names
+        self.btn_rem = self.btn_meeting_guard
+        self.btn_diag = self.btn_reports
+        self.btn_hist = self.btn_reports
+        self.btn_wifi_router = self.btn_router
+
+        self._nav_keys = [
+            "nav.dashboard",
+            "nav.meeting_guard",
+            "nav.traffic",
+            "nav.dns",
+            "nav.wifi_intelligence",
+            "nav.router_management",
+            "nav.internet_quality",
+            "nav.reports",
+            "nav.settings",
+            "nav.about",
+        ]
         self.nav_buttons = [
             self.btn_dash,
-            self.btn_diag,
-            self.btn_rem,
-            self.btn_dns,
+            self.btn_meeting_guard,
             self.btn_traffic,
-            self.btn_hist,
+            self.btn_dns,
+            self.btn_wifi,
+            self.btn_router,
+            self.btn_quality,
+            self.btn_reports,
             self.btn_settings,
+            self.btn_about,
         ]
 
         self.sidebar_layout.addWidget(self.nav_container)
@@ -228,35 +262,35 @@ class SidebarWidget(QFrame):
         # -------------------------------------------------------------
         self.btn_restart_admin = SecondaryButton("تشغيل كمسؤول")
         self.btn_restart_admin.setFixedHeight(36)
-        self.btn_restart_admin.setFont(tokens.get_sans_font(13, 500))
+        self.btn_restart_admin.setFont(tokens.get_sans_font(12, 500))
         self.btn_restart_admin.setToolTip("تشغيل NetGuard AI بصلاحيات مسؤول Windows (Run as Administrator)")
         self.sidebar_layout.addWidget(self.btn_restart_admin)
 
         # -------------------------------------------------------------
-        # 3. Bottom: Mode Selector Group (وضع الإصلاح)
+        # 3. Bottom: Mode Selector Group
         # -------------------------------------------------------------
         self.mode_container = QWidget()
         mode_col = QVBoxLayout(self.mode_container)
-        mode_col.setContentsMargins(0, 8, 0, 0)
-        mode_col.setSpacing(6)
+        mode_col.setContentsMargins(0, 6, 0, 0)
+        mode_col.setSpacing(4)
 
-        self.lbl_mode_caption = QLabel("وضع الإصلاح")
-        self.lbl_mode_caption.setFont(tokens.get_sans_font(12, 400))
+        self.lbl_mode_caption = QLabel(tr("mode_label"))
+        self.lbl_mode_caption.setFont(tokens.get_sans_font(12, 500))
         self.lbl_mode_caption.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         mode_col.addWidget(self.lbl_mode_caption)
 
-        self.opt_auto = SidebarModeOption(0, "تلقائي", self)
-        self.opt_assisted = SidebarModeOption(1, "بموافقتي", self)
-        self.opt_observe = SidebarModeOption(2, "مراقبة فقط", self)
+        self.opt_auto = SidebarModeOption(0, tr("mode_auto"), self)
+        self.opt_assisted = SidebarModeOption(1, tr("mode_ask"), self)
+        self.opt_observe = SidebarModeOption(2, tr("mode_watch"), self)
 
         self.mode_options = [self.opt_auto, self.opt_assisted, self.opt_observe]
         for opt in self.mode_options:
             opt.clicked.connect(self._on_mode_clicked)
             mode_col.addWidget(opt)
 
-        self.lbl_mode_desc = QLabel("يكتشف المشكلة ويصلحها فوراً ثم يسجل ما فعله بالتفصيل.")
+        self.lbl_mode_desc = QLabel(tr("mode_auto_desc"))
         self.lbl_mode_desc.setFont(tokens.get_sans_font(12, 400))
-        self.lbl_mode_desc.setStyleSheet(f"color: {tokens.TEXT_MUTED}; line-height: 1.5;")
+        self.lbl_mode_desc.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
         self.lbl_mode_desc.setWordWrap(True)
         mode_col.addWidget(self.lbl_mode_desc)
 
@@ -265,24 +299,34 @@ class SidebarWidget(QFrame):
         self.set_mode("dock")
         self.set_operating_mode(OperatingMode.AUTO)
 
+    def retranslate(self) -> None:
+        self.brand_sub.setText(tr("app_subtitle"))
+        self.lbl_mode_caption.setText(tr("mode_label"))
+        for btn, k in zip(self.nav_buttons, self._nav_keys):
+            btn.set_label_text(tr(k))
+        self.opt_auto.lbl_text.setText(tr("mode_auto"))
+        self.opt_assisted.lbl_text.setText(tr("mode_ask"))
+        self.opt_observe.lbl_text.setText(tr("mode_watch"))
+        self.set_operating_mode([OperatingMode.AUTO, OperatingMode.ASK, OperatingMode.WATCH][getattr(self, "_current_mode_idx", 0)])
+        self.set_mode(self._current_mode)
+
     def set_operating_mode(self, mode: OperatingMode | str) -> None:
         target = OperatingMode(mode)
         mode_to_idx = {OperatingMode.AUTO: 0, OperatingMode.ASK: 1, OperatingMode.WATCH: 2}
         idx = mode_to_idx.get(target, 0)
-        if getattr(self, "_current_mode_idx", None) == idx:
-            return
         self._current_mode_idx = idx
         for i, opt in enumerate(self.mode_options):
             opt.set_selected(i == idx)
         descs = {
-            0: "يكتشف المشكلة ويصلحها فوراً ثم يسجل ما فعله بالتفصيل.",
-            1: "يقترح الإصلاح وينتظر موافقتك قبل أي تغيير.",
-            2: "يراقب ويسجل دون تغيير أي إعداد على جهازك.",
+            0: tr("mode_auto_desc"),
+            1: tr("mode_ask_desc"),
+            2: tr("mode_watch_desc"),
         }
         self.lbl_mode_desc.setText(descs.get(idx, ""))
 
     def set_mode(self, mode: str) -> None:
         self._current_mode = mode
+        border_side = "border-left" if get_language() == "ar" else "border-right"
         if mode == "collapsed":
             self.setFixedWidth(64)
             self.sidebar_layout.setContentsMargins(8, 16, 8, 16)
@@ -294,7 +338,7 @@ class SidebarWidget(QFrame):
                 QFrame#SidebarDock {{
                     background-color: {tokens.SIDEBAR};
                     border: none;
-                    border-left: 1px solid {tokens.LINE};
+                    {border_side}: 1px solid {tokens.LINE};
                 }}
             """)
             for i, btn in enumerate(self.nav_buttons):
@@ -305,7 +349,7 @@ class SidebarWidget(QFrame):
                 opt.set_collapsed(True)
         else:
             self.setFixedWidth(248)
-            self.sidebar_layout.setContentsMargins(16, 20, 16, 20)
+            self.sidebar_layout.setContentsMargins(14, 18, 14, 16)
             self.brand_container.setVisible(True)
             self.lbl_mode_desc.setVisible(True)
             self.lbl_mode_caption.setVisible(True)
@@ -314,7 +358,7 @@ class SidebarWidget(QFrame):
                 QFrame#SidebarDock {{
                     background-color: {tokens.SIDEBAR};
                     border: none;
-                    border-left: 1px solid {tokens.LINE};
+                    {border_side}: 1px solid {tokens.LINE};
                 }}
             """)
             for i, btn in enumerate(self.nav_buttons):
@@ -338,6 +382,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.app_core = application
         self._fallback_async_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._fallback_async_thread: Optional[threading.Thread] = None
         ctx = getattr(application, "ctx", None)
         eb = getattr(ctx, "event_bus", None)
         plat = getattr(ctx, "platform", None)
@@ -397,44 +442,101 @@ class MainWindow(QMainWindow):
         self.root_layout.setContentsMargins(0, 0, 0, 0)
         self.root_layout.setSpacing(0)
 
-        # Fixed Sidebar Dock (Right in RTL, width 248px)
+        # Fixed Sidebar Dock (Right in RTL / Left in LTR, width 248px)
         self.sidebar = SidebarWidget(self)
         self.root_layout.addWidget(self.sidebar)
 
-        # Main Content Stack (Left in RTL)
+        # Workspace Column (Persistent TopStatusBar + 10-Section QStackedWidget)
+        workspace_col = QVBoxLayout()
+        workspace_col.setContentsMargins(0, 0, 0, 0)
+        workspace_col.setSpacing(0)
+
+        self.top_bar = TopStatusBar(self)
+        self.top_bar.set_section(tr("nav.dashboard"), tr("dash_sub"))
+        self.top_bar.language_toggle_requested.connect(self._on_toggle_language)
+        self.top_bar.refresh_requested.connect(self._on_topbar_refresh)
+        self.top_bar.notifications_clicked.connect(lambda: self._switch_view(7, self.btn_reports))
+        workspace_col.addWidget(self.top_bar)
+
         self.stack = QStackedWidget()
         self.stack.setObjectName("ContentStack")
 
-        self.view_dashboard = DashboardView()
-        self.view_diagnosis = DiagnosisView()
-        self.view_remediation = RemediationView()
-        self.view_dns = DNSView()
-        self.view_traffic = TrafficView(session_tracker=self.traffic_controller.session_tracker)
+        # Startup sweep of any lingering NetGuard rules from active or persistent stores off UI thread
+        if plat and hasattr(plat, "sweep_all_netguard_rules"):
+            import threading
+            threading.Thread(target=plat.sweep_all_netguard_rules, daemon=True).start()
+
         meas_repo = getattr(self.app_core.ctx, "measurements", None) if hasattr(self.app_core, "ctx") else None
         inc_repo = getattr(self.app_core.ctx, "incidents", None) if hasattr(self.app_core, "ctx") else None
-        self.view_history = HistoryView(measurement_repo=meas_repo, incident_repo=inc_repo)
+
+        # Instantiate all 10 canonical workstation views
+        self.view_dashboard = DashboardView()
+        self.view_meeting_guard = MeetingGuardView(
+            session_tracker=self.traffic_controller.session_tracker,
+            platform=plat,
+            user_settings=us,
+            qos_config=getattr(self.traffic_controller, "qos_config", None),
+            controller=self.traffic_controller,
+        )
+        self.view_traffic = TrafficView(
+            session_tracker=self.traffic_controller.session_tracker,
+            platform=plat,
+            user_settings=us,
+            qos_config=getattr(self.traffic_controller, "qos_config", None),
+            controller=self.traffic_controller,
+        )
+        self.view_dns = DNSView()
+        self.view_wifi = WifiIntelligenceView(app_core=self.app_core)
+        self.view_router = RouterManagementView(app_core=self.app_core)
+        self.view_quality = InternetQualityView(app_core=self.app_core)
+        self.view_reports = ReportsView(
+            app_core=self.app_core,
+            measurement_repo=meas_repo,
+            incident_repo=inc_repo,
+        )
         self.view_settings = SettingsView()
+        self.view_about = AboutView(app_core=self.app_core)
 
-        # Index sequence matching tests:
-        # 0: Dash, 1: Diag, 2: Rem, 3: DNS, 4: Traffic, 5: Hist, 6: Settings
+        # Compatibility aliases preserving all controller & test contracts
+        self.view_diagnosis = self.view_reports.diagnosis_view
+        self.view_history = self.view_reports.history_view
+        self.view_remediation = self.view_meeting_guard.remediation_section
+        self.view_wifi_router = self.view_router
+
+        # Canonical 10-index stack sequence:
+        # 0: Dashboard, 1: Meeting Guard, 2: Traffic Monitor, 3: DNS Optimizer,
+        # 4: Wi-Fi Intelligence, 5: Router Management, 6: Internet Quality,
+        # 7: Reports, 8: Settings, 9: About
         self.stack.addWidget(self.view_dashboard)
-        self.stack.addWidget(self.view_diagnosis)
-        self.stack.addWidget(self.view_remediation)
-        self.stack.addWidget(self.view_dns)
+        self.stack.addWidget(self.view_meeting_guard)
         self.stack.addWidget(self.view_traffic)
-        self.stack.addWidget(self.view_history)
+        self.stack.addWidget(self.view_dns)
+        self.stack.addWidget(self.view_wifi)
+        self.stack.addWidget(self.view_router)
+        self.stack.addWidget(self.view_quality)
+        self.stack.addWidget(self.view_reports)
         self.stack.addWidget(self.view_settings)
+        self.stack.addWidget(self.view_about)
 
-        self.root_layout.addWidget(self.stack, stretch=1)
+        workspace_col.addWidget(self.stack, stretch=1)
+        self.root_layout.addLayout(workspace_col, stretch=1)
 
         # Connect Navigation Buttons
         self.btn_dash = self.sidebar.btn_dash
-        self.btn_diag = self.sidebar.btn_diag
-        self.btn_rem = self.sidebar.btn_rem
-        self.btn_dns = self.sidebar.btn_dns
+        self.btn_meeting_guard = self.sidebar.btn_meeting_guard
         self.btn_traffic = self.sidebar.btn_traffic
-        self.btn_hist = self.sidebar.btn_hist
+        self.btn_dns = self.sidebar.btn_dns
+        self.btn_wifi = self.sidebar.btn_wifi
+        self.btn_router = self.sidebar.btn_router
+        self.btn_quality = self.sidebar.btn_quality
+        self.btn_reports = self.sidebar.btn_reports
         self.btn_settings = self.sidebar.btn_settings
+        self.btn_about = self.sidebar.btn_about
+
+        self.btn_diag = self.btn_reports
+        self.btn_rem = self.btn_meeting_guard
+        self.btn_hist = self.btn_reports
+        self.btn_wifi_router = self.btn_router
         self.nav_buttons = self.sidebar.nav_buttons
 
         for idx, btn in enumerate(self.nav_buttons):
@@ -442,6 +544,16 @@ class MainWindow(QMainWindow):
 
         self.sidebar.mode_changed.connect(self._on_sidebar_mode_changed)
         self.view_remediation.mode_changed.connect(self._on_sidebar_mode_changed)
+        self.view_dashboard.navigate_requested.connect(
+            lambda idx: self._switch_view(idx, self.nav_buttons[idx]) if 0 <= idx < len(self.nav_buttons) else None
+        )
+        self.view_meeting_guard.preflight_requested.connect(self._on_meeting_preflight_requested)
+        self.view_wifi.wifi_telemetry_updated.connect(self._on_wifi_tel_to_dashboard)
+        self.view_router.router_summary_updated.connect(self._on_router_summary_to_dashboard)
+        self.view_quality.speed_test_completed.connect(self._on_iq_speed_completed)
+        self.view_reports.deep_scan_requested.connect(self._on_run_deep_diagnosis)
+        self.view_settings.language_changed_requested.connect(self._apply_language_direction)
+        language_manager().language_changed.connect(self._apply_language_direction)
 
         # Set initial active tab
         self.btn_dash.setChecked(True)
@@ -454,7 +566,7 @@ class MainWindow(QMainWindow):
             self.view_settings.set_retention_days(self.app_core.settings.get_retention_days())
         elif hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
             initial_mode = getattr(self.app_core.orchestrator, "mode", OperatingMode.AUTO)
-        self.set_operating_mode(initial_mode)
+        self.set_operating_mode(initial_mode, sync_router_auto=False)
 
         # -------------------------------------------------------------
         # 3. Connect Bridge Signals & Wire Handlers
@@ -502,9 +614,10 @@ class MainWindow(QMainWindow):
         if "pytest" not in sys.modules:
             QTimer.singleShot(600, self._on_scan_traffic)
 
-        # Connect single source of truth DNS state manager (Item B1)
+        # Connect single source of truth DNS state manager (Item B1) and Global Network State
         from app.dns.state import DnsStateManager, DnsStateData
         DnsStateManager.get_instance().state_changed.connect(self._on_dns_state_changed)
+        GlobalNetworkStateStore.get_instance().state_changed.connect(self._on_global_network_state_changed)
 
         # UI Refresh Timer (1 second interval)
         self.refresh_timer = QTimer(self)
@@ -516,6 +629,12 @@ class MainWindow(QMainWindow):
         self.dns_rank_timer = QTimer(self)
         self.dns_rank_timer.timeout.connect(self._on_run_dns_benchmark)
         self.dns_rank_timer.start(300000)
+
+        # Dedicated meeting-signal poller (every 2s regardless of visible view)
+        self._is_polling_meeting_signal: bool = False
+        self.meeting_signal_timer = QTimer(self)
+        self.meeting_signal_timer.timeout.connect(self._on_poll_meeting_signal)
+        self.meeting_signal_timer.start(2000)
 
         self.ticker_counter = 0
 
@@ -546,12 +665,15 @@ class MainWindow(QMainWindow):
 
     def call_on_ui(self, fn: Any) -> None:
         """Thread-safe invocation of a function on the main Qt GUI event loop."""
+        if getattr(self, "_is_closing", False):
+            return
         import threading
         if threading.current_thread() is threading.main_thread():
             self._run_on_gui(fn)
         else:
             try:
-                self.bridge.gui_dispatch.emit(fn)
+                if hasattr(self, "bridge") and self.bridge:
+                    self.bridge.gui_dispatch.emit(fn)
             except Exception:
                 pass
 
@@ -563,8 +685,8 @@ class MainWindow(QMainWindow):
             return loop
         if not hasattr(self, "_fallback_async_loop") or self._fallback_async_loop is None or self._fallback_async_loop.is_closed():
             self._fallback_async_loop = asyncio.new_event_loop()
-            import threading
             t = threading.Thread(target=self._fallback_async_loop.run_forever, daemon=True, name="MainWindowCentralAsyncLoop")
+            self._fallback_async_thread = t
             t.start()
         if hasattr(self.app_core, "async_loop") and self.app_core.async_loop is None:
             self.app_core.async_loop = self._fallback_async_loop
@@ -583,29 +705,144 @@ class MainWindow(QMainWindow):
         return future
 
     def _switch_view(self, index: int, active_btn: QPushButton) -> None:
+        _t0 = time.perf_counter()
         self.stack.setCurrentIndex(index)
         for b in self.nav_buttons:
             b.setChecked(b == active_btn)
 
+        sec_titles = [
+            ("nav.dashboard", "dash_sub"),
+            ("nav.meeting_guard", "mg_sub"),
+            ("nav.traffic", "tm_sub"),
+            ("nav.dns", "dns_sub"),
+            ("nav.wifi_intelligence", "wifi_sub"),
+            ("nav.router_management", "router_sub"),
+            ("nav.internet_quality", "iq_sub"),
+            ("nav.reports", "rep_sub"),
+            ("nav.settings", "set_sub"),
+            ("nav.about", "about_sub"),
+        ]
+        if 0 <= index < len(sec_titles) and hasattr(self, "top_bar"):
+            tk, sk = sec_titles[index]
+            self.top_bar.set_section(tr(tk), tr(sk))
+
         if hasattr(self.view_dashboard, "set_animations_paused"):
             self.view_dashboard.set_animations_paused(index != 0)
 
-        # Immediate single-shot refresh on tab change so user never waits
+        # Immediate targeted refresh on tab switch
         if index == 0:
             obs = getattr(self.app_core, "observability", None)
             last_diag = getattr(self.app_core.diagnosis, "last_diagnosis", None) if hasattr(self.app_core, "diagnosis") else None
             if obs:
                 self.view_dashboard.update_telemetry(obs, last_diag)
         elif index == 1:
+            self.view_meeting_guard.refresh_policy_matrix()
+        elif index == 2:
+            self._on_scan_traffic()
+        if hasattr(self.view_wifi, "set_page_active"):
+            self.view_wifi.set_page_active(index == 4)
+        if index == 4 and hasattr(self.view_wifi, "ensure_initial_scan"):
+            self.view_wifi.ensure_initial_scan()
+        elif index == 5 and hasattr(self.view_router, "ensure_initial_devices_scan"):
+            self.view_router.ensure_initial_devices_scan()
+        elif index == 7:
             obs = getattr(self.app_core, "observability", None)
             last_diag = getattr(self.app_core.diagnosis, "last_diagnosis", None) if hasattr(self.app_core, "diagnosis") else None
-            net_info = getattr(self.view_dashboard, "_network_info", {})
+            net_info = getattr(self.view_dashboard, "_last_net_info", {})
             if obs:
                 self.view_diagnosis.update_live_telemetry(obs, net_info, last_diag)
                 if last_diag:
                     self.view_diagnosis.update_diagnosis(last_diag)
-        elif index == 4:
+
+        PerfMetricsCollector.get_instance().record_nav_switch(index, (time.perf_counter() - _t0) * 1000.0)
+
+    def _on_toggle_language(self) -> None:
+        set_language("en" if get_language() == "ar" else "ar")
+
+    def _apply_language_direction(self, lang: str | None = None) -> None:
+        active = lang or get_language()
+        app = QApplication.instance()
+        if app:
+            app.setLayoutDirection(Qt.RightToLeft if active == "ar" else Qt.LeftToRight)
+        if hasattr(self, "sidebar"):
+            self.sidebar.retranslate()
+        if hasattr(self, "top_bar"):
+            self.top_bar.retranslate()
+            idx = self.stack.currentIndex() if hasattr(self, "stack") else 0
+            sec_titles = [
+                ("nav.dashboard", "dash_sub"),
+                ("nav.meeting_guard", "mg_sub"),
+                ("nav.traffic", "tm_sub"),
+                ("nav.dns", "dns_sub"),
+                ("nav.wifi_intelligence", "wifi_sub"),
+                ("nav.router_management", "router_sub"),
+                ("nav.internet_quality", "iq_sub"),
+                ("nav.reports", "rep_sub"),
+                ("nav.settings", "set_sub"),
+                ("nav.about", "about_sub"),
+            ]
+            if 0 <= idx < len(sec_titles):
+                self.top_bar.set_section(tr(sec_titles[idx][0]), tr(sec_titles[idx][1]))
+
+    def _on_topbar_refresh(self) -> None:
+        idx = self.stack.currentIndex() if hasattr(self, "stack") else 0
+        if idx == 0:
+            self._on_quick_scan_requested()
+        elif idx == 1:
+            self.view_meeting_guard.refresh_policy_matrix()
+        elif idx == 2:
             self._on_scan_traffic()
+        elif idx == 3:
+            self._on_run_dns_benchmark(full=True)
+        elif idx == 4:
+            self.view_wifi.refresh_wifi_and_rf()
+        elif idx == 5:
+            self.view_router.run_router_discovery()
+        elif idx == 6:
+            self.view_quality.run_network_sequence()
+        elif idx == 7:
+            self.view_reports.run_full_investigation()
+        else:
+            self._on_ui_tick()
+
+    def _on_global_network_state_changed(self, state: Any) -> None:
+        if state is None:
+            return
+        if hasattr(self, "top_bar"):
+            st_enum, st_label = state.format_status_badge(get_language())
+            self.top_bar.set_connection_status(st_enum, st_label)
+
+    def _on_wifi_tel_to_dashboard(self, tel: Any) -> None:
+        if tel is None:
+            return
+        sig_pct = getattr(tel, "signal_quality_pct", getattr(tel, "signal_percent", None))
+        GlobalNetworkStateStore.get_instance().update_from_wifi_telemetry(tel)
+        self.view_dashboard.update_wifi_and_router_summary(
+            ssid=getattr(tel, "ssid", None),
+            band=getattr(tel, "band", None),
+            channel=getattr(tel, "channel", None),
+            rssi_dbm=getattr(tel, "rssi_dbm", None),
+            wifi_quality_pct=sig_pct,
+        )
+
+    def _on_router_summary_to_dashboard(self, info: Dict[str, Any]) -> None:
+        r_ip = info.get("router_ip")
+        r_model = info.get("router_model")
+        if r_ip or r_model:
+            GlobalNetworkStateStore.get_instance().update_router_reachability(
+                reachable=True,
+                model=r_model,
+                url=f"http://{r_ip}" if r_ip else None,
+            )
+        self.view_dashboard.update_wifi_and_router_summary(
+            router_model=r_model,
+            router_ip=r_ip,
+            connected_devices_count=info.get("connected_devices_count"),
+        )
+
+    def _on_iq_speed_completed(self, rep: Any) -> None:
+        if rep is not None:
+            self.view_dashboard.set_last_speed_test_time(datetime.now().strftime("%H:%M"))
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
@@ -623,7 +860,7 @@ class MainWindow(QMainWindow):
             mode = OperatingMode(mode_val)
         self.set_operating_mode(mode)
 
-    def set_operating_mode(self, mode: OperatingMode | str) -> None:
+    def set_operating_mode(self, mode: OperatingMode | str, *, sync_router_auto: bool = True) -> None:
         target_mode = OperatingMode(mode)
         if getattr(self, "_current_operating_mode", None) == target_mode:
             return
@@ -631,6 +868,8 @@ class MainWindow(QMainWindow):
         self.sidebar.set_operating_mode(target_mode)
         self.view_remediation.set_operating_mode(target_mode)
         self.view_settings.set_operating_mode(target_mode)
+        if hasattr(self, "view_wifi_router") and hasattr(self.view_wifi_router, "sync_operating_mode"):
+            self.view_wifi_router.sync_operating_mode(target_mode, allow_auto_router=sync_router_auto)
         if hasattr(self.app_core, "orchestrator") and self.app_core.orchestrator:
             self.app_core.orchestrator.set_operating_mode(target_mode)
         if hasattr(self.app_core, "settings") and self.app_core.settings:
@@ -683,6 +922,8 @@ class MainWindow(QMainWindow):
         self.view_dns.apply_dns_requested.connect(self._on_apply_dns_requested)
         self.view_dashboard.dns_panel.apply_clicked.connect(self._on_dashboard_apply_dns)
         self.view_dashboard.dns_panel.revert_clicked.connect(self._on_dashboard_revert_dns)
+        if hasattr(self.view_wifi_router, "apply_local_dns_requested"):
+            self.view_wifi_router.apply_local_dns_requested.connect(self._on_apply_dns_requested)
 
         # Dashboard quick scan / speed test request
         self.view_dashboard.quick_scan_requested.connect(self._on_quick_scan_requested)
@@ -691,7 +932,7 @@ class MainWindow(QMainWindow):
 
         # Dashboard timeline requests
         self.view_dashboard.timeline_panel.view_evidence_requested.connect(
-            lambda: self._switch_view(1, self.btn_diag)
+            lambda: self._switch_view(7, self.btn_reports)
         )
         self.view_dashboard.timeline_panel.rollback_requested.connect(
             self._on_timeline_rollback_requested
@@ -725,7 +966,15 @@ class MainWindow(QMainWindow):
             try:
                 from app.traffic.preflight import MeetingPreflightChecker
                 checker = MeetingPreflightChecker(self.app_core.ctx.platform)
-                report = checker.run_check()
+                is_active = (
+                    hasattr(self, "traffic_controller")
+                    and self.traffic_controller
+                    and self.traffic_controller.is_critical_meeting_active()
+                )
+                report = checker.run_check(
+                    is_meeting_active=is_active,
+                    traffic_controller=getattr(self, "traffic_controller", None),
+                )
             except Exception as e:
                 logger.warning("Pre-flight meeting check failed: %s", e)
             finally:
@@ -755,9 +1004,24 @@ class MainWindow(QMainWindow):
             box.exec()
 
     def _apply_preflight_immediate_remedy(self) -> None:
-        """Apply Tier-1 QoS and flush DNS cache immediately."""
-        self.app_core.ctx.platform.flush_dns_cache()
-        QMessageBox.information(self, "تحسين فوري", "تم تطبيق أولوية QoS وتفريغ كاش DNS لضمان جودة الاجتماع.")
+        """Prepare QoS policy readiness and pre-resolve meeting domains without disrupting active calls."""
+        from app.traffic.controller import preresolve_meeting_domains
+        preresolve_meeting_domains()
+        is_meeting = (
+            hasattr(self, "traffic_controller")
+            and self.traffic_controller
+            and self.traffic_controller.is_critical_meeting_active()
+        )
+        if not is_meeting and hasattr(self.app_core.ctx.platform, "flush_dns_cache"):
+            try:
+                self.app_core.ctx.platform.flush_dns_cache()
+            except Exception:
+                pass
+        QMessageBox.information(
+            self,
+            "تحسين فوري",
+            "تم تجهيز أولوية QoS وتحديث سجلات العناوين المسبقة (DNS Pre-resolution) لضمان جودة الاجتماع."
+        )
 
     def _on_export_report_requested(self) -> None:
         """Export comprehensive diagnostic report to desktop or reports directory."""
@@ -898,14 +1162,25 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
 
     def _refresh_timeline_from_records(self) -> None:
         """Refresh timeline in dashboard view with most recent incident and audit records."""
-        if getattr(self, "_timeline_refreshing", False):
+        if getattr(self, "_is_closing", False) or getattr(self, "_timeline_refreshing", False):
+            return
+        app_core = getattr(self, "app_core", None)
+        if not app_core or not getattr(app_core, "ctx", None):
             return
         self._timeline_refreshing = True
 
         def _worker():
             try:
-                inc_repo = getattr(self.app_core.ctx, "incidents", None)
-                aud_repo = getattr(self.app_core.ctx, "audit", None)
+                if getattr(self, "_is_closing", False):
+                    return
+                core = getattr(self, "app_core", None)
+                ctx = getattr(core, "ctx", None) if core else None
+                if not ctx or getattr(self, "_is_closing", False):
+                    return
+                inc_repo = getattr(ctx, "incidents", None)
+                aud_repo = getattr(ctx, "audit", None)
+                if getattr(self, "_is_closing", False):
+                    return
                 incidents = inc_repo.get_recent(limit=1) if inc_repo and hasattr(inc_repo, "get_recent") else []
                 audits = aud_repo.get_recent(limit=1) if aud_repo and hasattr(aud_repo, "get_recent") else []
                 latest_inc = incidents[0] if incidents else None
@@ -915,13 +1190,19 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
                 cnt = len(succeeded_today)
                 avg_dur = (sum(getattr(a, "execution_duration_ms", 0.0) for a in succeeded_today) / (cnt * 1000.0)) if cnt > 0 else 0.0
 
+                if getattr(self, "_is_closing", False):
+                    return
+
                 def _apply():
+                    if getattr(self, "_is_closing", False):
+                        return
                     self.view_dashboard.update_timeline_from_records(latest_inc, latest_aud)
                     self.view_dashboard.update_daily_incident_summary(cnt, avg_dur)
 
-                self.call_on_ui(_apply)
-            except Exception as e:
-                logger.warning("Failed to refresh timeline from records: %s", e)
+                if hasattr(self, "call_on_ui"):
+                    self.call_on_ui(_apply)
+            except Exception:
+                pass
             finally:
                 self._timeline_refreshing = False
 
@@ -958,6 +1239,13 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
             QMessageBox.warning(self, "فشل التراجع", f"تعذر التراجع عن الإجراء: {msg}")
 
     def _async_inspect_network_environment(self) -> None:
+        if "pytest" in sys.modules:
+            return
+        if getattr(self, "_is_inspecting_net_env", False):
+            PerfMetricsCollector.get_instance().increment_counter("dedup_skip:network_env_inspect")
+            return
+        self._is_inspecting_net_env = True
+
         def _ownership_worker():
             try:
                 from app.dns.ownership import DnsOwnershipEngine
@@ -969,9 +1257,11 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
             except Exception as exc:
                 logger.debug("Background DNS ownership discovery error: %s", exc)
 
-        threading.Thread(target=_ownership_worker, daemon=True).start()
+        threading.Thread(target=_ownership_worker, daemon=True, name="DnsOwnershipWorker").start()
 
         def _safe_emit_net_info(info_dict: Dict[str, Any]) -> None:
+            if getattr(self, "_is_closing", False):
+                return
             if hasattr(self, "bridge") and self.bridge is not None:
                 try:
                     self.bridge.network_info_ready.emit(info_dict)
@@ -979,29 +1269,35 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
                     pass
 
         def _worker():
+            perf = PerfMetricsCollector.get_instance()
+            t0 = time.perf_counter()
             try:
                 from app.platform.windows.network_info import get_network_identity
 
-                # 1. Ultra-fast local identity emission (SSID, Local IP, Gateway, Adapter in <300ms)
+                # 1. Fast local identity emission (SSID, Local IP, Gateway, Adapter in <300ms)
                 fast_info = get_network_identity(self.app_core.ctx.platform, include_hop2=False, include_isp=False)
                 _safe_emit_net_info(fast_info)
 
-                # 2. ISP and hop2 diagnostics emission as soon as resolved
-                isp_info = get_network_identity(self.app_core.ctx.platform, include_hop2=True, include_isp=True)
-                _safe_emit_net_info(isp_info)
-
-                # 3. Complete background probe with hop 2 traceroute
-                full_info = get_network_identity(self.app_core.ctx.platform, include_hop2=True, include_isp=True)
-                _safe_emit_net_info(full_info)
+                # 2. Single enriched background pass for ISP + Hop 2 traceroute (no duplicate 3rd call)
+                if fast_info.get("is_connected", True):
+                    full_info = get_network_identity(self.app_core.ctx.platform, include_hop2=True, include_isp=True)
+                    _safe_emit_net_info(full_info)
             except Exception as e:
                 logger.warning("Network environment inspection failed: %s", e)
+            finally:
+                self._is_inspecting_net_env = False
+                perf.record_timing("network_env_inspect", (time.perf_counter() - t0) * 1000.0)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        threading.Thread(target=_worker, daemon=True, name="NetworkEnvInspectWorker").start()
 
     def _on_network_info_ready(self, info: Dict[str, Any]) -> None:
-        self._active_dns_servers = info.get("dns", [])
-        self.view_dashboard.update_network_identity(info)
+        norm = normalize_network_identity_payload(info)
+        self._active_dns_servers = norm.get("dns_servers", [])
+        GlobalNetworkStateStore.get_instance().update_from_network_info(norm)
+        self.view_dashboard.update_network_identity(norm)
         self.view_dns.set_active_dns_info(self._active_dns_servers)
+        if hasattr(self, "top_bar"):
+            self.top_bar.set_last_update(datetime.now().strftime("%H:%M:%S"))
 
         # Set honest active DNS label without fake pre-seeded latencies
         active_ip = self._active_dns_servers[0] if self._active_dns_servers else ""
@@ -1114,23 +1410,107 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         except Exception:
             pass
         self._is_ui_tick_running = True
+        _tick_t0 = time.perf_counter()
         try:
             obs = self.app_core.observability
             last_diag = self.app_core.diagnosis.last_diagnosis
             curr_widget = self.stack.currentWidget() if hasattr(self, "stack") else None
 
-            # Lightweight targeted updates: only update widgets for the visible view
-            if curr_widget is None or curr_widget == self.view_dashboard or curr_widget not in (getattr(self, "view_diagnosis", None), getattr(self, "view_history", None), getattr(self, "view_remediation", None)):
-                self.view_dashboard.update_telemetry(obs, last_diag)
-            elif curr_widget == self.view_diagnosis:
-                net_info = getattr(self.view_dashboard, "_network_info", {})
+            # Lightweight targeted updates: avoid redundant full-chart redraws if telemetry signature didn't change
+            def _obs_sig(o: Any) -> Any:
+                if o is None or not hasattr(o, "get_latest_measurement"):
+                    return None
+                return tuple(
+                    getattr(o.get_latest_measurement(mt), "timestamp", None)
+                    for mt in (
+                        MetricType.EXTERNAL_LATENCY,
+                        MetricType.GATEWAY_LATENCY,
+                        MetricType.BANDWIDTH_RX_BYTES_PER_SEC,
+                        MetricType.DNS_LATENCY,
+                    )
+                )
+
+            sig = _obs_sig(obs)
+            diag_sig = id(last_diag)
+            on_dashboard = (curr_widget is None or curr_widget == self.view_dashboard or curr_widget not in (
+                getattr(self, "view_reports", None),
+                getattr(self, "view_meeting_guard", None),
+                getattr(self, "view_traffic", None),
+                getattr(self, "view_wifi", None),
+                getattr(self, "view_router", None),
+                getattr(self, "view_quality", None),
+                getattr(self, "view_settings", None),
+                getattr(self, "view_about", None),
+            ))
+            if on_dashboard:
+                if sig != getattr(self, "_last_obs_tick_sig", None) or diag_sig != getattr(self, "_last_diag_tick_sig", None):
+                    self.view_dashboard.update_telemetry(obs, last_diag)
+                    self._last_obs_tick_sig = sig
+                    self._last_diag_tick_sig = diag_sig
+            elif curr_widget == getattr(self, "view_reports", None):
+                net_info = getattr(self.view_dashboard, "_last_net_info", {})
                 self.view_diagnosis.update_live_telemetry(obs, net_info, last_diag)
                 if last_diag:
                     self.view_diagnosis.update_diagnosis(last_diag)
-            elif curr_widget == self.view_history:
                 self._async_refresh_history()
-            elif curr_widget == self.view_remediation:
+            elif curr_widget == getattr(self, "view_meeting_guard", None):
                 self._async_refresh_audit()
+            elif curr_widget == getattr(self, "view_traffic", None):
+                self.view_traffic.sample_live_counters()
+
+            if hasattr(self, "top_bar"):
+                self.top_bar.set_last_update(datetime.now().strftime("%H:%M:%S"))
+
+            # Helper for probe measurement freshness check (<= 10s)
+            def _is_measurement_fresh(m: Optional[Any], max_age_sec: float = 10.0) -> bool:
+                if m is None or getattr(m, "raw_value", None) is None:
+                    return False
+                ts = getattr(m, "timestamp", None)
+                if ts is None:
+                    return True
+                try:
+                    from datetime import datetime, timezone
+                    if isinstance(ts, (int, float)):
+                        return 0.0 <= (time.time() - ts) <= max_age_sec
+                    if isinstance(ts, datetime):
+                        now_dt = datetime.now(timezone.utc)
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        return 0.0 <= (now_dt - ts).total_seconds() <= max_age_sec
+                except Exception:
+                    return True
+                return True
+
+            # Live Quality Sample Recording & Pre-Meeting Baseline (Feature 12, 13)
+            if hasattr(self, "traffic_controller") and self.traffic_controller and obs:
+                try:
+                    wan_lat_m = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
+                    wan_loss_m = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
+                    jit_m = obs.get_latest_measurement(MetricType.JITTER_MS)
+
+                    if (
+                        _is_measurement_fresh(wan_lat_m)
+                        and _is_measurement_fresh(wan_loss_m)
+                        and _is_measurement_fresh(jit_m)
+                    ):
+                        now_mono = time.monotonic()
+                        tracker = getattr(self.traffic_controller, "session_tracker", None)
+                        active_s = tracker.get_active_sessions() if tracker else []
+                        sess_id = active_s[0].process_name if active_s else None
+
+                        cur_loss = float(wan_loss_m.raw_value) * 100.0
+                        cur_jit = float(jit_m.raw_value)
+                        cur_rtt = float(wan_lat_m.raw_value)
+
+                        self.traffic_controller.record_quality_sample(
+                            loss_pct=cur_loss,
+                            jitter_ms=cur_jit,
+                            rtt_ms=cur_rtt,
+                            timestamp_mono=now_mono,
+                            session_id=sess_id,
+                        )
+                except Exception as ex:
+                    logger.debug("Failed recording live quality sample: %s", ex)
 
             # Meeting Shield proactive early warning check (when meeting is active)
             try:
@@ -1140,40 +1520,127 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
                     if active_meetings:
                         m_sess = active_meetings[0]
                         gw_lat_m = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
-                        gw_lat = gw_lat_m.raw_value if gw_lat_m and gw_lat_m.raw_value is not None else 0.0
                         gw_loss_m = obs.get_latest_measurement(MetricType.GATEWAY_PACKET_LOSS)
-                        gw_loss = gw_loss_m.raw_value if gw_loss_m and gw_loss_m.raw_value is not None else 0.0
-
                         wan_lat_m = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
-                        wan_lat = wan_lat_m.raw_value if wan_lat_m and wan_lat_m.raw_value is not None else 0.0
                         wan_loss_m = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
-                        wan_loss = wan_loss_m.raw_value if wan_loss_m and wan_loss_m.raw_value is not None else 0.0
-
                         jit_m = obs.get_latest_measurement(MetricType.JITTER_MS)
-                        jit = jit_m.raw_value if jit_m and jit_m.raw_value is not None else 0.0
 
-                        if not hasattr(self, "_meeting_shield"):
-                            from app.traffic.meeting_detector import MeetingShield
-                            self._meeting_shield = MeetingShield(self)
-
-                        procs = getattr(self.view_traffic, "_last_profiles_cache", [])
-                        alert = self._meeting_shield.evaluate_telemetry(
-                            is_meeting_active=True,
-                            meeting_app_name=m_sess.app_name,
-                            meeting_process_name=m_sess.process_name,
-                            gateway_latency_ms=gw_lat,
-                            gateway_loss_ratio=gw_loss,
-                            wan_latency_ms=wan_lat,
-                            wan_loss_ratio=wan_loss,
-                            jitter_ms=jit,
-                            active_processes=procs,
+                        # Check freshness - reject missing or stale telemetry without converting to 0.0
+                        has_fresh_metrics = (
+                            _is_measurement_fresh(gw_lat_m)
+                            and _is_measurement_fresh(wan_lat_m)
+                            and _is_measurement_fresh(jit_m)
                         )
-                        if alert:
-                            tracker.set_early_warning(m_sess.process_name, alert["case"], alert["message"])
-                            if hasattr(self, "view_traffic"):
-                                self.view_traffic._refresh_sessions_ui()
+                        if has_fresh_metrics:
+                            gw_lat = float(gw_lat_m.raw_value)
+                            gw_loss = float(gw_loss_m.raw_value) if _is_measurement_fresh(gw_loss_m) else 0.0
+                            wan_lat = float(wan_lat_m.raw_value)
+                            wan_loss = float(wan_loss_m.raw_value) if _is_measurement_fresh(wan_loss_m) else 0.0
+                            jit = float(jit_m.raw_value)
+
+                            if not hasattr(self, "_meeting_shield"):
+                                from app.traffic.meeting_detector import MeetingShield
+                                self._meeting_shield = MeetingShield(self)
+
+                            procs = getattr(self.view_traffic, "_last_profiles_cache", [])
+                            alert = self._meeting_shield.evaluate_telemetry(
+                                is_meeting_active=True,
+                                meeting_app_name=m_sess.app_name,
+                                meeting_process_name=m_sess.process_name,
+                                gateway_latency_ms=gw_lat,
+                                gateway_loss_ratio=gw_loss,
+                                wan_latency_ms=wan_lat,
+                                wan_loss_ratio=wan_loss,
+                                jitter_ms=jit,
+                                active_processes=procs,
+                            )
+                            if alert:
+                                tracker.set_early_warning(m_sess.process_name, alert["case"], alert["message"])
+                                if hasattr(self, "view_traffic"):
+                                    self.view_traffic._refresh_sessions_ui()
+
+                            # Closed-loop guard: check quality post-policy and auto-rollback if degraded
+                            if hasattr(self, "traffic_controller") and self.traffic_controller:
+                                rolled_back = self.traffic_controller.evaluate_closed_loop_quality(
+                                    current_loss_pct=wan_loss * 100.0,
+                                    current_jitter_ms=jit,
+                                    current_rtt_ms=wan_lat,
+                                    timestamp_mono=time.monotonic(),
+                                    session_id=m_sess.process_name,
+                                )
+                                if rolled_back:
+                                    self.view_dashboard.log_autonomous_action(
+                                        "تراجع تلقائي عن سياسة QoS",
+                                        self.traffic_controller._closed_loop_rollback_reason,
+                                        level="warning",
+                                    )
             except Exception as e:
                 logger.debug("Meeting shield check non-fatal error: %s", e)
+
+            # Watchdog QoS policy reconciliation every 30 seconds off UI thread (overlap-guarded)
+            if (
+                self.ticker_counter % 30 == 0
+                and hasattr(self, "traffic_controller")
+                and self.traffic_controller
+                and not getattr(self, "_is_reconciling_qos", False)
+            ):
+                self._is_reconciling_qos = True
+
+                def _recon_worker():
+                    try:
+                        if getattr(self, "_is_closing", False):
+                            return
+                        report = self.traffic_controller.reconcile_active_policies()
+                        if getattr(self, "_is_closing", False):
+                            return
+                        is_active = self.traffic_controller.is_critical_meeting_active()
+                        verified = (report.get("status") == "verified")
+                        rolled = getattr(self.traffic_controller, "_closed_loop_rolled_back", False)
+                        reason = getattr(self.traffic_controller, "_closed_loop_rollback_reason", "")
+                        confirmed = report.get("confirmed_count", len(getattr(self.traffic_controller, "_active_qos_specs", [])))
+                        if hasattr(self, "view_traffic") and hasattr(self.view_traffic, "set_qos_status_badge"):
+                            self.call_on_ui(
+                                lambda: self.view_traffic.set_qos_status_badge(
+                                    is_active=is_active,
+                                    verified=verified,
+                                    confirmed_count=confirmed,
+                                    rolled_back=rolled,
+                                    rollback_reason=reason,
+                                )
+                            )
+                    finally:
+                        self._is_reconciling_qos = False
+
+                threading.Thread(target=_recon_worker, daemon=True, name="QosReconcileWorker").start()
+
+            # Evaluate live telemetry advisories (bufferbloat & Wi-Fi weak link)
+            if hasattr(self, "traffic_controller") and self.traffic_controller and obs:
+                try:
+                    gw_lat_m = obs.get_latest_measurement(MetricType.GATEWAY_LATENCY)
+                    wan_lat_m = obs.get_latest_measurement(MetricType.EXTERNAL_LATENCY)
+                    wan_loss_m = obs.get_latest_measurement(MetricType.EXTERNAL_PACKET_LOSS)
+                    jit_m = obs.get_latest_measurement(MetricType.JITTER_MS)
+
+                    if _is_measurement_fresh(gw_lat_m) and _is_measurement_fresh(wan_lat_m):
+                        gw_lat = float(gw_lat_m.raw_value)
+                        wan_lat = float(wan_lat_m.raw_value)
+                        wan_loss_pct = float(wan_loss_m.raw_value) * 100.0 if _is_measurement_fresh(wan_loss_m) else 0.0
+                        jit = float(jit_m.raw_value) if _is_measurement_fresh(jit_m) else 0.0
+
+                        net_info = getattr(self.view_dashboard, "_network_info", {})
+                        is_wifi = bool(net_info.get("is_wifi", False)) if isinstance(net_info, dict) else getattr(net_info, "is_wifi", False)
+                        sig_pct = net_info.get("wifi_signal_pct") if isinstance(net_info, dict) else getattr(net_info, "wifi_signal_pct", None)
+
+                        self.traffic_controller.evaluate_telemetry_advisories(
+                            idle_latency_ms=gw_lat,
+                            load_latency_ms=wan_lat,
+                            is_wifi=is_wifi,
+                            signal_pct=sig_pct,
+                            jitter_ms=jit,
+                            packet_loss_pct=wan_loss_pct,
+                        )
+                except Exception as e:
+                    logger.debug("Telemetry advisories evaluation error: %s", e)
 
             # Refresh 48-slot day strip every 120 seconds
             self.ticker_counter = getattr(self, "ticker_counter", 0) + 1
@@ -1193,6 +1660,9 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
                 self._on_scan_traffic()
         finally:
             self._is_ui_tick_running = False
+            tick_ms = (time.perf_counter() - _tick_t0) * 1000.0
+            if tick_ms > 90.0:
+                PerfMetricsCollector.get_instance().record_ui_stall(tick_ms)
 
     def _async_check_external_dns(self) -> None:
         if getattr(self, "_is_checking_ext_dns", False):
@@ -1224,6 +1694,12 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
     def _on_run_dns_benchmark(self, full: bool = False) -> None:
         if getattr(self, "_is_benchmarking_dns", False):
             return
+        if hasattr(self, "traffic_controller") and self.traffic_controller and self.traffic_controller.is_critical_meeting_active():
+            logger.info("DNS benchmark deferred: active meeting in progress (protecting live call).")
+            self.view_dns.benchmark_btn.setEnabled(True)
+            self.view_dns.benchmark_btn.setText("فحص خوادم DNS الآن")
+            return
+
         self._is_benchmarking_dns = True
         self.view_dns.benchmark_btn.setEnabled(False)
         self.view_dns.benchmark_btn.setText("جاري الفحص التلقائي...")
@@ -1490,6 +1966,10 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
 
     def _on_dashboard_revert_dns(self) -> None:
         """Asynchronously restore previous DNS or DHCP without blocking the UI thread."""
+        if hasattr(self, "traffic_controller") and self.traffic_controller and self.traffic_controller.is_critical_meeting_active():
+            QMessageBox.warning(self, "درع الاجتماعات", "لا يمكن تغيير أو استعادة إعدادات DNS أثناء اجتماع نشط لحماية استقرار المكالمة من الانقطاع.")
+            return
+
         iface = self.app_core.ctx.platform.get_primary_interface() or "Wi-Fi"
         pre = getattr(self, "_last_dns_pre_state", None)
         if pre and not pre.get("is_dhcp") and pre.get("original_servers"):
@@ -1548,6 +2028,10 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_apply_dns_requested(self, primary_ip: str, secondary_ip: str, name: str) -> None:
+        if hasattr(self, "traffic_controller") and self.traffic_controller and self.traffic_controller.is_critical_meeting_active():
+            QMessageBox.warning(self, "درع الاجتماعات", "لا يمكن تغيير خادم DNS أثناء اجتماع نشط لحماية استقرار المكالمة من الانقطاع.")
+            return
+
         self._last_dns_switch_time = time.time()
         def _worker():
             import uuid
@@ -1679,14 +2163,81 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         self.dispatch_coroutine(_run_scan())
 
     def _on_scan_traffic_done(self, profiles, is_conferencing: bool) -> None:
+        qos_pols = getattr(self, "_last_qos_policies", [])
         self.view_traffic.btn_refresh.setEnabled(True)
-        self.view_traffic.btn_refresh.setText("فحص البرامج النشطة")
+        self.view_traffic.btn_refresh.setText("تحديث / Refresh")
         self.view_traffic.update_profiles(
             profiles,
             conferencing_active=is_conferencing,
-            qos_policies=getattr(self, "_last_qos_policies", []),
+            qos_policies=qos_pols,
         )
+        if hasattr(self, "view_meeting_guard"):
+            self.view_meeting_guard.update_live_state(
+                profiles=profiles,
+                conferencing_active=is_conferencing,
+                qos_policies=qos_pols,
+                verified=len(qos_pols) > 0,
+                confirmed_count=len(qos_pols),
+                rolled_back=bool(getattr(self.traffic_controller, "_closed_loop_rolled_back", False)),
+                rollback_reason=str(getattr(self.traffic_controller, "_closed_loop_rollback_reason", "")),
+            )
         self.view_dashboard.consumers_panel.update_processes(profiles)
+
+    def _on_poll_meeting_signal(self) -> None:
+        if not hasattr(self, "traffic_controller") or not self.traffic_controller:
+            return
+        if getattr(self, "_is_polling_meeting_signal", False):
+            return
+        self._is_polling_meeting_signal = True
+
+        async def _run_poll():
+            try:
+                await self.traffic_controller.poll_meeting_signal()
+                is_active = self.traffic_controller.is_critical_meeting_active()
+                rolled = getattr(self.traffic_controller, "_closed_loop_rolled_back", False)
+                reason = getattr(self.traffic_controller, "_closed_loop_rollback_reason", "")
+                confirmed = len(getattr(self.traffic_controller, "_active_qos_specs", []))
+
+                def _sync_guard_ui() -> None:
+                    self.view_traffic.set_qos_status_badge(
+                        is_active=is_active,
+                        verified=confirmed > 0 or not is_active,
+                        confirmed_count=confirmed,
+                        rolled_back=rolled,
+                        rollback_reason=reason,
+                    )
+                    if hasattr(self, "view_meeting_guard"):
+                        self.view_meeting_guard.update_live_state(
+                            profiles=getattr(self.view_traffic, "_last_profiles_cache", []),
+                            conferencing_active=is_active,
+                            qos_policies=getattr(self, "_last_qos_policies", []),
+                            verified=confirmed > 0 or not is_active,
+                            confirmed_count=confirmed,
+                            rolled_back=rolled,
+                            rollback_reason=reason,
+                        )
+                    if hasattr(self, "view_dns"):
+                        self.view_dns.set_meeting_freeze_state(is_active)
+                    if hasattr(self, "view_dashboard"):
+                        self.view_dashboard.update_meeting_guard_summary(
+                            meeting_active=is_active,
+                            verified_rules=confirmed,
+                            configured_rules=confirmed,
+                            lifecycle_stage="active" if is_active else "idle",
+                        )
+                    if hasattr(self, "top_bar"):
+                        self.top_bar.set_guard_status(
+                            tokens.SystemStatus.ACTIVE if is_active else tokens.SystemStatus.RUNNING,
+                            tr("topbar_guard_active") if is_active else tr("topbar_guard_ready"),
+                        )
+
+                self.call_on_ui(_sync_guard_ui)
+            except Exception as e:
+                logger.debug("Meeting signal polling error: %s", e)
+            finally:
+                self._is_polling_meeting_signal = False
+
+        self.dispatch_coroutine(_run_poll())
 
     def _on_run_deep_diagnosis(self) -> None:
         self.view_diagnosis.btn_run_audit.setEnabled(False)
@@ -1754,6 +2305,10 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         )
 
     def _on_quick_flush_dns(self) -> None:
+        if hasattr(self, "traffic_controller") and self.traffic_controller and self.traffic_controller.is_critical_meeting_active():
+            QMessageBox.warning(self, "درع الاجتماعات", "لا يمكن تفريغ كاش DNS أثناء اجتماع نشط لحماية استقرار المكالمة من الانقطاع.")
+            return
+
         self.view_remediation.btn_flush_now.setEnabled(False)
         self.view_remediation.btn_flush_now.setText("جاري تنظيف كاش DNS...")
 
@@ -1807,6 +2362,10 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         QTimer.singleShot(2500, lambda: self.view_remediation.btn_flush_now.setText("تنظيف كاش DNS"))
 
     def _on_quick_renew_ip(self) -> None:
+        if hasattr(self, "traffic_controller") and self.traffic_controller and self.traffic_controller.is_critical_meeting_active():
+            QMessageBox.warning(self, "درع الاجتماعات", "لا يمكن تجديد عنوان IP أثناء اجتماع نشط لتجنب فصل المكالمة.")
+            return
+
         platform = self.app_core.ctx.platform
         from app.platform.admin import require_admin, prompt_restart_as_admin
         ok_admin, reason = require_admin("تجديد مسار الاتصال وعنوان IP (DHCP Lease)", platform)
@@ -2016,16 +2575,76 @@ th {{ background: #1e293b; color: #38bdf8; font-size: 13px; }}
         updater.check_for_updates_async()
 
     def closeEvent(self, event) -> None:
+        if getattr(self, "_is_closing", False):
+            super().closeEvent(event)
+            return
         self._is_closing = True
-        if hasattr(self, "update_check_timer") and self.update_check_timer.isActive():
-            self.update_check_timer.stop()
-        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
-            self.refresh_timer.stop()
-        if hasattr(self, "dns_rank_timer") and self.dns_rank_timer.isActive():
-            self.dns_rank_timer.stop()
-        if getattr(self, "_fallback_async_loop", None) and self._fallback_async_loop.is_running():
+        for view_attr in (
+            "view_dashboard",
+            "view_meeting_guard",
+            "view_traffic",
+            "view_dns",
+            "view_wifi",
+            "view_router",
+            "view_quality",
+            "view_reports",
+            "view_settings",
+            "view_about",
+            "view_diagnosis",
+            "view_history",
+            "view_remediation",
+        ):
+            vw = getattr(self, view_attr, None)
+            if vw and hasattr(vw, "shutdown"):
+                try:
+                    vw.shutdown()
+                except Exception:
+                    pass
+        try:
+            language_manager().language_changed.disconnect(self._apply_language_direction)
+        except Exception:
+            pass
+        try:
+            from app.dns.state import DnsStateManager
+            DnsStateManager.get_instance().state_changed.disconnect(self._on_dns_state_changed)
+        except Exception:
+            pass
+        try:
+            GlobalNetworkStateStore.get_instance().state_changed.disconnect(self._on_global_network_state_changed)
+        except Exception:
+            pass
+        if hasattr(self, "traffic_controller") and self.traffic_controller:
             try:
-                self._fallback_async_loop.call_soon_threadsafe(self._fallback_async_loop.stop)
+                self.traffic_controller.cleanup_all_policies()
+            except Exception:
+                pass
+        for t_attr in ("update_check_timer", "refresh_timer", "dns_rank_timer", "meeting_signal_timer"):
+            tmr = getattr(self, t_attr, None)
+            if tmr and tmr.isActive():
+                tmr.stop()
+        loop = getattr(self, "_fallback_async_loop", None)
+        if loop and loop.is_running():
+            try:
+                def _stop_loop() -> None:
+                    try:
+                        for task in asyncio.all_tasks(loop):
+                            task.cancel()
+                    except Exception:
+                        pass
+                    loop.call_later(0.05, loop.stop)
+
+                loop.call_soon_threadsafe(_stop_loop)
+            except Exception:
+                pass
+        t = getattr(self, "_fallback_async_thread", None)
+        if t and t.is_alive():
+            try:
+                t.join(timeout=0.5)
+            except Exception:
+                pass
+        if loop and not loop.is_closed() and not loop.is_running():
+            try:
+                loop.close()
             except Exception:
                 pass
         try:

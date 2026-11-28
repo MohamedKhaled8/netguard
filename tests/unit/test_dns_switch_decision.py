@@ -66,11 +66,23 @@ def test_no_switch_when_gain_is_inside_measurement_noise():
     assert decision.gain_ms == pytest.approx(0.3)
 
 
-def test_switch_when_other_google_server_is_a_couple_ms_faster():
+def test_no_switch_when_gain_is_below_10ms_or_25_percent():
     ranked = [
         _score("8.8.8.8", "Google Primary", 56.3),
         _score("8.8.4.4", "Google Secondary", 58.6),
     ]
+    # Gain is 2.3 ms (< max(10 ms, 25% of 58.6 = 14.65 ms)) -> Must NOT switch
+    decision = decide_auto_switch(ranked, current_servers=["8.8.4.4"])
+    assert decision.should_switch is False
+    assert decision.reason_code == "insufficient_gain"
+
+
+def test_switch_when_gain_meets_10ms_and_25_percent():
+    ranked = [
+        _score("8.8.8.8", "Google Primary", 20.0),
+        _score("8.8.4.4", "Google Secondary", 58.6),
+    ]
+    # Gain is 38.6 ms (>= max(10 ms, 14.65 ms)) -> Switches
     decision = decide_auto_switch(ranked, current_servers=["8.8.4.4"])
     assert decision.should_switch is True
     assert decision.best is not None

@@ -1,90 +1,143 @@
 """Design tokens for NetGuard AI.
 
 Three layers: primitive hex values, semantic roles, then component use.
-Dark operational surfaces, one warm action accent, status colors only for real state.
-Arabic UI keeps IBM Plex Sans Arabic. Display faces without Arabic glyphs
-(Playfair, Chakra Petch, Orbitron) are not used for labels.
+Deep navy & charcoal network engineering workstation palette with restrained
+electric blue accent, green healthy, amber warning, red critical, and purple
+secondary/upload metrics.
+Arabic UI keeps IBM Plex Sans Arabic; technical values use IBM Plex Mono + LTR isolation.
 """
 
 from __future__ import annotations
 import os
+import re
 import logging
-from typing import Any, Optional
+from enum import Enum
+from typing import Any, Dict, Tuple
 from PySide6.QtGui import QFont, QFontDatabase
 
 logger = logging.getLogger("netguard.tokens")
 
 # -----------------------------------------------------------------------------
-# Colors
-# Primitive surfaces stay near-black. Accent is the action color only.
-# Status green / amber / red stay separate from the accent so health is not
-# confused with a button.
+# Layer 1 & 2: Deep Navy / Charcoal Surfaces & Semantic Palette
 # -----------------------------------------------------------------------------
-BG = "#090B0E"
-SIDEBAR = "#0C0E12"
-SURFACE = "#161A1F"
-SURFACE_INSET = "#101318"
-RANGE_TRACK = "#090B0E"
-SURFACE_HOVER = "#1E242B"
-SURFACE_SELECTED = "#241910"
+BG = "#0A0F1A"
+SIDEBAR = "#0D1322"
+SURFACE = "#121A2D"
+SURFACE_ELEVATED = "#172138"
+SURFACE_INSET = "#0E1525"
+RANGE_TRACK = "#090E18"
+SURFACE_HOVER = "#1C2742"
+SURFACE_SELECTED = "#182848"
 
-LINE = "#2A3138"
-LINE_STRONG = "#3A434C"
-LINE_THRESHOLD = "#4A545E"
+LINE = "#1F2B44"
+LINE_STRONG = "#2D3D5E"
+LINE_THRESHOLD = "#3E5078"
 
-TEXT = "#ECEBE6"
-TEXT_SECONDARY = "#C5C9CE"
-TEXT_MUTED = "#A7ADB4"
+TEXT = "#EEF2F7"
+TEXT_SECONDARY = "#B5C0D4"
+TEXT_MUTED = "#7F8EA8"
 
-# Action accent. Dark text on this orange clears 4.5:1; white text does not.
-ACCENT = "#FF5701"
-ACCENT_HOVER = "#E64E00"
-ACCENT_PRESSED = "#C44300"
-ON_ACCENT = "#111827"
+# Restrained electric blue primary action accent (white text >= 5.1:1 contrast)
+ACCENT = "#2563EB"
+ACCENT_HOVER = "#3B82F6"
+ACCENT_PRESSED = "#1D4ED8"
+ACCENT_SOFT = "#172554"
+ON_ACCENT = "#FFFFFF"
 
-# Status colors (ONLY used to convey real status)
-STATUS_OK = "#5FD38D"
-STATUS_WARN = "#F5B942"
-STATUS_BAD = "#FF6B5E"
+# Secondary measurement / data visualization colors
+CYAN = "#0EA5E9"       # Download traffic / primary RF curve
+PURPLE = "#C084FC"     # Upload traffic / secondary diagnostics (>= 6.5:1 contrast on dark surfaces)
 
-# Bad soft (event chip)
-BAD_SOFT_BG = "#2A1614"
-BAD_SOFT_BORDER = "#5A2B27"
-BAD_SOFT_TEXT = "#FF9A90"
+# Semantic status colors (ONLY used to convey real measured/verified state)
+STATUS_OK = "#22C55E"
+STATUS_WARN = "#F59E0B"
+STATUS_BAD = "#EF4444"
+STATUS_INFO = "#38BDF8"
+STATUS_PURPLE = "#C084FC"
 
-# Ok soft (resolved chip)
-OK_SOFT_BG = "#0F2218"
-OK_SOFT_BORDER = "#2C5A42"
-OK_SOFT_TEXT = "#5FD38D"
+# Soft chip / pill backgrounds & borders
+BAD_SOFT_BG = "#2A1215"
+BAD_SOFT_BORDER = "#692329"
+BAD_SOFT_TEXT = "#FCA5A5"
 
-# Warn tags
-WARN_BORDER = "#5A4A1C"
+OK_SOFT_BG = "#0E291B"
+OK_SOFT_BORDER = "#1E5E3A"
+OK_SOFT_TEXT = "#4ADE80"
 
-# Empty / future progress bar
-BAR_FUTURE = "#2A2E31"
+WARN_SOFT_BG = "#291E0B"
+WARN_BORDER = "#6B4E16"
+WARN_SOFT_TEXT = "#FCD34D"
+
+INFO_SOFT_BG = "#0F223A"
+INFO_SOFT_BORDER = "#1E4B7A"
+INFO_SOFT_TEXT = "#7DD3FC"
+
+PURPLE_SOFT_BG = "#231438"
+PURPLE_SOFT_BORDER = "#582D8C"
+PURPLE_SOFT_TEXT = "#D8B4FE"
+
+# Empty / future progress bar & semantic token aliases
+BAR_FUTURE = "#1E293B"
+BG_ELEVATED = SURFACE_ELEVATED
+ACCENT_BRIGHT = "#60A5FA"
+SECONDARY_CYAN = CYAN
+SECONDARY_PURPLE = PURPLE
+INFO_BORDER = INFO_SOFT_BORDER
+PURPLE_BORDER = PURPLE_SOFT_BORDER
 
 # Focus ring
-FOCUS_RING = "#7AA2FF"
+FOCUS_RING = "#60A5FA"
 
 # -----------------------------------------------------------------------------
-# Spacing & Radii
+# Global Standardized Status System
 # -----------------------------------------------------------------------------
-SPACING_SCALE = [4, 8, 12, 16, 20, 24, 28, 40]
-PAGE_PADDING_DESKTOP = 40
+class SystemStatus(str, Enum):
+    HEALTHY = "healthy"
+    ACTIVE = "active"
+    RUNNING = "running"
+    WARNING = "warning"
+    FAILED = "failed"
+    UNAVAILABLE = "unavailable"
+    UNSUPPORTED = "unsupported"
+    NOT_CONNECTED = "not_connected"
+    WAITING = "waiting"
+    VERIFYING = "verifying"
+
+
+# (foreground, background, border)
+STATUS_COLOR_MAP: Dict[str, Tuple[str, str, str]] = {
+    SystemStatus.HEALTHY.value: (STATUS_OK, OK_SOFT_BG, OK_SOFT_BORDER),
+    SystemStatus.ACTIVE.value: (STATUS_OK, OK_SOFT_BG, OK_SOFT_BORDER),
+    SystemStatus.RUNNING.value: (STATUS_INFO, INFO_SOFT_BG, INFO_SOFT_BORDER),
+    SystemStatus.WARNING.value: (STATUS_WARN, WARN_SOFT_BG, WARN_BORDER),
+    SystemStatus.FAILED.value: (STATUS_BAD, BAD_SOFT_BG, BAD_SOFT_BORDER),
+    SystemStatus.UNAVAILABLE.value: (TEXT_MUTED, SURFACE_INSET, LINE),
+    SystemStatus.UNSUPPORTED.value: (TEXT_MUTED, SURFACE_INSET, LINE),
+    SystemStatus.NOT_CONNECTED.value: (STATUS_BAD, BAD_SOFT_BG, BAD_SOFT_BORDER),
+    SystemStatus.WAITING.value: (TEXT_SECONDARY, SURFACE_INSET, LINE_STRONG),
+    SystemStatus.VERIFYING.value: (STATUS_PURPLE, PURPLE_SOFT_BG, PURPLE_SOFT_BORDER),
+}
+
+# -----------------------------------------------------------------------------
+# Layer 3: Spacing & Radii (4px grid)
+# -----------------------------------------------------------------------------
+SPACING_SCALE = [4, 8, 12, 16, 20, 24, 28, 32, 40]
+PAGE_PADDING_DESKTOP = 28
 PAGE_PADDING_NARROW = 16
-SECTION_GAP = 28
-PANEL_GAP = 20
+MAX_CONTENT_WIDTH = 1360
+SECTION_GAP = 20
+PANEL_GAP = 16
 
-RADIUS_PANEL = 16
-RADIUS_BUTTON = 10
-RADIUS_INNER = 12
+RADIUS_PANEL = 12
+RADIUS_BUTTON = 8
+RADIUS_INNER = 10
 RADIUS_CHIP = 999
 RADIUS_BAR = 3
 
 BORDER_WIDTH = 1
 
 # Global animation switch and master clock parameters
-# Energy-efficient 20 FPS (50ms) unified clock (< 0.1% CPU, ideal for low-end 2GB hardware)
+# Energy-efficient 20 FPS (50ms) unified clock
 ANIMATIONS_ENABLED = True
 LOW_RESOURCE_MODE = False
 ANIMATION_MASTER_FPS = 20
@@ -154,9 +207,41 @@ def format_arabic_connections(count: int) -> str:
         return f"{count} اتصالاً"
 
 
+_LATIN_TECH_RUN_RE = re.compile(
+    r"\(\s*[A-Za-z0-9][A-Za-z0-9_.\-/:+=% ]*[A-Za-z0-9%]\s*\)"
+    r"|(?:[+\-]?(?:[A-Za-z0-9][A-Za-z0-9_.\-/:+=% ]*[A-Za-z0-9%]))"
+    r"|(?:[+\-]?\d+(?:\.\d+)?%)"
+    r"|(?:[A-Za-z])"
+)
+
+
 def bidi_isolate(text: Any) -> str:
     """Wrap Latin tokens or numeric specs in Unicode LTR isolate so RTL punctuation never scrambles."""
     return f"\u2066{text}\u2069"
+
+
+def bidi_isolate_mixed(text: Any) -> str:
+    """Keep Arabic RTL paragraphs in RTL direction while isolating embedded Latin/numeric tokens as LTR."""
+    if text is None:
+        return ""
+    s = str(text)
+    if not s:
+        return s
+    has_arabic = any("\u0600" <= ch <= "\u06FF" or "\u0750" <= ch <= "\u077F" or "\u08A0" <= ch <= "\u08FF" for ch in s)
+    if not has_arabic:
+        if s.startswith("\u2066") and s.endswith("\u2069"):
+            return s
+        if any(ch.isascii() and (ch.isalnum() or ch in "<>-+.") for ch in s):
+            return bidi_isolate(s)
+        return s
+    parts = re.split(r"(\u2066[^\u2069]*\u2069)", s)
+    out = []
+    for part in parts:
+        if part.startswith("\u2066") and part.endswith("\u2069"):
+            out.append(part)
+        else:
+            out.append(_LATIN_TECH_RUN_RE.sub(lambda m: f"\u2066{m.group(0)}\u2069\u200f", part))
+    return "".join(out)
 
 
 def _flatten_frame_style(style: str) -> str:

@@ -125,7 +125,7 @@ class TimelineStepWidget(QFrame):
         header_row.addWidget(self.lbl_title)
 
         self.lbl_time = QLabel(time_str)
-        self.lbl_time.setFont(tokens.get_mono_font(11, 400))
+        self.lbl_time.setFont(tokens.get_mono_font(12, 400))
         self.lbl_time.setStyleSheet(f"""
             color: {tokens.TEXT_MUTED};
             background-color: rgba(255, 255, 255, 0.04);
@@ -202,7 +202,7 @@ class TimelinePanel(QFrame):
         self.lbl_title = QLabel("ما الذي حدث بالضبط؟")
         self.lbl_title.setFont(tokens.get_sans_font(16, 600))
         self.lbl_title.setStyleSheet(f"color: {tokens.TEXT};")
-        self.lbl_title.setMinimumHeight(24)
+        self.lbl_title.setMinimumHeight(32)
 
         self.lbl_sub = QLabel("لا توجد أحداث مسجلة")
         self.lbl_sub.setFont(tokens.get_sans_font(12, 400))
@@ -255,12 +255,12 @@ class TimelinePanel(QFrame):
         footer_row.setSpacing(10)
 
         self.btn_evidence = SecondaryButton("عرض الأدلة")
-        self.btn_evidence.setFixedHeight(34)
+        self.btn_evidence.setFixedHeight(36)
         self.btn_evidence.clicked.connect(self.view_evidence_requested.emit)
         self.btn_evidence.setEnabled(False)
 
         self.btn_rollback = GhostButton("تراجع عن الإصلاح")
-        self.btn_rollback.setFixedHeight(34)
+        self.btn_rollback.setFixedHeight(36)
         self.btn_rollback.clicked.connect(self.rollback_requested.emit)
         self.btn_rollback.setVisible(True)
 

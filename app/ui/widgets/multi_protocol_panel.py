@@ -89,11 +89,13 @@ class MultiProtocolAnalysisPanel(Panel):
         self.h2_proto_chip = Chip("Multi-Probe", variant="neutral")
         h2_header.addWidget(self.h2_proto_chip)
 
-        h2_header.addStretch()
+        h2_header.addStretch(1)
 
         self.lbl_h2_lat = QLabel("—")
         self.lbl_h2_lat.setFont(tokens.get_mono_font(18, 600))
         self.lbl_h2_lat.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_h2_lat.setMinimumWidth(80)
+        self.lbl_h2_lat.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         h2_header.addWidget(self.lbl_h2_lat)
 
         self.lbl_h2_unit = QLabel("ms")
@@ -116,8 +118,9 @@ class MultiProtocolAnalysisPanel(Panel):
         self.lbl_h2_ip = QLabel("—")
         self.lbl_h2_ip.setFont(tokens.get_mono_font(14, 500))
         self.lbl_h2_ip.setStyleSheet(f"color: {tokens.TEXT};")
+        self.lbl_h2_ip.setWordWrap(True)
         h2_grid.addWidget(lbl_ip_title, 0, 0)
-        h2_grid.addWidget(self.lbl_h2_ip, 0, 1)
+        h2_grid.addWidget(self.lbl_h2_ip, 0, 1, 1, 3)
 
         # Cell 2: Subsequent Hops
         lbl_sub_title = QLabel("استجابة المحطات اللاحقة (Hop 3+):")
@@ -126,8 +129,9 @@ class MultiProtocolAnalysisPanel(Panel):
         self.lbl_h2_sub = QLabel("—")
         self.lbl_h2_sub.setFont(tokens.get_sans_font(13, 400))
         self.lbl_h2_sub.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
-        h2_grid.addWidget(lbl_sub_title, 0, 2)
-        h2_grid.addWidget(self.lbl_h2_sub, 0, 3)
+        self.lbl_h2_sub.setWordWrap(True)
+        h2_grid.addWidget(lbl_sub_title, 1, 0)
+        h2_grid.addWidget(self.lbl_h2_sub, 1, 1, 1, 3)
 
         # Cell 3: Reason for missing response
         lbl_reason_title = QLabel("تشخيص حالة المحطة:")
@@ -137,8 +141,8 @@ class MultiProtocolAnalysisPanel(Panel):
         self.lbl_h2_reason.setFont(tokens.get_sans_font(13, 400))
         self.lbl_h2_reason.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.lbl_h2_reason.setWordWrap(True)
-        h2_grid.addWidget(lbl_reason_title, 1, 0)
-        h2_grid.addWidget(self.lbl_h2_reason, 1, 1, 1, 3)
+        h2_grid.addWidget(lbl_reason_title, 2, 0)
+        h2_grid.addWidget(self.lbl_h2_reason, 2, 1, 1, 3)
 
         hop2_layout.addLayout(h2_grid)
         container_layout.addWidget(self.hop2_card)
@@ -245,7 +249,7 @@ class MultiProtocolAnalysisPanel(Panel):
 
         # Driver / Compatibility Footer
         self.lbl_driver_info = QLabel("Windows Native Driver: Win32 IcmpSendEcho Active · Npcap Sniffer Ready")
-        self.lbl_driver_info.setFont(tokens.get_mono_font(11, 400))
+        self.lbl_driver_info.setFont(tokens.get_mono_font(12, 400))
         self.lbl_driver_info.setStyleSheet(f"color: {tokens.TEXT_MUTED}; padding-top: 4px;")
         verdict_layout.addWidget(self.lbl_driver_info)
 
@@ -275,11 +279,13 @@ class MultiProtocolAnalysisPanel(Panel):
         t_lbl = QLabel(title)
         t_lbl.setFont(tokens.get_sans_font(14, 600))
         t_lbl.setStyleSheet(f"color: {tokens.TEXT};")
+        t_lbl.setWordWrap(True)
         l.addWidget(t_lbl)
 
         sub_lbl = QLabel(subtitle)
-        sub_lbl.setFont(tokens.get_sans_font(11, 400))
+        sub_lbl.setFont(tokens.get_sans_font(12, 400))
         sub_lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED};")
+        sub_lbl.setWordWrap(True)
         l.addWidget(sub_lbl)
 
         row_stat = QHBoxLayout()
@@ -297,7 +303,7 @@ class MultiProtocolAnalysisPanel(Panel):
 
         detail_lbl = QLabel("في انتظار الفحص")
         detail_lbl.setObjectName("ProtoDetail")
-        detail_lbl.setFont(tokens.get_sans_font(11, 400))
+        detail_lbl.setFont(tokens.get_sans_font(12, 400))
         detail_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         detail_lbl.setWordWrap(True)
         l.addWidget(detail_lbl)

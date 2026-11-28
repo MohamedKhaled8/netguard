@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QWidget,
     QGridLayout,
 )
@@ -76,6 +77,8 @@ class NetworkInfoCell(QFrame):
         self.lbl_sub.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.lbl_sub.setWordWrap(True)
         layout.addWidget(self.lbl_sub)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setMinimumHeight(96)
 
     def set_data(self, val: str, sub: str = "", status_color: Optional[str] = None) -> None:
         self.lbl_val.setText(val or "—")
@@ -85,6 +88,9 @@ class NetworkInfoCell(QFrame):
             self.lbl_val.setStyleSheet(f"color: {status_color};")
         else:
             self.lbl_val.setStyleSheet(f"color: {tokens.TEXT};")
+        self.updateGeometry()
+        if self.parentWidget() is not None:
+            self.parentWidget().updateGeometry()
 
 
 class NetworkInfoStrip(QFrame):
@@ -106,8 +112,8 @@ class NetworkInfoStrip(QFrame):
         self.grid.setVerticalSpacing(12)
 
         # 4 Cells
-        self.cell_ssid = NetworkInfoCell("اسم الشبكة", "—", "جاري الكشف عن بطاقة الشبكة...")
-        self.cell_isp = NetworkInfoCell("مزود الإنترنت", "—", "جاري فحص مزود الخدمة الفعلي...")
+        self.cell_ssid = NetworkInfoCell("اسم الشبكة", "—", "جاري فحص الشبكة...")
+        self.cell_isp = NetworkInfoCell("مزود الإنترنت", "—", "جاري فحص المزود...")
         self.cell_local_ip = NetworkInfoCell("عنوان IP الداخلي", "—", "محلي على الشبكة", is_mono=True)
         self.cell_public_ip = NetworkInfoCell("عنوان IP الخارجي", "—", "الظاهر على الإنترنت", is_mono=True)
 

@@ -20,10 +20,60 @@ class PreflightReport:
     dns_ms: Optional[float]
     wifi_signal_pct: Optional[float]
     heavy_uploaders: List[str] = field(default_factory=list)
+    measured_uplink_mbps: Optional[float] = None
     headline: str = ""
     detail: str = ""
     issues_found: List[str] = field(default_factory=list)
     recommended_fix: Optional[str] = None
+
+
+def measure_active_upload_capacity(
+    max_duration_sec: float = 3.0,
+    max_bytes: int = 1_500_000,
+    is_meeting_active: bool = False,
+) -> Optional[float]:
+    """Measures active upload capacity with bounded duration (<=3.0s) and payload cap (<=1.5MB).
+    
+    CRITICAL: Never runs during an active meeting.
+    Returns measured uplink bandwidth in Mbps, or None if unavailable/forbidden.
+    """
+    if is_meeting_active:
+        return None
+
+    import urllib.request
+    import time
+
+    endpoints = [
+        "https://speed.cloudflare.com/__up",
+        "https://httpbin.org/post",
+    ]
+
+    for url in endpoints:
+        try:
+            payload_size = min(max_bytes, 1_048_576)  # ~1MB target bounded payload
+            payload = b"\x00" * payload_size
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "User-Agent": "NetGuard/1.0",
+                },
+                method="POST",
+            )
+            t_req_start = time.perf_counter()
+            with urllib.request.urlopen(req, timeout=max_duration_sec) as resp:
+                _ = resp.read(1024)
+            dt = max(0.01, time.perf_counter() - t_req_start)
+            if dt <= (max_duration_sec + 0.5):
+                throughput_mbps = (payload_size * 8.0) / (dt * 1_000_000.0)
+                # Apply 15% safety headroom discount
+                usable_uplink = throughput_mbps * 0.85
+                return round(usable_uplink, 1)
+        except Exception:
+            continue
+
+    return None
 
 
 class MeetingPreflightChecker:
@@ -32,7 +82,11 @@ class MeetingPreflightChecker:
     def __init__(self, platform: IPlatformAdapter) -> None:
         self.platform = platform
 
-    def run_check(self) -> PreflightReport:
+    def run_check(
+        self,
+        is_meeting_active: bool = False,
+        traffic_controller: Optional[Any] = None,
+    ) -> PreflightReport:
         """Run genuine multi-metric pre-flight network diagnostics."""
         issues = []
         gateway = self.platform.get_default_gateway() or "192.168.1.1"
@@ -84,7 +138,7 @@ class MeetingPreflightChecker:
                 wifi_sig = m.get("signal_percent") if m and m.get("is_wifi") else None
             except Exception:
                 pass
-        if wifi_sig is not None and wifi_sig < 50.0:
+        if isinstance(wifi_sig, (int, float)) and wifi_sig < 50.0:
             issues.append(f"إشارة الواي فاي ضعيفة ({wifi_sig:.0f}%) — اقترب من الراوتر")
 
         # 4. Check for running heavy uploaders
@@ -105,10 +159,35 @@ class MeetingPreflightChecker:
         # Estimate video readiness
         gw_lat = gw_avg or 2.0
         jit = jitter or 1.0
-        # Estimate upload readiness (conservative default: assume 5 Mbps if no issues, or 1.5 if heavy)
-        est_upload = 2.0 if heavy else 8.0
+
+        # Active bounded upload capacity test (duration <= 3.0s, cap <= 1.5MB) during idle only
+        measured_upload: Optional[float] = None
+        if not is_meeting_active:
+            try:
+                measured_upload = measure_active_upload_capacity(
+                    max_duration_sec=3.0,
+                    max_bytes=1_500_000,
+                    is_meeting_active=is_meeting_active,
+                )
+            except Exception:
+                measured_upload = None
+
+        if measured_upload is not None and measured_upload > 0:
+            est_upload = float(measured_upload)
+        elif heavy:
+            est_upload = 2.0
+        else:
+            est_upload = 8.0
+
         est_loss = 0.0 if not issues else 1.5
         readiness = evaluate_video_readiness(est_upload, est_loss, jit)
+
+        # Wire measured throughput into traffic controller
+        if traffic_controller and hasattr(traffic_controller, "set_preflight_metrics") and measured_upload:
+            try:
+                traffic_controller.set_preflight_metrics(measured_upload, readiness["tier"])
+            except Exception:
+                pass
 
         is_ready = len(issues) == 0
         if is_ready:
@@ -128,6 +207,7 @@ class MeetingPreflightChecker:
             dns_ms=dns_ms,
             wifi_signal_pct=wifi_sig,
             heavy_uploaders=heavy,
+            measured_uplink_mbps=measured_upload,
             headline=headline,
             detail=detail,
             issues_found=issues,
